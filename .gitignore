@@ -47,3 +47,4 @@ Thumbs.db
 
 # Small committed test inputs (pop-up box masks of real cases, tests/test_cases.py)
 !tests/fixtures/popups/*.npz
+!tests/fixtures/match/*.npz
