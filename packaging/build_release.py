@@ -52,7 +52,8 @@ MIN_FREE_BYTES = 3 * 1024 ** 3
 DEEPEST_PACKAGE_PATH = 110                                      # characters below the package folder, measured on v0.2.2 + a margin
 MAX_WINDOWS_PATH = 259
 TEMPLATE_FILES = ["chest/en/chest.npy", "chest/en/chest_small.npy", "chest/en/rare.npy", "chest/en/rare_small.npy",
-                  "chest/en/sprite.npy", "chest/en/sprite_small.npy", "chest/pt/bau.npy", "container_opened.npy",
+                  "chest/en/sprite.npy", "chest/en/sprite_small.npy", "chest/pt/bau.npy", "chest/fr/coffre.npy",
+                  "container_opened.npy",
                   "ui/interaction_disc.npy", "ui/interaction_ring.npy"]                    # audio_fingerprint.npy is development-only
 THIRD_PARTY = ["numpy", "scipy"]
 # Livestream URL input (v0.2.1): Streamlink and its complete dependency closure on Windows / Python 3.13 (BSD / MIT /

@@ -130,7 +130,7 @@ read &mdash; nothing is counted. Use the player&rsquo;s fullscreen button.</li>
 <h2 id="need">What you need</h2>
 <ul>
   <li>Windows 10 or 11.</li>
-  <li>Fortnite shown in a <b>16:9</b> picture (1920&times;1080 is ideal; 1280&times;720 or higher works) with the <b>HUD</b> visible, in <b>English or Brazilian Portuguese</b>.</li>
+  <li>Fortnite shown in a <b>16:9</b> picture (1920&times;1080 is ideal; 1280&times;720 or higher works) with the <b>HUD</b> visible, in <b>English, Brazilian Portuguese, or French</b>.</li>
   <li>About half of one CPU core. No graphics card needed.</li>
   <li><b>OBS Studio 28 or newer</b> only if you count from your own OBS scene, or want the numbers on stream.</li>
   <li><b>Nothing else to install.</b> Everything the app needs is already inside the folder.</li>
@@ -278,7 +278,7 @@ down or changes the counting; it needs at least 2 GB of free disk space and stop
 <p>The app can also analyse a prerecorded gameplay video (.mp4, .mkv, .mov&hellip;). On the Dashboard click <b>Analyse a recording&hellip;</b>,
 choose the file and click <b>Start</b>. It runs faster than real time, shows progress and each counted chest, and finishes with the CERTAIN and
 APPROX numbers (APPROX includes CERTAIN). This <b>never changes your live counter</b>; the result text files go to <code>video_output\</code>.
-The video should be clean 16:9 gameplay with the HUD visible, in English or Brazilian Portuguese.</p>
+The video should be clean 16:9 gameplay with the HUD visible, in English, Brazilian Portuguese, or French.</p>
 
 <h2 id="start">Already opened chests? Set a starting count</h2>
 <p>On the Dashboard click <b>Edit counts&hellip;</b>, enter how many chests you have already opened (for example <code>150</code>) as
@@ -305,7 +305,7 @@ English pop-ups.</p>
 <b>not</b> reset anything; your totals continue.</p>
 
 <h2 id="settings">Settings (optional)</h2>
-<p><b>Most people never need to change anything.</b> The <b>Settings</b> page has the Fortnite language (English, Portuguese (Brazil) or Both;
+<p><b>Most people never need to change anything.</b> The <b>Settings</b> page has the Fortnite language (English, Portuguese (Brazil), Both, or French;
 pick the one your game is set to), the session logs and the optional <a href="#capture">diagnostic recording</a>. Changes are used the next time
 you click Start counting. <b>Remember window size and position</b> (on by default) reopens the app the way you closed it,
 maximised or not; a window whose monitor is gone is moved back onto a screen.</p>
@@ -360,7 +360,7 @@ If chests stop being counted after a Fortnite update, please report it on the pr
 <h2 id="limits">Known limitations (please read)</h2>
 <ul>
   <li><b>APPROX is an estimate.</b> It can be a little high or low. CERTAIN is the conservative number; APPROX is the best guess of the total.</li>
-  <li><b>Language:</b> chest detection uses the word in the pop-up. Supported: <b>English</b> (CHEST, incl. RARE CHEST and SPRITE CHEST) and <b>Brazilian Portuguese</b> (BA&Uacute;). Other languages are not supported yet. Chest types are read for English only.</li>
+  <li><b>Language:</b> chest detection uses the word in the pop-up. Supported: <b>English</b> (CHEST), <b>Brazilian Portuguese</b> (BA&Uacute;), and <b>French</b> (COFFRE). Chest types are read for English only.</li>
   <li><b>HUD layout:</b> it expects the HUD in its usual place at a 16:9 picture. For <b>English</b> pop-ups a HUD drawn larger (up to about 1.3&times;) or smaller (about 0.8&times;, tested on one stream) is recognised; those chests count in <b>APPROX only</b>, never CERTAIN. Other HUD sizes, a moved or hidden HUD, Portuguese pop-ups on a non-standard HUD, or a 4:3 / vertical picture will not work well.</li>
   <li><b>Chests opened in quick succession</b> are added to the pop-up on screen (&ldquo;RARE CHEST X2&rdquo;, &ldquo;X3&rdquo;, another chest line). They are counted (multiplier steps in APPROX only); two chests within a fraction of a second can count as one &mdash; never as two for one chest.</li>
   <li><b>Livestream URL</b> sees what viewers get: bursts, buffering, ad breaks and reconnects. Video the platform never delivered cannot be counted. <b>Screen</b>: the gameplay must fill the screen.</li>

@@ -57,7 +57,7 @@ CERTAIN_TIERS = ("CERTAIN", "HIGH")
 # MEDIUM popups counted as APPROX even without other support, per popup template.
 # English CHEST (27 px word): every popup >= 0.75 on the English clip was a real chest (6/6).
 # Portuguese BAU (14 px word): only 2 of 9 MEDIUM popups were real chests on the PS5 clip.
-APPROX_COUNTS_MEDIUM_ALONE = {"en:CHEST": True, "pt:BAÚ": False}
+APPROX_COUNTS_MEDIUM_ALONE = {"en:CHEST": True, "pt:BAÚ": False, "fr:COFFRE": True}
 
 # A MEDIUM popup that also has a prompt >= INTERACTION_SUPPORT_PROMPT_MIN with a chest-like
 # object near it counts as APPROX. PROVISIONAL: this 0.60 level was fixed after seeing the
@@ -88,7 +88,7 @@ ROBUST_SEARCH_PX = 8          # the blurred match is searched within this many p
 # ~33 px wide instead of 27 px: the exact match (one fixed size) stays near 0.25 and nearly every chest is missed, while a
 # blurred match of the picture made smaller (x0.8) scores 0.82-0.92. This is a second channel BESIDE the exact path:
 #   - it runs only when the pop-up box has >= SCALED_PREFILTER_PX lavender pixels (production computes that mask anyway)
-#   - it looks only for the specific English word (SCALED_POPUP_TEMPLATES) and only shrinks the picture (= larger HUD);
+#   - it looks only for long chest words (SCALED_POPUP_TEMPLATES) and only shrinks the picture (= larger HUD);
 #     enlarging, or the short Portuguese word, matched non-chest text on the PS5 reference
 #   - after two strong pop-ups agree on a scale (SCALED_LOCK_MIN), only that scale and its neighbours are searched
 #   - a blurred onset becomes a pop-up only when the exact path has not fired within SCALED_WAIT seconds of it, so every
@@ -98,7 +98,7 @@ ROBUST_SEARCH_PX = 8          # the blurred match is searched within this many p
 # Validation: event-identical on every reference clip (English and PS5, clean and compressed); on three large-HUD sessions
 # 11 of 11 verified chests (exact path alone: 3), 0 duplicates, 0 wrong counts.
 SCALE_AWARE_POPUPS = True
-SCALED_POPUP_TEMPLATES = ("en:CHEST",)       # used only while the word also counts MEDIUM alone (APPROX_COUNTS_MEDIUM_ALONE)
+SCALED_POPUP_TEMPLATES = ("en:CHEST", "fr:COFFRE")  # used only when the word counts MEDIUM alone
 SCALED_SCALES = (1.0, 0.9, 0.85, 0.8, 0.75)  # picture made smaller = HUD drawn larger
 SCALED_TRIGGER = 0.80
 SCALED_REARM = 0.55
@@ -265,7 +265,8 @@ class ChestEstimator:
             tpl = np.load(paths.TEMPLATES_DIR / SMALL_TEMPLATE_FILE).astype(np.float32)
             self.small = {"array": tpl, "blur": V.blur_template(tpl, ROBUST_SIGMA)}
         self.small_onset = OnsetDetector(SMALL_TRIGGER, SMALL_REARM, False)
-        self.stacked = bool((STACKED_POPUPS if stacked is None else stacked) and "en:CHEST" in self.robust_templates)
+        self.stack_word = next((word for word in SCALED_POPUP_TEMPLATES if word in self.robust_templates), None)
+        self.stacked = bool((STACKED_POPUPS if stacked is None else stacked) and self.stack_word)
         self.trackers = {}                 # "normal" / "small" -> popup_lines.PopupTracker
         self.tracking = None               # the key of the tracker following the pop-up on screen
         self.tracked_scaled = None         # {"blur", "scale"} when that pop-up came from a scale-aware / small channel
@@ -321,8 +322,8 @@ class ChestEstimator:
                 if SAVE_SNAPSHOTS:
                     p["roi"] = roi.copy()
         word = self.templates[k]["id"] if score > 0 else "-"
-        exact_fired = self.popup.update(t, score, y, x, allow_jump=not (self.stacked and word == "en:CHEST"))
-        if exact_fired and word == "en:CHEST" and self._same_popup_counted():
+        exact_fired = self.popup.update(t, score, y, x, allow_jump=not (self.stacked and word == self.stack_word))
+        if exact_fired and word == self.stack_word and self._same_popup_counted():
             exact_fired = False                              # the pop-up on screen, already counted: not a new chest
             self.scaled_stats["exact_same_popup"] = self.scaled_stats.get("exact_same_popup", 0) + 1
             self.exact_onsets.append(t)                      # ...but it still owns any blurred onset near it
@@ -330,7 +331,7 @@ class ChestEstimator:
             self.pending_popups.append({"onset": t, "score": score, "y": y, "x": x, "template": word})
             if SAVE_SNAPSHOTS:
                 self.pending_popups[-1]["roi"] = roi.copy()
-            if word == "en:CHEST":
+            if word == self.stack_word:
                 run = self._track(t, "normal", None, (y, x))
                 if run is not None:
                     self.pending_popups[-1]["slot"] = (self.tracking, run, "first")
@@ -377,9 +378,9 @@ class ChestEstimator:
             if key == "small":
                 tpl, line_min = self.small["array"], STACKED_LINE_MIN_SMALL
             else:
-                tpl, line_min = next(x["array"] for x in self.templates if x["id"] == "en:CHEST"), STACKED_LINE_MIN
+                tpl, line_min = next(x["array"] for x in self.templates if x["id"] == self.stack_word), STACKED_LINE_MIN
             self.trackers[key] = popup_lines.PopupTracker(tpl, line_min, SAMPLE_FPS)
-            if CHEST_TYPES:
+            if CHEST_TYPES and self.stack_word == "en:CHEST":
                 prefixes = chest_types.load_prefixes(key)
                 th, tw = tpl.shape
                 self.trackers[key].classify = lambda m, ln, p=prefixes, h=th, w=tw: chest_types.classify_line(
@@ -407,10 +408,10 @@ class ChestEstimator:
         since = [h for h in self.popup_hist if h[0] >= change["t"]] or list(self.popup_hist)[-1:]
         score, y, x = max(since, key=lambda h: h[1])[1:4] if since else (0.0, 0, 0)   # its frames since the change began
         popup = {"onset": float(change["t"]), "until": t + POPUP_FINISH_DELAY, "score": score, "y": y, "x": x,
-                 "template": "en:CHEST", "increment": {k: (float(v) if k == "t" else v) for k, v in change.items()}}
-        robust = [r.get("en:CHEST", 0.0) for tt, r in self.robust_hist if tt >= change["t"]]
+                 "template": self.stack_word, "increment": {k: (float(v) if k == "t" else v) for k, v in change.items()}}
+        robust = [r.get(self.stack_word, 0.0) for tt, r in self.robust_hist if tt >= change["t"]]
         if robust:                                           # its compression-robust match since the change began
-            popup["robust"] = {"en:CHEST": max(robust)}
+            popup["robust"] = {self.stack_word: max(robust)}
         if self.tracked_scaled is not None:
             popup["scaled"] = dict(self.tracked_scaled)
         popup["slot"] = (self.tracking, tracker.run, change.get("line"))
@@ -497,7 +498,7 @@ class ChestEstimator:
                 if SAVE_SNAPSHOTS:
                     self.pending_scaled[-1]["roi"] = roi.copy()
                 self.scaled_stats["onsets"] += 1
-                if s == 1.0:
+                if s == 1.0 and tid == self.stack_word:
                     self.pending_scaled[-1]["run"] = self._track(t, "normal", {"blur": score, "scale": s}, (cy, cx))
         for p in list(self.pending_scaled):                 # not claimed by the exact path in time -> a pop-up
             if t >= p["onset"] + SCALED_WAIT:

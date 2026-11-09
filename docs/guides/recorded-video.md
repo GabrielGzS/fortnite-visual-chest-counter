@@ -18,8 +18,8 @@ Your Settings (for example **Fortnite language**) apply as in live counting.
 ## Which videos work well
 
 - Fortnite gameplay filling a **16:9** picture, with the HUD visible in its usual place.
-- English or Portuguese (Brazil) pop-ups. A HUD drawn up to about 1.3x larger is recognised for English pop-ups; those chests
-  count in APPROX only.
+- English, Brazilian Portuguese, or French pop-ups. The scale-aware path for larger English and French pop-ups counts
+  them in APPROX only.
 - A clean recording is best (for example an OBS recording of your gameplay scene). Stream recordings work too, but strong
   compression blurs the small pop-up text, so more chests end up in APPROX only.
 - No overlays covering the HUD; no 4:3 or vertical video.

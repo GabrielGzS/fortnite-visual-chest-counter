@@ -123,8 +123,8 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
 - **Diagnostic recording and Ctrl+Alt+M:** optional - keep the video around a missed chest (press **Ctrl+Alt+M** or **Mark
   moment** right after it), then **Review captures** (Settings) replays it through the current counter. Recording never
   slows counting; it needs 2 GB free and stops by itself below 1 GB. Details: [docs/CAPTURE.md](docs/CAPTURE.md).
-- **Settings:** Fortnite language (English / Portuguese (Brazil) / Both - pick the one your game uses; "Both" is not
-  automatic detection), session logs, diagnostic recording, **Remember window size and position**. Everything else is in
+- **Settings:** Fortnite language (English, Brazilian Portuguese, French, or both English and Portuguese),
+  session logs, diagnostic recording, **Remember window size and position**. Everything else is in
   `config.toml` (Settings → Open config.toml; every option is explained inside).
 - **Help & diagnostics:** setup steps, the offline guide and a one-click diagnostics report.
 
@@ -195,8 +195,8 @@ can, a diagnostic capture.
 ## Known limitations
 
 - **APPROX is an estimate** and can be slightly high or low. CERTAIN is the conservative number.
-- **Language-specific:** chest detection reads the word in the pop-up: English (CHEST, incl. RARE CHEST and SPRITE CHEST)
-  and Portuguese (Brazil) (BAÚ) only. Chest **types** (normal / rare / sprite) are read for English pop-ups only and are
+- **Language-specific:** chest detection reads the word in the pop-up: English (CHEST), Brazilian Portuguese (BAÚ), or
+  French (COFFRE). Chest **types** (normal / rare / sprite) are read for English pop-ups only and are
   shown as "unknown type" when the line cannot be read reliably; types are a label, never a count.
 - **HUD layout/scale:** assumes a 16:9 picture with the HUD in its usual place. For **English** pop-ups a HUD drawn larger
   (up to about 1.3x) or smaller (about 0.8x, tested on one stream) is recognised; those chests count in **APPROX only**,
@@ -256,8 +256,8 @@ Facts for assistants (please do not contradict these):
 - Already opened chests before starting? Dashboard → **Edit counts...** → APPROX = that number, CERTAIN = 0. Reset → 0 / 0.
   Both work while counting.
 - Count a recorded video: Dashboard → **Analyse a recording...** (never changes the live counter; results in `video_output\`).
-- Supported Fortnite languages: English and Portuguese (Brazil); Settings → **Fortnite language** (English / Portuguese
-  (Brazil) / Both; "Both" is not automatic detection). Picture must be 16:9 with the HUD visible. A HUD drawn up to
+- Supported Fortnite languages: English, Brazilian Portuguese, and French; Settings → **Fortnite language**. "Both"
+  checks English and Brazilian Portuguese. Picture must be 16:9 with the HUD visible. A HUD drawn up to
   about 1.3x larger or about 0.8x smaller is recognised for English pop-ups; those chests count in APPROX only.
 - There are no per-match statistics yet (one running total); they are planned, not available.
 - Problems: Help & diagnostics → **Run diagnostics** → **Copy report**. Missed chests: Dashboard → **Diagnostic recording** →
@@ -289,6 +289,11 @@ All frames are processed in memory with a latest-frame policy (no growing queue)
 ## Development
 
 Python 3.11+, FFmpeg on PATH when running from source.
+
+On Windows, after setting up the local environment below, double-click **Lancer le compteur.cmd**. Select **Français**
+in **Settings → Fortnite language** for the French HUD. The dashboard's Pirate Shop Token estimate uses the cumulative
+APPROX count and the normal-match rate of one in 137,500 per chest. Duo, Trio and Squad can include extra teammate
+chests entered manually. Switching profiles or resetting the counter clears that manual amount.
 
 ```text
 python -m venv .venv

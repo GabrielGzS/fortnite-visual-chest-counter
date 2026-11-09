@@ -11,6 +11,7 @@ config.toml / state file as the command line, so the two always agree.
 
 import ctypes
 import json
+import math
 import os
 import sys
 import threading
@@ -50,6 +51,7 @@ RECORDING_CHOICES = (("Off", "off"), ("Only around my marks  (smallest)", "marks
 RECORDING_TEXT = {"marks": "only around your marks", "events": "around chest decisions and your marks",
                   "session": "the whole session"}
 REPO_URL = "https://github.com/GabrielGzS/fortnite-visual-chest-counter"
+PIRATE_TOKEN_RATE = 137_500
 UPDATE_HEALTH_DELAY_MS = 2000                                  # the window must have been running this long before it counts as started
 AUTO_CHECK_DELAY_MS = 6000                                     # after the window is up, so a check never competes with starting
 INSTALL_STOP_DEADLINE_MS = 45000                               # longer than the worker's own 30 seconds to stop
@@ -841,6 +843,23 @@ class Dashboard(QWidget):
         actions.addStretch(1)
         counts.addLayout(actions)
         layout.addLayout(counts)
+        token_row = QHBoxLayout()
+        self.token_mode = QComboBox()
+        self.token_mode.addItems(["Solo", "Duo", "Trio", "Squad"])
+        self.token_mode.setToolTip("Mode utilisé pour l’estimation du jeton.")
+        self.token_teammates = QSpinBox()
+        self.token_teammates.setRange(0, 999_999)
+        self.token_teammates.setToolTip("Coffres supplémentaires de tes coéquipiers, à saisir manuellement.")
+        self.token_teammate_label = label("Coffres des coéquipiers")
+        self.token_odds = label("", "hint", wrap=True)
+        self.token_odds.setToolTip("Estimation cumulative à 1 chance sur 137 500 par coffre en partie normale.")
+        for widget in (self.token_mode, self.token_teammate_label, self.token_teammates, self.token_odds):
+            token_row.addWidget(widget)
+        token_row.setStretch(3, 1)
+        layout.addLayout(token_row)
+        self.token_mode.currentIndexChanged.connect(lambda _: self.update_token_odds())
+        self.token_teammates.valueChanged.connect(lambda _: self.update_token_odds())
+        self.update_token_odds()
         types = QHBoxLayout()                                 # v0.2.2: read-only chest-type split of the APPROX total
         types.addWidget(label("Chest types:", "hint"), 0, Qt.AlignTop)
         self.types = label("", "hint", wrap=True)
@@ -971,6 +990,15 @@ class Dashboard(QWidget):
         self.show_log.toggled.connect(self._panels)
         self.show_preview.toggled.connect(self._panels)
         self.detail.currentIndexChanged.connect(lambda _: win.render_log())
+
+    def update_token_odds(self):
+        group = self.token_mode.currentIndex() > 0
+        self.token_teammate_label.setVisible(group)
+        self.token_teammates.setVisible(group)
+        total = max(0, self.win.counts[1]) + (self.token_teammates.value() if group else 0)
+        probability = -math.expm1(min(total, 10_000_000) * math.log1p(-1 / PIRATE_TOKEN_RATE)) if total else 0
+        chance = f"{probability:.6%}".replace(".", ",").replace("%", " %")
+        self.token_odds.setText(f"Jeton pirate · {chance} · {total} coffres")
 
     def _panels(self):
         self.log.setVisible(self.show_log.isChecked())
@@ -1302,7 +1330,7 @@ class SettingsPage(QWidget):
         layout = page_layout(self, "Settings", "Changes are saved in config.toml next to the app and are used the next time "
                                                "you press Start counting.")
         box, box_layout = card("Fortnite language", "The language your Fortnite is set to - the counter reads the word in the "
-                                                    "chest pop-up (CHEST / BAÚ). \"Both\" checks the two words all the time: "
+                                                    "chest pop-up (CHEST / BAÚ / COFFRE). \"Both\" checks English and Portuguese: "
                                                     "only useful for mixed footage. One language avoids a small risk of false "
                                                     "alarms and a little work, but does not find more chests (no difference on "
                                                     "our English test videos). Automatic language detection will come once the "
@@ -1973,6 +2001,7 @@ class MainWindow(QMainWindow):
     def profile_changed(self):
         """After a switch / new profile: its counts, its OBS text, its video source."""
         reg = self.fill_profiles()
+        self.dashboard.token_teammates.setValue(0)
         self.read_state(force=True)
         self.write_obs_files(quiet=True)              # OBS shows the selected profile
         live = self.profile_live()
@@ -2400,6 +2429,7 @@ class MainWindow(QMainWindow):
         self.counts = (certain, approx)
         self.dashboard.certain.set_value(certain, flash=flash and changed)
         self.dashboard.approx.set_value(approx, flash=flash and changed)
+        self.dashboard.update_token_odds()
         if changed:
             self.refresh_viewers()
 
@@ -2530,6 +2560,8 @@ class MainWindow(QMainWindow):
         except (C.UserError, OSError) as error:
             show_error(self, str(error))
             return
+        if action == "reset":
+            self.dashboard.token_teammates.setValue(0)
         self.set_counts(session.state["certain"], session.state["approximate"], flash=True)
         what = "reset to 0" if action == "reset" else f"set to CERTAIN {fmt(certain)} / APPROX {fmt(approx)}"
         self.add_log({"type": "info", "text": f"Counter {what}."

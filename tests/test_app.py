@@ -263,7 +263,7 @@ def test_child_process_flags_hide_consoles_only_when_asked_or_windowless():
 
 def test_language_choices_map_to_the_detector_setting_and_back():
     names = [name for name, _ in settings.LANGUAGE_CHOICES]
-    assert names == ["English", "Portuguese (Brazil)", "Both (English + Portuguese (Brazil))"]
+    assert names == ["English", "Portuguese (Brazil)", "Both (English + Portuguese (Brazil))", "Français"]
     for i, (_, langs) in enumerate(settings.LANGUAGE_CHOICES):
         assert settings.language_choice(langs) == i
     assert settings.language_choice(["pt", "en"]) == 2                 # order does not matter
@@ -284,6 +284,43 @@ def test_language_choice_is_saved_and_existing_configs_keep_their_language():
             assert not warnings and cfg["detector"]["languages"] == langs
         text = path.read_text(encoding="utf-8")
         assert "# my settings" in text and 'show = "approx"' in text and "process_fps = 15" in text
+
+
+def test_token_odds_use_approx_and_optional_teammate_chests():
+    qt = _qt()
+    if qt is None:
+        return
+    from fortnite_chest_counter.gui import app as A
+
+    previous_dir, previous_app_dir = os.getcwd(), paths.APP_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        os.chdir(tmp)
+        paths.APP_DIR = Path(tmp)
+        win = None
+        try:
+            win = A.MainWindow()
+            win.timer.stop()
+            win.set_counts(5, 10)
+            assert "0,007272 % · 10 coffres" in win.dashboard.token_odds.text()
+            win.dashboard.token_mode.setCurrentText("Squad")
+            win.dashboard.token_teammates.setValue(20)
+            assert "0,021816 % · 30 coffres" in win.dashboard.token_odds.text()
+            win.dashboard.token_mode.setCurrentText("Solo")
+            assert "0,007272 % · 10 coffres" in win.dashboard.token_odds.text()
+            win._set(0, 0, "reset")
+            win.dashboard.token_mode.setCurrentText("Duo")
+            assert "0,000000 % · 0 coffres" in win.dashboard.token_odds.text()
+            win.dashboard.token_teammates.setValue(10)
+            win.profile_changed()
+            assert win.dashboard.token_teammates.value() == 0
+        finally:
+            if win is not None:
+                if win._source_scan is not None:
+                    win._source_scan.join(30)
+                win.close()
+                qt.processEvents()
+            paths.APP_DIR = previous_app_dir
+            os.chdir(previous_dir)
 
 
 # ------------------------------------------------------------------ diagnostic capture

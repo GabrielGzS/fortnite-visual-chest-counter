@@ -25,7 +25,7 @@ DEFAULTS = {
         "certain_min_tier": "HIGH",             # "HIGH": CERTAIN+HIGH popups are certain; "CERTAIN": only CERTAIN
         "count_supported_medium_as_approx": True,       # MEDIUM popup + prompt + chest-like object
         "count_interaction_object_as_approx": True,     # prompt + chest-like object without a popup
-        "medium_counts_alone_languages": ["en"],        # languages whose MEDIUM popups count as approx by themselves
+        "medium_counts_alone_languages": ["en", "fr"],  # languages whose MEDIUM popups count as approx by themselves
     },
     "display": {
         "show": "both",                         # what obs_output/chest_counter.txt shows: both | certain | approx
@@ -112,7 +112,12 @@ CAPTURE_MODES = ("off", "marks", "events", "session")
 CAPTURE_QUALITIES = ("standard", "lossless")
 # The app's language choice -> [detector] languages. "Both" is not automatic detection: it checks both words all the time.
 # (Real "Auto" - identify the language per match - needs match recognition first; see docs/ROADMAP.md.)
-LANGUAGE_CHOICES = (("English", ["en"]), ("Portuguese (Brazil)", ["pt"]), ("Both (English + Portuguese (Brazil))", ["en", "pt"]))
+LANGUAGE_CHOICES = (
+    ("English", ["en"]),
+    ("Portuguese (Brazil)", ["pt"]),
+    ("Both (English + Portuguese (Brazil))", ["en", "pt"]),
+    ("Français", ["fr"]),
+)
 
 
 # The app's "Pictures analysed per second" choice -> [detector] process_fps (config.toml still accepts any 5-30).
@@ -136,7 +141,7 @@ def fps_choice(fps):
 def language_choice(languages):
     """Index in LANGUAGE_CHOICES for a [detector] languages list (any order); unknown combinations -> Both."""
     wanted = set(languages or [])
-    return next((i for i, (_, langs) in enumerate(LANGUAGE_CHOICES) if set(langs) == wanted), len(LANGUAGE_CHOICES) - 1)
+    return next((i for i, (_, langs) in enumerate(LANGUAGE_CHOICES) if set(langs) == wanted), 2)
 TEXT_TEMPLATES = ("certain_text", "approx_text", "combined_status_format")
 # Placeholders every display text may use. {count} = this text's own number (CERTAIN for certain_text, APPROX for
 # approx_text); {certain} and {approx} (or {approximate}) = either number, anywhere.

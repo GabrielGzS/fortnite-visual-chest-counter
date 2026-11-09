@@ -108,6 +108,9 @@ CHEST_TEMPLATES = [
     {"id": "pt:BAÚ", "file": paths.TEMPLATES_DIR / "chest/pt/bau.npy",
      "source_video": SAMPLES_DIR / "Fortnite-PS5-Pro-HD-No-Audio.mp4", "source_time": 64.0,
      "box": (898, 226, 918, 238)},
+    {"id": "fr:COFFRE", "file": paths.TEMPLATES_DIR / "chest/fr/coffre.npy",
+     "source_video": SAMPLES_DIR / "Fortnite-ARCHIS-2026-11-07.mp4", "source_time": 69.5,
+     "box": (890, 229, 920, 236)},
 ]
 
 

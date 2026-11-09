@@ -7,8 +7,8 @@
 # Lines starting with # are comments.
 
 [detector]
-# Which languages Fortnite is set to. "en" = English (CHEST), "pt" = Portuguese (Brazil) (BAU). The app's Settings page
-# sets this for you (English / Portuguese (Brazil) / Both).
+# Which language Fortnite is set to. "en" = English (CHEST), "pt" = Brazilian Portuguese (BAÚ), "fr" = French (COFFRE).
+# The app's Settings page sets this for you.
 # Use only the language your Fortnite is set to, e.g.  languages = ["en"]  (the other word is not needed and only
 # adds a small risk of false alarms; on our English test videos it made no difference).
 languages = ["en", "pt"]
@@ -28,7 +28,7 @@ certain_min_tier = "HIGH"
 # decide which weaker evidence is allowed to add to APPROX only.
 count_supported_medium_as_approx = true     # medium popup + the "open chest" button + a chest-looking object
 count_interaction_object_as_approx = true   # button + chest-looking object, even if the popup was missed
-medium_counts_alone_languages = ["en"]      # languages whose medium-confidence popup counts by itself
+medium_counts_alone_languages = ["en", "fr"]  # languages whose medium-confidence popup counts by itself
 
 [display]
 # What your viewers see. EASIEST: the Overlay page of the app - it writes these lines for you.

@@ -151,6 +151,25 @@ def test_every_case_finds_every_chest_once_and_nothing_else():
             check(name)
 
 
+def test_french_chest_popups_count_once_including_the_storm():
+    # ARCHIS gameplay, Nov 7 at 49–55s (chest) and 33–39s (storm phase),
+    # then Nov 9 at 294–300s (chest under a sprite XP line in the storm).
+    defaults = settings.DEFAULTS["detector"]
+    E.configure(dict(defaults, languages=["fr"]))
+    try:
+        estimator = E.ChestEstimator()
+        events = []
+        for t, frame in frames("french_chest"):
+            events.extend(estimator.process_frame(t, frame))
+        events.extend(estimator.flush())
+    finally:
+        E.configure(defaults)
+    counted = [event for event in events if event["approx_counted"]]
+    assert len(counted) == 2
+    assert all(event["popup_template"] == "fr:COFFRE" for event in counted)
+    assert counted[0]["time"] < 6 and counted[1]["time"] >= 12
+
+
 def test_five_chest_vault_counts_every_step_including_the_third_lines_x2():
     counted = check("replays_vault_five_chests")
     assert sorted((e.get("increment") or {}).get("kind") or "new" for e in counted) == \
