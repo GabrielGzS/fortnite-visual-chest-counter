@@ -1,0 +1,28 @@
+Frozen chest-detector baseline for v0.3.0 (milestone M0, 2026-11-09)
+
+Made at commit 032df3b4ebdaea57e49dbc54ba6496d9c2e0364b, the published v0.2.3.
+
+    en_v0.3.0-base.json    English reference clip     6 events, 6 CERTAIN, 6 APPROX
+    ps5_v0.3.0-base.json   Portuguese reference clip  24 events, 11 CERTAIN, 15 APPROX
+
+Made twice, with byte-identical results:
+
+    python research/regress.py snapshot --tag v0.3.0-base --clips en ps5 --jobs 1
+
+A pass takes about 13 minutes. Do not rebuild this baseline: reuse it.
+
+FFmpeg must be this exact build, first on PATH, because `simulate` uses whichever FFmpeg comes first and another build
+could change the scores:
+
+    N-128433-gdb8537d8cc-20261105 (runtime/ffmpeg/ffmpeg.exe in v0.2.3)
+    SHA-256 7A1CC6F3E55089F5C0575F14F8BD608CAD4F2CCEF813C9536F876F5B481C83F0
+
+`regress.py compare` only fails on regressions. To prove nothing changed, compare the event lists exactly.
+
+These must stay as they are at 032df3b. Only the new folder templates/match/ may be added:
+
+    src/fortnite_chest_counter/detection       tree 6927aa9d3a481a7ed48668d6c5480ea0bd413809
+    src/fortnite_chest_counter/templates       tree 417a11a0f289132bb4f356c6ecc112365609e3a2
+    src/fortnite_chest_counter/estimator.py    blob f0c42178f8611d977fb6172bc1c0e522e64ba83d
+
+    git diff --exit-code 032df3b -- src/fortnite_chest_counter/detection src/fortnite_chest_counter/estimator.py src/fortnite_chest_counter/templates ":!src/fortnite_chest_counter/templates/match"
