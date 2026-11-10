@@ -2302,8 +2302,9 @@ class DiscordPage(QWidget):
         links.addStretch(1)
         setup_layout.addLayout(links)
         setup_layout.addWidget(label("1. Copy the Application ID from General Information and the token from the Bot page.\n"
-                                     "2. Invite it with the bot scope. Grant View Channel and Send Messages "
-                                     "only in the destination text channel. Leave privileged intents off.\n"
+                                     "2. Enable Guild Install under Installation and leave Requires OAuth2 Code Grant "
+                                     "off under Bot. Click Invite bot and authorize it on a server you can manage. "
+                                     "Grant View Channel and Send Messages only in the destination text channel.\n"
                                      "3. In Discord, enable Developer Mode, right-click the text channel and "
                                      "choose Copy Channel ID.", "hint", wrap=True))
         form = QGridLayout()
@@ -2405,7 +2406,11 @@ class DiscordPage(QWidget):
             self.setup_status.setText("Enter the Application ID from General Information first.")
             self.application_id.setFocus()
             return
-        QDesktopServices.openUrl(QUrl(f"https://discord.com/oauth2/authorize?client_id={app_id}&scope=bot&permissions=0"))
+        url = QUrl(f"https://discord.com/oauth2/authorize?client_id={app_id}&integration_type=0&scope=bot&permissions=0")
+        if QDesktopServices.openUrl(url):
+            self.setup_status.setText("In Discord, choose a server you can manage and click Authorize.")
+        else:
+            self.setup_status.setText("Could not open the invite link. Check your default browser.")
 
     def show_saved_setup(self, config):
         self._configured = config is not None
