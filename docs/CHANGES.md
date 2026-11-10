@@ -22,6 +22,7 @@ changes; the pull request links here. Versioned release notes describe published
   a manual selector.
 - Put sharing and bot setup together in Group. Add Host and Guest roles, one published leaderboard, Discord
   match reports and team matching by verified session fingerprint.
+- Stagger Group clients and share a webhook cooldown across submissions and shared-board requests. Respect Discord retry/reset delays, retain queued results and avoid blocking the UI.
 - Share coalesced current-match updates, recover edited live feed messages after reconnect and keep final saved results authoritative. Add matching team participants and totals to local history.
 - Show personal, verified team and cumulative match totals with boost-aware Pirate Token estimates. Add overlay transparency and custom headings and multiline templates for Personal, Team and All matches, including cumulative match count.
 - Use one section editor and renderer for the floating overlay, Dashboard preview and managed OBS text file. Remove

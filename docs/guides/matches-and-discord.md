@@ -23,7 +23,7 @@ Guests with sharing enabled follow the Host's published mode and boost. Turning 
 
 ## Live sessions and history
 
-Live sharing applies to a local Battle Royale match with a verified session fingerprint. The app queues the latest counts about every five seconds, coalesces unsent changes and updates the same live webhook message. A saved match supplies the final result. Retries update that player's result instead of adding the same chests again.
+Live sharing applies to a local Battle Royale match with a verified session fingerprint. The app queues the latest counts every five to eight seconds, with a per-client stagger and small random variation so players do not all send together. It coalesces unsent changes and updates the same live webhook message. A saved match supplies the final result. Retries update that player's result instead of adding the same chests again. Webhook submissions and shared-board requests share a cooldown: Discord’s `Retry-After` / `retry_after` and exhausted-bucket reset delays are respected. Pending results stay queued during the pause; the app does not block the UI or loop on HTTP 429. The bot’s authenticated requests also use discord.py’s rate-limit handling. See [Discord’s rate-limit documentation](https://docs.discord.com/developers/topics/rate-limits).
 
 Matching Fortnite session fingerprints group teammates even when they leave at different times. The app sends the fingerprint, player name, confidence counts and boost, rather than the raw Fortnite log. Team membership is based on received submissions from that session. Players in another match stay in their own session.
 

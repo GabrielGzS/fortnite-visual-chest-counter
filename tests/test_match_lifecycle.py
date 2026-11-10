@@ -491,6 +491,7 @@ def test_qt_republishes_a_team_update_when_ranking_is_unchanged(app, monkeypatch
     win.discord.runner = SimpleNamespace(status=("online", ""), webhook=webhook, stop=lambda **_: None)
     win.group._webhook = webhook
     win.group._scoreboard_id = ident
+    win.group._next_scoreboard_refresh = 0
     win.group.sync_scoreboard()
     wait_for_board()
     assert len(edits) == 1
@@ -642,3 +643,39 @@ def test_qt_custom_overlay_sections_opacity_and_team_history(app, monkeypatch):
     # Sharing off hides current team stats, while saved group history remains in the lifetime result.
     win.group.share_matches.setChecked(False)
     assert win.dashboard.screen_overlay_sections(cfg)[1] == ""
+
+
+def test_qt_group_cooldown_defers_network_but_keeps_latest_counts(app, monkeypatch):
+    from time import monotonic
+
+    gui, win, _ = app
+    group = gui.discord_group
+    webhook = group.Webhook("123456789012345678", "fixture-webhook-token")
+    monkeypatch.setattr(group, "load_webhook", lambda: webhook)
+    monkeypatch.setattr(group, "webhook_retry_after", lambda _: 17.25)
+    sent = []
+    monkeypatch.setattr(group, "queue_live", lambda *args: sent.append(args))
+    monkeypatch.setattr(group, "flush", lambda _: pytest.fail("HTTP flush during Discord cooldown"))
+    gui.C.update_config_file(gui.config_file(), "app", {"group_player": "Alex", "group_share_matches": True})
+    win.group._webhook = webhook
+    win.group._scoreboard_id = "234567890123456789"
+    win.group._publish_channel = "345678901234567890"
+    win.group._next_scoreboard_refresh = 0
+    before = monotonic()
+    win.group.sync_scoreboard(publish=True)
+    assert not win.group._scoreboard_pending
+    assert win.group._next_scoreboard_refresh >= before + 17.25
+    assert win.group._publish_channel == "345678901234567890"
+    assert "paused" in win.group.player_status.text()
+
+    win.discord.retry_group_outbox()
+    assert win.discord._next_outbox_retry >= before + 17.25
+    assert not win.discord._outbox_active.locked()
+    seed(gui, win, (8, 10))
+    win._match_active = True
+    win._match_fingerprint = "a" * 64
+    win.worker.alive = True
+    win._next_live_share = 0
+    win.publish_live_counts()
+    assert sent and sent[-1][2:5] == ("Alex", 8, 10)
+    assert win._next_live_share >= before + 17.25

@@ -74,6 +74,7 @@ def _field(index, row):
 
 
 def _request(webhook, suffix, method, payload=None, *, attachment=None):
+    discord_group.check_webhook_cooldown(webhook)
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
     content_type = "application/json"
     if attachment is not None:
@@ -88,10 +89,13 @@ def _request(webhook, suffix, method, payload=None, *, attachment=None):
                       headers={"Content-Type": content_type, "User-Agent": "FortniteVisualChestCounter"})
     try:
         with build_opener(_NoRedirects()).open(request, timeout=8) as response:
+            discord_group.webhook_response(webhook, response)
             if response.status == 204:
                 return None
             return json.load(response)
     except HTTPError as error:
+        if error.code == 429:
+            raise discord_group.webhook_rate_limited(webhook, error) from None
         if error.code == 404:
             raise BoardNotFound("Discord could not find this leaderboard message for the saved webhook.") from None
         raise ValueError(f"Discord returned HTTP {error.code} for the shared leaderboard.") from None

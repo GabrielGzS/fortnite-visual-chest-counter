@@ -2288,7 +2288,7 @@ class GroupPage(QWidget):
         self._publish_channel = None
         self._channels = ()
         self._published_channel = ""
-        self._next_scoreboard_refresh = 0.0
+        self._next_scoreboard_refresh = time.monotonic() + discord_group.webhook_sync_delay(None, base=0)
         self.scoreboard_result.connect(self._scoreboard_result)
         self.scoreboard_removed.connect(self._scoreboard_removed)
         self.players_reset.connect(self._players_reset)
@@ -2689,13 +2689,19 @@ class GroupPage(QWidget):
             self._sessions = ()
             self.render_ranks(())
             return
+        cooldown = discord_group.webhook_retry_after(webhook)
+        if cooldown > 0:
+            self._next_scoreboard_refresh = time.monotonic() + cooldown
+            if publish:
+                self.player_status.setText(f"Discord sync paused; retrying in {math.ceil(cooldown)} seconds.")
+            return
         if publish and not host:
             return
         if self._scoreboard_pending or (not publish and time.monotonic() < self._next_scoreboard_refresh):
             return
         if not host and (not ident or self.win.pages.currentWidget() not in (self, self.win.dashboard)):
             return
-        self._next_scoreboard_refresh = time.monotonic() + 5
+        self._next_scoreboard_refresh = time.monotonic() + discord_group.webhook_sync_delay(webhook)
         self._scoreboard_pending = True
         previous = self._published
         dashboard = self.win.dashboard
@@ -2783,7 +2789,11 @@ class GroupPage(QWidget):
         if host and self.win.group_role != "host" and not published:
             return
         if error:
-            self._publish_channel = None
+            cooldown = discord_group.webhook_retry_after(webhook)
+            if cooldown > 0:
+                self._next_scoreboard_refresh = time.monotonic() + cooldown
+            else:
+                self._publish_channel = None
             self.player_status.setText(error)
             self.publish_board.setEnabled(self._is_board_host())
             return
@@ -3223,9 +3233,13 @@ class DiscordPage(QWidget):
             return
         if webhook is None:
             return
+        cooldown = discord_group.webhook_retry_after(webhook)
+        if cooldown > 0:
+            self._next_outbox_retry = time.monotonic() + cooldown
+            return
         if not self._outbox_active.acquire(blocking=False):
             return
-        self._next_outbox_retry = time.monotonic() + 30
+        self._next_outbox_retry = time.monotonic() + discord_group.webhook_sync_delay(webhook, base=30)
         history = self.win.match_history_path()
 
         def deliver():
@@ -3596,7 +3610,7 @@ class MainWindow(QMainWindow):
         self._mode_tail = None
         self._detected_mode = None
         self._match_events = deque()
-        self._next_live_share = 0.0
+        self._next_live_share = time.monotonic() + discord_group.webhook_sync_delay(None, base=0)
         self._match_active = False
         self._match_fingerprint = ""
         self._pending_match_fingerprint = ""
@@ -4672,7 +4686,7 @@ class MainWindow(QMainWindow):
     def publish_live_counts(self):
         if time.monotonic() < self._next_live_share:
             return
-        self._next_live_share = time.monotonic() + 5
+        self._next_live_share = time.monotonic() + discord_group.webhook_sync_delay(None)
         if not self._match_active or not self._match_fingerprint or not self.workers_active():
             return
         cfg = load_cfg()[0]["app"]
@@ -4682,6 +4696,7 @@ class MainWindow(QMainWindow):
             webhook = discord_group.load_webhook()
             if webhook is None:
                 return
+            self._next_live_share = time.monotonic() + discord_group.webhook_sync_delay(webhook)
             certain, total = self.counts
             discord_group.queue_live(webhook, self._match_fingerprint, cfg["group_player"], certain, total,
                                      self.dashboard.token_boost.currentData())

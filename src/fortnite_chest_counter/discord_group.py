@@ -5,6 +5,7 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 import json
 import math
+import random
 from pathlib import Path
 import re
 import sqlite3
@@ -30,6 +31,10 @@ _SESSION_PREFIX = "FCC session v1 "
 _FINGERPRINT = re.compile(r"[a-f0-9]{64}")
 PIRATE_TOKEN_RATE = 137_500
 _FLUSH_LOCK = threading.Lock()
+_COOLDOWN_LOCK = threading.Lock()
+_WEBHOOK_COOLDOWNS = {}
+_CLIENT_STAGGER = random.uniform(0.0, 2.0)
+
 GROUP_TYPE_LABELS = {**LABELS, "unclassified": "Not classified"}
 _WEBHOOK_NAME = "Chest Counter"
 _WEBHOOK_AVATAR = ("https://raw.githubusercontent.com/NEVARLeVrai/fortnite-visual-chest-counter/"
@@ -89,6 +94,93 @@ class Webhook:
     @property
     def url(self):
         return f"https://discord.com/api/v10/webhooks/{self.id}/{self.token}"
+
+
+class WebhookRateLimited(ValueError):
+    def __init__(self, retry_after):
+        self.retry_after = max(0.0, retry_after)
+        super().__init__(f"Discord is rate limiting Group sync. Retry in {math.ceil(self.retry_after)} seconds. "
+                         "Pending results are kept.")
+
+
+def _webhook_key(webhook):
+    return str(getattr(webhook, "id", webhook))
+
+
+def webhook_retry_after(webhook):
+    now = time.monotonic()
+    with _COOLDOWN_LOCK:
+        return max(0.0, _WEBHOOK_COOLDOWNS.get(_webhook_key(webhook), 0.0) - now,
+                   _WEBHOOK_COOLDOWNS.get("*", 0.0) - now)
+
+
+def webhook_sync_delay(webhook, base=5.0):
+    """Spread clients across a bounded interval and respect a server-requested cooldown."""
+    return max(webhook_retry_after(webhook), max(0.0, base) + _CLIENT_STAGGER + random.uniform(0.0, 1.0))
+
+
+def check_webhook_cooldown(webhook):
+    remaining = webhook_retry_after(webhook)
+    if remaining > 0:
+        raise WebhookRateLimited(remaining)
+
+
+def _retry_number(value):
+    if type(value) not in (int, float, str) or isinstance(value, str) and len(value) > 64:
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return max(0.5, seconds)
+
+
+def _set_webhook_cooldown(webhook, seconds, *, global_limit=False):
+    delay = seconds + random.uniform(0.1, 0.5)
+    until = time.monotonic() + delay
+    with _COOLDOWN_LOCK:
+        key = "*" if global_limit else _webhook_key(webhook)
+        _WEBHOOK_COOLDOWNS[key] = max(_WEBHOOK_COOLDOWNS.get(key, 0.0), until)
+    return webhook_retry_after(webhook)
+
+
+def webhook_rate_limited(webhook, error):
+    """Read only bounded Discord error metadata. No request is retried or slept here."""
+    headers = getattr(error, "headers", None)
+    delays = []
+    if headers is not None:
+        for key in ("Retry-After", "X-RateLimit-Reset-After"):
+            delay = _retry_number(headers.get(key))
+            if delay is not None:
+                delays.append(delay)
+    global_limit = bool(headers is not None and (
+        str(headers.get("X-RateLimit-Global", "")).lower() == "true"
+        or headers.get("X-RateLimit-Scope") == "global"))
+    try:
+        body = error.read(8192)
+        if len(body) <= 8192:
+            data = json.loads(body)
+            if isinstance(data, dict):
+                delay = _retry_number(data.get("retry_after"))
+                if delay is not None:
+                    delays.append(delay)
+                global_limit = global_limit or data.get("global") is True
+    except (AttributeError, OSError, TypeError, ValueError, RecursionError):
+        pass
+    finally:
+        error.close()
+    delay = max(delays, default=1.0)
+    return WebhookRateLimited(_set_webhook_cooldown(webhook, delay, global_limit=global_limit))
+
+
+def webhook_response(webhook, response):
+    headers = getattr(response, "headers", None)
+    if headers is not None and headers.get("X-RateLimit-Remaining") == "0":
+        delay = _retry_number(headers.get("X-RateLimit-Reset-After"))
+        if delay is not None:
+            _set_webhook_cooldown(webhook, delay)
 
 
 def webhook_identity():
@@ -634,6 +726,7 @@ def _message_session(message):
 
 
 def _publish(webhook, event, name, count, certain, chest_types, fingerprint=None, boost=None):
+    check_webhook_cooldown(webhook)
     payload = json.dumps([event, name, count, certain, chest_types], ensure_ascii=True,
                          separators=(",", ":")).replace("|", "\\u007c")
     embed = {"title": "Group chest contribution", "author": {"name": name},
@@ -651,11 +744,11 @@ def _publish(webhook, event, name, count, certain, chest_types, fingerprint=None
     request = Request(f"{webhook.url}?wait=true", data=body,
                       headers={"Content-Type": "application/json", "User-Agent": "FortniteVisualChestCounter"})
     try:
-        with build_opener(_NoRedirects()).open(request, timeout=12):
-            pass
+        with build_opener(_NoRedirects()).open(request, timeout=12) as response:
+            webhook_response(webhook, response)
     except HTTPError as error:
         if error.code == 429:
-            raise ValueError("Discord is rate limiting Group contributions. The pending reports will retry later.") from None
+            raise webhook_rate_limited(webhook, error) from None
         raise ValueError(f"Discord rejected the Group webhook request (HTTP {error.code}).") from None
     except (OSError, URLError):
         raise ValueError("Discord did not confirm the Group contribution. It remains pending.") from None
@@ -674,6 +767,7 @@ def _parse_live(content):
 
 
 def _publish_live(webhook, fingerprint, name, revision, certain, total, boost, message=""):
+    check_webhook_cooldown(webhook)
     values = [fingerprint, name, revision, certain, total, boost, time.time()]
     content = json.dumps(values, ensure_ascii=True, separators=(",", ":")).replace("|", "\\u007c")
     payload = {"content": f"{_LIVE_PREFIX}{content}||", "allowed_mentions": {"parse": []}}
@@ -685,12 +779,15 @@ def _publish_live(webhook, fingerprint, name, revision, certain, total, boost, m
                       headers={"Content-Type": "application/json", "User-Agent": "FortniteVisualChestCounter"})
     try:
         with build_opener(_NoRedirects()).open(request, timeout=12) as response:
+            webhook_response(webhook, response)
             result = json.load(response)
             ident = result["id"]
             if not isinstance(ident, str) or not ident.isdigit() or not 1 <= len(ident) <= 22:
                 raise ValueError("Discord did not return a live update message ID.")
             return ident
     except HTTPError as error:
+        if error.code == 429:
+            raise webhook_rate_limited(webhook, error) from None
         if error.code == 404 and message:
             return _publish_live(webhook, fingerprint, name, revision, certain, total, boost)
         raise ValueError(f"Discord rejected the live Group update (HTTP {error.code}).") from None
