@@ -24,6 +24,7 @@ Each on-screen section has its own heading and multiline content editor. You can
 | `{approx}` | Additional estimated openings. |
 | `{chance}` | Estimated Pirate Token percentage. |
 | `{players}` | Submitted players in the verified team. |
+| `{names}` | Names of the submitted players. |
 | `{matches}` | Match count for the cumulative section. |
 | `{types}` | Available chest-type breakdown. |
 

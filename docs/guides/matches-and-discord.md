@@ -43,7 +43,7 @@ The bot profile and the webhook sender identity are configured separately. With 
 
 The webhook can use its own display name and image URL for outgoing messages. Its avatar is an HTTPS image URL, rather than a local image file. This sender identity is attached to the webhook messages.
 
-While the bot is online, its presence rotates about every 30 seconds. When a current verified team session has recent live submissions, it shows team players and chests, then the team Pirate Token estimate. Saved group totals and match counts can appear in the rotation too. The text reflects received data.
+While the bot is online, its presence rotates about every 30 seconds. When a current verified team session has recent live submissions, it shows team players and chests, then the team Pirate Token estimate. Saved group totals and match counts can appear in the rotation too. The text reflects received data. In **Bot presence**, choose Watching, Playing or Listening, edit each activity template, enable or disable rotation and set its interval from 30 to 300 seconds. Templates accept {total}, {players}, {matches} and {chance}. Use **Save profile and presence** to apply these preferences.
 
 Bot and webhook credentials are stored in Windows Credential Manager.
 
