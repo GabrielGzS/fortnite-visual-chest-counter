@@ -2,8 +2,8 @@
 
 ## Setup and features
 
-After installing the development environment, use **launch-chest-counter.cmd** on Windows or run
-`./launch-chest-counter.sh` from a shell. The shell script can also use a Windows virtual environment from Git Bash.
+Launch the release executable, or start the GUI from the development environment with
+`python -m fortnite_chest_counter.gui`. See [development notes](../DEVELOPMENT.md) for the local Windows launcher.
 Capture features that depend on Windows still require Windows.
 
 The app uses English labels. To read a French Fortnite HUD, select **French** in **Settings → Fortnite language**.

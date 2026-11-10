@@ -230,7 +230,7 @@ def verify_record(dist):
     return d, base, checked
 
 
-def build_launcher(target, work, mingw=None):
+def build_launcher(target, work, mingw=None, *, development=False):
     """Compile packaging/launcher (C + icon + version info + manifest) into `target`. Reproducible: no timestamps."""
     env = dict(os.environ)
     if mingw:
@@ -247,8 +247,10 @@ def build_launcher(target, work, mingw=None):
     (work / "launcher.rc").write_text(RC_TEMPLATE.format(major=major, minor=minor, patch=patch, version=__version__,
                                                          app=APP_NAME, exe=EXE_NAME), encoding="ascii")
     subprocess.run([tools["windres"], "-i", "launcher.rc", "-O", "coff", "-o", "launcher.res"], cwd=work, env=env, check=True)
-    subprocess.run([tools["gcc"], "-O2", "-s", "-mwindows", "-o", "launcher.exe", str(LAUNCHER_DIR / "launcher.c"),
-                    "launcher.res", "-Wl,--no-insert-timestamp"], cwd=work, env=env, check=True)
+    defines = ["-DFCC_DEV_LAUNCHER"] if development else []
+    subprocess.run([tools["gcc"], "-O2", "-s", "-mwindows", *defines, "-o", "launcher.exe",
+                    str(LAUNCHER_DIR / "launcher.c"), "launcher.res", "-Wl,--no-insert-timestamp"],
+                   cwd=work, env=env, check=True)
     shutil.copy2(work / "launcher.exe", target)
     version = subprocess.run([tools["gcc"], "--version"], capture_output=True, text=True, env=env).stdout.splitlines()[0]
     return version
@@ -503,13 +505,17 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=str(ROOT / "build_out"))
     ap.add_argument("--preflight", action="store_true", help="only report whether this PC can build the release")
     ap.add_argument("--launcher-only", action="store_true", help="only compile the launcher (seconds of work), to use with --prebuilt-launcher elsewhere")
+    ap.add_argument("--development-launcher", action="store_true", help="with --launcher-only, launch the checkout's .venv")
     ap.add_argument("--prebuilt-launcher", help="use this launcher instead of compiling one, on a PC that cannot run the compiler")
     a = ap.parse_args()
+    if a.development_launcher and not a.launcher_only:
+        ap.error("--development-launcher requires --launcher-only")
     if a.preflight:
         sys.exit(preflight(a.python_embed, a.ffmpeg_zip, a.ffmpeg_source, a.mingw, a.out, a.prebuilt_launcher))
     if a.launcher_only:
         Path(a.out).mkdir(parents=True, exist_ok=True)
-        build_launcher(Path(a.out) / EXE_NAME, Path(a.out) / "_launcher-build", a.mingw)
+        work = ROOT / "build_out" / "_development-launcher-build" if a.development_launcher else Path(a.out) / "_launcher-build"
+        build_launcher(Path(a.out) / EXE_NAME, work, a.mingw, development=a.development_launcher)
         print(f"Built {Path(a.out) / EXE_NAME} for v{__version__}\nSHA-256 {sha256(Path(a.out) / EXE_NAME)}")
         sys.exit(0)
     if not (a.python_embed and a.ffmpeg_zip and a.ffmpeg_source):

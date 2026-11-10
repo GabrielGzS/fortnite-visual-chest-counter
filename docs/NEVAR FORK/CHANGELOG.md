@@ -15,14 +15,19 @@
 
 ## Local UI follow-up
 
-- Place Total and Pirate Token chance in the main stage, with separate centred Certain and Approx cards and recent
-  openings grouped by source and type. Align the two selectors and move profile actions to the right of the profile.
-- Replace the collapsible sidebar with a fixed 96-unit left navigation rail with a distinct surface. Keep all four
+- Add a dedicated recent-match card and a Group tab for editing and deleting saved matches and viewing local ranks.
+  Finish and reset a match manually. Save a match from both capture sources.
+- Add a Discord tab for bot setup and optional manual match summaries. Store credentials in Windows Credential Manager.
+- Show Total on its own line in the stacked on-screen overlay. Render the selected layout example and preview from
+  the same wording and counts. Use a tonal button to restore wording defaults.
+- Replace the shell launchers with a buildable local Windows executable and a console-only debug batch file. Update the app icon to the skull chest.
+- Place Total and Pirate Token chance in the main stage, with separate Certain and Approx cards above recent openings. Align the two selectors and move profile actions to the right of the profile.
+- Replace the collapsible sidebar with a fixed 96-unit left navigation rail with a distinct surface. Keep all six
   destinations keyboard-accessible and show the full update status in the content area.
 - Bundle Google Sans and official Material Icons with their licenses. Use connected action groups, themed dropdown
   chevrons, checkboxes, radio controls and numeric steppers.
-- Pair Capture settings with Start counting in the header, with capture status next to the sources. Group Edit counts
-  with Reset and Analyse a recording with Mark moment. Give the on-screen summary a card and a shortcut to Overlay.
+- Group Capture settings with Activity and Live preview, with capture status next to the sources. Group Edit counts
+  with Reset and Finish match and Analyse a recording with Mark moment. Give the on-screen summary a card and a shortcut to Overlay.
 - Apply themed confirmations and profile prompts. Destructive confirmations default to Cancel. The Windows file
   picker remains a system dialog.
 - Use static Google Sans faces, animate the selection indicator and dropdowns with reduced-motion support, and keep

@@ -1,0 +1,114 @@
+"""Local, manually recorded match results."""
+
+from dataclasses import asdict, dataclass, replace
+from hashlib import sha256
+import json
+
+from fortnite_chest_counter.counter import atomic_write
+
+
+@dataclass(frozen=True)
+class Match:
+    snapshot: str
+    finished_at: str
+    profile_id: str
+    profile: str
+    mode: str
+    certain: int
+    estimated: int
+    token_chance: str
+    boost: float = 1.0
+
+    @property
+    def total(self):
+        return self.certain + self.estimated
+
+    def summary(self):
+        return (
+            f"Fortnite | {self.mode} | {self.profile} | {self.finished_at}\n"
+            f"Total: {self.total:,} chests ({self.certain:,} certain, {self.estimated:,} estimated)\n"
+            f"Estimated Pirate Token chance: {self.token_chance}"
+        )
+
+
+def read_snapshot(profile_id, state_paths):
+    certain = total = 0
+    parts = []
+    for index, path in enumerate(state_paths):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            state = {"certain": 0, "approximate": 0}
+        if not isinstance(state, dict):
+            raise ValueError("A counter file does not contain saved counts.")
+        confirmed, opened = state.get("certain"), state.get("approximate")
+        if type(confirmed) is not int or type(opened) is not int or not 0 <= confirmed <= opened:
+            raise ValueError("A counter file contains invalid counts.")
+        certain += confirmed
+        total += opened
+        if index == 0 or opened:
+            parts.append((str(path), state.get("session_started_at"), state.get("last_event_id"), confirmed, opened))
+    key = json.dumps([profile_id, parts], ensure_ascii=False)
+    return sha256(key.encode("utf-8")).hexdigest(), certain, total
+
+
+def read_history(path):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except ValueError as error:
+        raise ValueError("The saved match history could not be read.") from error
+    try:
+        if data["version"] != 1 or not isinstance(data["matches"], list):
+            raise ValueError
+        rows = [Match(**item) for item in data["matches"]]
+        if any(type(row.certain) is not int or type(row.estimated) is not int or row.certain < 0 or row.estimated < 0
+               or type(row.boost) not in (int, float) or not 0 < row.boost <= 2
+               or not all(isinstance(value, str) for value in
+                          (row.snapshot, row.finished_at, row.profile_id, row.profile, row.mode, row.token_chance))
+               for row in rows):
+            raise ValueError
+        return rows
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("The saved match history could not be read.") from error
+
+
+def save_match(path, match):
+    rows = read_history(path)
+    if any(row.snapshot == match.snapshot for row in rows):
+        return False
+    _write_history(path, (*rows, match))
+    return True
+
+
+def edit_match(path, snapshot, certain, total, token_chance):
+    rows = read_history(path)
+    for index, row in enumerate(rows):
+        if row.snapshot == snapshot:
+            rows[index] = replace(row, certain=certain, estimated=total - certain, token_chance=token_chance)
+            _write_history(path, rows)
+            return True
+    return False
+
+
+def delete_match(path, snapshot):
+    rows = read_history(path)
+    remaining = [row for row in rows if row.snapshot != snapshot]
+    if len(remaining) == len(rows):
+        return False
+    _write_history(path, remaining)
+    return True
+
+
+def _write_history(path, rows):
+    atomic_write(path, json.dumps({"version": 1, "matches": [asdict(row) for row in rows]},
+                                  ensure_ascii=False, indent=2) + "\n")
+
+
+def leaderboard(rows):
+    profiles = {}
+    for row in rows:
+        _, matches, total, certain = profiles.get(row.profile_id, (row.profile, 0, 0, 0))
+        profiles[row.profile_id] = (row.profile, matches + 1, total + row.total, certain + row.certain)
+    return sorted(profiles.values(), key=lambda item: (-item[2], -item[3], item[0].casefold()))

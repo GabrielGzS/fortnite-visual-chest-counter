@@ -9,9 +9,11 @@ recordings used in that work were local and have since been removed at the contr
 
 ## Local UI follow-up
 
-- 77 selected tests passed from an isolated working directory, covering cleanup, overlay, two sources, the token
-  formula, worker messages, and the update UI. This is a targeted result.
-- The native Windows self-test opened the application and listed both SDR and HDR screen entries.
+- 108 selected tests passed from an isolated working directory, covering match history, cleanup, overlay, two sources,
+  the token formula, worker messages, and the update UI.
+- The local Windows executable passed its native self-test and listed both SDR and HDR screen entries.
+- A scripted Windows Qt run exercised combined match saving, deduplication, editing, deletion and the local leaderboard.
+  It also checked Discord sending with a mock, equal Dashboard columns, dropdown interaction and the overlay layout.
 - A scripted Qt run at 920 × 640 exercised all four navigation destinations by keyboard, profile prompt validation,
   Enter and Escape on a destructive confirmation, numeric input, and capture layout.
 - The four chest illustrations and lid motion were exercised with events from both simulated sources, including late
@@ -21,7 +23,7 @@ recordings used in that work were local and have since been removed at the contr
 
 ## Manual checks before publishing the follow-up
 
-1. Start from `launch-chest-counter.cmd`. Check Google Sans, the left rail, grouped profile actions, capture selectors,
+1. Start from the Windows executable. Check Google Sans, the left rail, grouped profile actions, capture selectors,
    and the **Help → Clean logs and captures…** confirmation.
 2. Count on one HDR and one SDR source. Check both previews, status on stop, separate Certain and Approx, and the
    Pirate Token percentage on the combined Total. Test the normal, rare, Sprite and unknown presentations.

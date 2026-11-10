@@ -57,7 +57,7 @@ QPushButton#navDestination:focus {{ border-color: {ACCENT}; }}
 #metrics {{ color: {MUTED}; font-size: 9pt; }}
 
 #chestStage {{ background: {STAGE}; border: 1px solid transparent; border-radius: 28px; }}
-#stageTotal {{ color: {ACCENT}; font-size: 53pt; }}
+#stageTotal {{ color: {ACCENT}; font-size: 46pt; }}
 #stageOdds {{ color: {ACCENT_HOVER}; font-size: 22pt; }}
 #recentOpenings {{ background: transparent; border: none; min-height: 120px; }}
 #recentOpenings::item {{ padding: 6px 2px; }}
@@ -68,8 +68,12 @@ QPushButton#navDestination:focus {{ border-color: {ACCENT}; }}
 #countSub {{ color: {MUTED}; font-size: 9pt; }}
 
 #pill {{ border-radius: 11px; padding: 3px 12px; font-size: 9pt; font-weight: 500; }}
-#sourceChip {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 12px;
+#sourceChip {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 4px;
                 padding: 3px 9px; color: {MUTED}; font-size: 9pt; }}
+#sourceChip[groupPosition="first"] {{ border-top-left-radius: 12px; border-bottom-left-radius: 12px;
+                                    border-top-right-radius: 4px; border-bottom-right-radius: 4px; }}
+#sourceChip[groupPosition="last"] {{ border-top-left-radius: 4px; border-bottom-left-radius: 4px;
+                                   border-top-right-radius: 12px; border-bottom-right-radius: 12px; }}
 #banner {{ background: #3a1d22; border: 1px solid #6b2a33; border-radius: 8px; }}
 #bannerText {{ color: #ffd7dc; }}
 #notice {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 8px; }}
@@ -77,6 +81,7 @@ QPushButton#navDestination:focus {{ border-color: {ACCENT}; }}
 #screenOverlayCaption {{ color: {TEXT}; font-size: 12pt; font-weight: 500; }}
 
 QPushButton {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 12px; padding: 7px 14px; }}
+QPushButton[compactAction="true"] {{ padding: 7px 8px; }}
 QPushButton:hover {{ background: {SURFACE_3}; }}
 QPushButton:pressed {{ background: {BORDER}; }}
 QPushButton:focus {{ border-color: {ACCENT}; }}
@@ -88,7 +93,7 @@ QPushButton#danger {{ background: {DANGER}; border: 1px solid {DANGER}; color: {
 QPushButton#danger:hover {{ background: #ffc8c1; }}
 QPushButton#toggle {{ background: transparent; border: 1px solid {BORDER}; border-radius: 14px; padding: 5px 14px; color: {MUTED}; }}
 QPushButton#toggle:checked {{ background: {SURFACE_2}; color: {TEXT}; border-color: {ACCENT}; }}
-QPushButton[groupPosition="middle"] {{ border-radius: 4px; }}
+QPushButton[groupPosition="middle"], QPushButton#toggle[groupPosition="middle"] {{ border-radius: 4px; }}
 QPushButton[groupPosition="first"], QPushButton#primary[groupPosition="first"],
 QPushButton#danger[groupPosition="first"] {{
     border-top-left-radius: 16px; border-bottom-left-radius: 16px;
@@ -115,13 +120,18 @@ QComboBox, QLineEdit, QSpinBox {{ background: {SURFACE_2}; border: 1px solid {BO
                                   selection-background-color: {SURFACE_3}; }}
 QComboBox:hover, QLineEdit:hover, QSpinBox:hover {{ border-color: {DIM}; }}
 QComboBox:focus, QLineEdit:focus, QSpinBox:focus {{ border-color: {ACCENT}; }}
+QComboBox {{ combobox-popup: 0; }}
+QComboBox[groupPosition="first"] {{ border-top-left-radius: 16px; border-bottom-left-radius: 16px;
+                                   border-top-right-radius: 4px; border-bottom-right-radius: 4px; }}
+QComboBox[groupPosition="last"] {{ border-top-left-radius: 4px; border-bottom-left-radius: 4px;
+                                  border-top-right-radius: 16px; border-bottom-right-radius: 16px; }}
 QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right;
                         width: 25px; border: none; border-radius: 12px; }}
 QComboBox::down-arrow {{ image: url("{ASSET_DIR}/dropdown_arrow.png"); width: 12px; height: 8px; }}
 QComboBox:disabled {{ color: {DIM}; }}
 QComboBox::down-arrow:disabled {{ image: url("{ASSET_DIR}/dropdown_arrow_disabled.png"); }}
 #comboPopup {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 12px; }}
-QComboBox QAbstractItemView {{ background: {SURFACE}; border: none; outline: none; padding: 4px;
+QComboBox QAbstractItemView {{ background: transparent; border: none; outline: none;
                                selection-background-color: {SURFACE_3}; selection-color: {TEXT}; }}
 QMenu {{ background: {SURFACE}; border: 1px solid {BORDER};
                                       outline: none; border-radius: 12px; padding: 4px; selection-background-color: {SURFACE_3};
@@ -154,6 +164,15 @@ QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background: transparen
 QSpinBox::up-arrow {{ image: url("{ASSET_DIR}/stepper_up.png"); width: 10px; height: 6px; }}
 QSpinBox::down-arrow {{ image: url("{ASSET_DIR}/dropdown_arrow.png"); width: 10px; height: 6px; }}
 QSpinBox::up-arrow:disabled, QSpinBox::down-arrow:disabled {{ image: none; }}
+
+#matchTable {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 12px; outline: none;
+                selection-background-color: {SURFACE_3}; selection-color: {TEXT}; }}
+#matchTable QHeaderView {{ background: transparent; }}
+#matchTable QHeaderView::section {{ background: {SURFACE_2}; border: none; padding: 6px 8px; color: {MUTED}; }}
+#matchTable QHeaderView::section:first {{ border-top-left-radius: 10px; }}
+#matchTable QHeaderView::section:last {{ border-top-right-radius: 10px; }}
+#matchTable::item {{ padding: 5px 8px; }}
+#matchTable:focus {{ border-color: {ACCENT}; }}
 
 QPlainTextEdit#log, QPlainTextEdit#report {{ background: #1c1814; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px;
                                             font-family: "Cascadia Mono", "Consolas", monospace; font-size: 9pt; }}

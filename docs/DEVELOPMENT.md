@@ -4,6 +4,18 @@ End users: read the top-level [README.md](../README.md) and the setup guides in 
 for contributors.
 The original research log (how the detector was built and validated) is in [DETECTOR_NOTES.md](DETECTOR_NOTES.md).
 
+## Local Windows executable
+
+With the editable installation in `.venv` and MinGW's `gcc` and `windres` on PATH, run:
+
+```powershell
+.\.venv\Scripts\python.exe packaging\build_release.py --launcher-only --development-launcher --out .
+```
+
+Open `Fortnite Visual Chest Counter.exe` from the checkout. It uses the local virtual environment.
+The updater requires a packaged build and a signed release channel.
+Use `debug-chest-counter.bat` to start the GUI with a console and pass through GUI arguments.
+
 ## Repository layout
 
 ```text

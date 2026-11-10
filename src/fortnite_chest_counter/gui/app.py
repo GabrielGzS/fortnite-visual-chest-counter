@@ -19,19 +19,20 @@ import time
 import traceback
 import uuid
 from collections import deque
+from contextlib import ExitStack
 from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QEasingCurve, QPoint, QRect, QRectF, QSize, Qt, QTimer, QUrl, QUrlQuery, QVariantAnimation
+from PySide6.QtCore import QByteArray, QEasingCurve, QPoint, QRect, QRectF, QSize, Qt, Signal, QTimer, QUrl, QUrlQuery, QVariantAnimation
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPalette, QPixmap, QRegion
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
                                QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
-                               QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QStyledItemDelegate, QVBoxLayout, QWidget)
+                               QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
-from fortnite_chest_counter import diagnostics_cleanup, paths, profiles, settings
+from fortnite_chest_counter import diagnostics_cleanup, discord_summary, match_history, paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -292,6 +293,11 @@ def hline():
     return line
 
 
+def token_odds_text(total, boost):
+    probability = -math.expm1(total * math.log1p(-boost / PIRATE_TOKEN_RATE)) if total else 0
+    return f"{probability:.6%}"
+
+
 def rounded_region(rect, radius):
     shape = QPainterPath()
     shape.addRoundedRect(QRectF(rect), radius, radius)
@@ -505,6 +511,19 @@ class CountCard(QFrame):
 
 
 class MaterialMenuItems(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        active = QStyle.State_Selected | QStyle.State_MouseOver
+        if option.state & active:
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(theme.SURFACE_3))
+            painter.drawRoundedRect(QRectF(option.rect.adjusted(2, 2, -2, -2)), 10, 10)
+            painter.restore()
+            option = QStyleOptionViewItem(option)
+            option.state &= ~active
+        super().paint(painter, option, index)
+
     def sizeHint(self, option, index):
         size = super().sizeHint(option, index)
         size.setHeight(max(size.height(), 48))
@@ -518,11 +537,18 @@ class MaterialComboBox(QComboBox):
         super().__init__()
         self.setItemDelegate(MaterialMenuItems(self))
         self._popup_window = None
+        self._popup_origin = QPoint()
         self._popup_motion = QVariantAnimation(self)
-        self._popup_motion.setDuration(130)
+        self._popup_motion.setDuration(180)
         self._popup_motion.setStartValue(0.2)
         self._popup_motion.setEndValue(1.0)
         self._popup_motion.setEasingCurve(QEasingCurve.OutCubic)
+        self._popup_motion.valueChanged.connect(self._show_progress)
+
+    def _show_progress(self, amount):
+        if self._popup_window is not None:
+            self._popup_window.setWindowOpacity(amount)
+            self._popup_window.move(self._popup_origin + QPoint(0, round(-6 * (1 - amount))))
 
     def showPopup(self):
         if not self.count():
@@ -536,13 +562,29 @@ class MaterialComboBox(QComboBox):
             self._popup_window = popup
             popup.setObjectName("comboPopup")
             popup.setFrameShape(QFrame.NoFrame)
-            self._popup_motion.valueChanged.connect(popup.setWindowOpacity)
+            if popup.layout() is not None:
+                popup.layout().setContentsMargins(5, 5, 5, 5)
         animate = theme.animations_enabled()
         popup.setWindowOpacity(0.2 if animate else 1.0)
         super().showPopup()
+        screen = popup.screen()
+        if screen is not None and popup.layout() is not None:
+            margins = popup.layout().contentsMargins()
+            available = screen.availableGeometry()
+            height = min(popup.height() + margins.top() + margins.bottom(), available.height())
+            popup.resize(popup.width(), height)
+            if popup.geometry().bottom() > available.bottom():
+                popup.move(popup.x(), available.bottom() - popup.height() + 1)
         popup.setMask(rounded_region(popup.rect(), 12))
+        self._popup_origin = popup.pos()
+        if (screen is not None and popup.y() >= self.mapToGlobal(QPoint(0, self.height())).y() - 2
+                and popup.geometry().bottom() + 6 <= screen.availableGeometry().bottom()):
+            self._popup_origin += QPoint(0, 6)
         if animate:
+            self._show_progress(0.2)
             self._popup_motion.start()
+        else:
+            popup.move(self._popup_origin)
 
     def hidePopup(self):
         self._popup_motion.stop()
@@ -567,8 +609,17 @@ class ScreenOverlayCard(QFrame):
         self.caption = label("", "screenOverlayCaption", wrap=True)
         self.caption.setTextFormat(Qt.PlainText)
         self.caption.setMaximumWidth(720)
-        layout.addWidget(self.caption, 0, Qt.AlignLeft)
-        layout.addStretch(1)
+        layout.addWidget(self.caption, 1)
+        layout.addStretch()
+
+    def set_text(self, text):
+        if self.caption.text() == text:
+            return
+        if self._floating:
+            metrics = self.caption.fontMetrics()
+            width = max((metrics.horizontalAdvance(line) for line in text.splitlines()), default=0)
+            self.caption.setMinimumWidth(min(self.caption.maximumWidth(), width + 2))
+        self.caption.setText(text)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -628,9 +679,8 @@ class CountsDialog(ThemedDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(12)
-        layout.addWidget(label("Set the counter", "cardTitle"))
-        layout.addWidget(label("Use this to start from the chests you already opened before using the counter, or to "
-                               "correct a mistake. New chests are added on top.", "hint", wrap=True))
+        layout.addWidget(label("Edit chest counts", "cardTitle"))
+        layout.addWidget(label("Enter the total opened and how many were confirmed.", "hint", wrap=True))
         grid = QGridLayout()
         grid.setHorizontalSpacing(14)
         grid.setVerticalSpacing(8)
@@ -642,13 +692,13 @@ class CountsDialog(ThemedDialog):
             spin.setGroupSeparatorShown(True)
             spin.setValue(value)
             spin.setMinimumWidth(140)
-        grid.addWidget(label("Chests opened (APPROX, the total)"), 0, 0)
+        grid.addWidget(label("Total chests"), 0, 0)
         grid.addWidget(self.approx, 0, 1)
-        grid.addWidget(label("Confirmed chests (CERTAIN)"), 1, 0)
+        grid.addWidget(label("Confirmed chests"), 1, 0)
         grid.addWidget(self.certain, 1, 1)
         layout.addLayout(grid)
-        layout.addWidget(label("CERTAIN is part of APPROX, so it cannot be higher. Chests opened before the counter ran "
-                               "were not seen by it: leave CERTAIN at 0 for those.", "hint", wrap=True))
+        self.estimated = label("", "hint")
+        layout.addWidget(self.estimated)
         self.problem = label("", "hint")
         self.problem.setStyleSheet(f"color: {theme.REJECT};")
         layout.addWidget(self.problem)
@@ -659,10 +709,12 @@ class CountsDialog(ThemedDialog):
         layout.addLayout(actions)
         self.approx.valueChanged.connect(self._check)
         self.certain.valueChanged.connect(self._check)
+        self._check()
 
     def _check(self):
         bad = self.certain.value() > self.approx.value()
-        self.problem.setText("CERTAIN cannot be higher than APPROX." if bad else "")
+        self.estimated.setText(f"Estimated openings: {fmt(max(0, self.approx.value() - self.certain.value()))}")
+        self.problem.setText("Confirmed chests cannot exceed the total." if bad else "")
         return not bad
 
     def _accept(self):
@@ -954,31 +1006,44 @@ class ReviewDialog(ThemedDialog):
 
 
 class AnimatedPages(QStackedWidget):
-    """Move the incoming page a short distance in the direction of the rail."""
+    """Keep the incoming layout fixed and fade out a snapshot of the previous page."""
 
     def __init__(self):
         super().__init__()
+        self._outgoing = QLabel(self)
+        self._outgoing.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._outgoing.hide()
+        self._fade = QGraphicsOpacityEffect(self._outgoing)
+        self._outgoing.setGraphicsEffect(self._fade)
         self._entrance = QVariantAnimation(self)
         self._entrance.setDuration(160)
+        self._entrance.setStartValue(1.0)
+        self._entrance.setEndValue(0.0)
         self._entrance.setEasingCurve(QEasingCurve.OutCubic)
-        self._entrance.valueChanged.connect(self._position_page)
+        self._entrance.valueChanged.connect(lambda value: self._fade.setOpacity(float(value)))
+        self._entrance.finished.connect(self._clear_transition)
+
+    def _clear_transition(self):
+        self._outgoing.hide()
+        self._outgoing.clear()
 
     def setCurrentIndex(self, index):
         previous = self.currentIndex()
         if index == previous or not 0 <= index < self.count():
             return
         self._entrance.stop()
-        self._position_page(0)
+        self._clear_transition()
+        current = self.currentWidget()
+        if current is not None and self.isVisible() and theme.animations_enabled():
+            self._outgoing.setGeometry(current.geometry())
+            self._outgoing.setPixmap(current.grab())
+            self._fade.setOpacity(1.0)
+            self._outgoing.raise_()
+            self._outgoing.show()
         super().setCurrentIndex(index)
-        if self.isVisible() and theme.animations_enabled():
-            self._entrance.setStartValue(12 if index > previous else -12)
-            self._entrance.setEndValue(0)
+        if self._outgoing.isVisible():
+            self._outgoing.raise_()
             self._entrance.start()
-
-    def _position_page(self, offset):
-        page = self.currentWidget()
-        if page is not None:
-            page.move(self.contentsRect().topLeft() + QPoint(0, offset))
 
 
 class Dashboard(QWidget):
@@ -999,9 +1064,8 @@ class Dashboard(QWidget):
         self.show_capture = button("Capture settings", "toggle")
         self.show_capture.setCheckable(True)
         self.start = button("Start counting", "primary", on_click=win.toggle_counting)
-        for action in (self.show_capture, self.start):
-            action.setMinimumHeight(36)
-        top.addLayout(connected_buttons(self.show_capture, self.start))
+        self.start.setMinimumHeight(36)
+        top.addWidget(self.start)
         layout.insertLayout(0, top)
 
         # error banner
@@ -1033,13 +1097,18 @@ class Dashboard(QWidget):
         source_row.setSpacing(8)
         source_row.addWidget(self.pill, 0, Qt.AlignVCenter)
         self.source_chips = []
-        for width in (140, 240, 220):
+        chips = QHBoxLayout()
+        chips.setSpacing(2)
+        for width, position in ((140, "first"), (240, "middle"), (220, "last")):
             chip = label("", "sourceChip")
+            chip.setProperty("groupPosition", position)
+            chip.setMinimumHeight(28)
             chip.setTextFormat(Qt.PlainText)
             chip.setMaximumWidth(width)
             chip.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
-            source_row.addWidget(chip, 0, Qt.AlignVCenter)
+            chips.addWidget(chip, 0, Qt.AlignVCenter)
             self.source_chips.append(chip)
+        source_row.addLayout(chips)
         source_row.addStretch(1)
         sources_layout.addLayout(source_row)
         self.metrics = label("", "metrics", wrap=True)
@@ -1049,22 +1118,30 @@ class Dashboard(QWidget):
         self.secondary_status.hide()
         sources_layout.addWidget(self.secondary_status)
         layout.addLayout(sources_layout)
-        capture_index = layout.count()
 
         board = QHBoxLayout()
         board.setSpacing(14)
         stage, stage_layout = card()
         stage.setObjectName("chestStage")
-        stage_layout.addStretch(1)
+        recent_card, recent_layout = card("Recent matches")
+        self.recent_matches = label("No matches saved yet.", "hint", wrap=True)
+        self.recent_matches.setTextFormat(Qt.PlainText)
+        recent_layout.addWidget(self.recent_matches)
+        recent_layout.addStretch(1)
+        recent_layout.addWidget(button("View history", on_click=lambda: win.go_to(4)), 0, Qt.AlignLeft)
+        board.addWidget(recent_card, 1)
+        stage_content = stage_layout
+        stage_content.setSpacing(6)
+        stage_content.addStretch(1)
         self.chest = ChestIllustration()
         self._shown_chest = None
-        stage_layout.addWidget(self.chest)
+        stage_content.addWidget(self.chest)
         total_title = label("TOTAL CHESTS", "countLabel")
-        stage_layout.addWidget(total_title, 0, Qt.AlignHCenter)
+        stage_content.addWidget(total_title, 0, Qt.AlignHCenter)
         self.total = label("0", "stageTotal")
-        stage_layout.addWidget(self.total, 0, Qt.AlignHCenter)
+        stage_content.addWidget(self.total, 0, Qt.AlignHCenter)
         odds_title = label("PIRATE TOKEN CHANCE", "countLabel")
-        stage_layout.addWidget(odds_title, 0, Qt.AlignHCenter)
+        stage_content.addWidget(odds_title, 0, Qt.AlignHCenter)
         token_row = QHBoxLayout()
         self.token_mode = MaterialComboBox()
         self.token_mode.addItems(["Solo", "Duo", "Trio", "Squad"])
@@ -1077,14 +1154,13 @@ class Dashboard(QWidget):
         self.token_odds.setToolTip("Estimated chance that at least one chest in the shown total would drop a Pirate Token. "
                                    "The model assumes independent rolls at 1 in 137,500 per chest before the selected boost. "
                                    "The calculation uses the TOTAL card.")
-        stage_layout.addWidget(self.token_odds, 0, Qt.AlignHCenter)
+        stage_content.addWidget(self.token_odds, 0, Qt.AlignHCenter)
         token_row.addStretch(1)
-        token_row.addWidget(self.token_mode)
-        token_row.addWidget(self.token_boost)
+        token_row.addLayout(connected_buttons(self.token_mode, self.token_boost))
         token_row.addStretch(1)
-        stage_layout.addLayout(token_row)
-        stage_layout.addStretch(1)
-        board.addWidget(stage, 5)
+        stage_content.addStretch(1)
+        stage_content.addLayout(token_row)
+        board.addWidget(stage, 1)
         self.token_boost.currentIndexChanged.connect(lambda _: self.update_token_odds())
 
         rail, rail_layout = card()
@@ -1096,7 +1172,6 @@ class Dashboard(QWidget):
         counts.addWidget(self.certain, 1)
         counts.addWidget(self.approx, 1)
         rail_layout.addLayout(counts)
-        rail_layout.addWidget(hline())
         rail_layout.addWidget(label("Recent openings", "cardTitle"))
         self.recent = QListWidget()
         self.recent.setObjectName("recentOpenings")
@@ -1106,12 +1181,15 @@ class Dashboard(QWidget):
         rail_layout.addWidget(self.recent, 1)
         self.clear_recent()
         count_actions = connected_buttons(
-            button("Edit counts...", on_click=win.edit_counts),
-            button("Reset...", tip="Set all counts to 0", on_click=win.reset_counts),
+            button("Edit", tip="Edit the counts", on_click=win.edit_counts),
+            button("Reset", tip="Set all counts to 0", on_click=win.reset_counts),
+            button("Finish match", on_click=win.finish_match),
         )
+        for index in range(count_actions.count()):
+            count_actions.itemAt(index).widget().setProperty("compactAction", True)
         count_actions.addStretch(1)
         rail_layout.addLayout(count_actions)
-        board.addWidget(rail, 4)
+        board.addWidget(rail, 1)
         layout.addLayout(board)
         self.update_token_odds()
         overlay_card, overlay_layout = card()
@@ -1239,45 +1317,48 @@ class Dashboard(QWidget):
         # optional panels
         row = QHBoxLayout()
         box.hide()
-        fade = QGraphicsOpacityEffect(box)
-        fade.setEnabled(False)
-        box.setGraphicsEffect(fade)
-        entrance = QVariantAnimation(box)
-        entrance.setDuration(150)
-        entrance.setStartValue(0.4)
-        entrance.setEndValue(1.0)
-        entrance.setEasingCurve(QEasingCurve.OutCubic)
-        entrance.valueChanged.connect(fade.setOpacity)
-        entrance.finished.connect(lambda: fade.setEnabled(False))
+        scroll = self.findChild(QScrollArea)
+        scrollbar = scroll.verticalScrollBar()
+        reveal = QVariantAnimation(box)
+        reveal.setDuration(200)
+        reveal.setEasingCurve(QEasingCurve.OutCubic)
+        reveal.valueChanged.connect(lambda value: scrollbar.setValue(int(value)))
+
+        def reveal_capture():
+            if not box.isVisible():
+                return
+            start = scrollbar.value()
+            scroll.ensureWidgetVisible(self.profile)
+            end = scrollbar.value()
+            if start != end and theme.animations_enabled():
+                scrollbar.setValue(start)
+                reveal.setStartValue(start)
+                reveal.setEndValue(end)
+                reveal.start()
 
         def show_capture(opened):
-            entrance.stop()
-            animate = opened and self.isVisible() and theme.animations_enabled()
-            fade.setOpacity(0.4 if animate else 1.0)
-            fade.setEnabled(animate)
+            reveal.stop()
             box.setVisible(opened)
-            if animate:
-                entrance.start()
+            if opened and self.isVisible():
+                QTimer.singleShot(0, reveal_capture)
 
         self.show_capture.toggled.connect(show_capture)
         self.show_log = button("Activity", "toggle", tip="What the counter sees and decides, live")
         self.show_log.setCheckable(True)
         self.show_preview = button("Live preview", "toggle", tip="The video the counter is analysing")
         self.show_preview.setCheckable(True)
-        row.addLayout(connected_buttons(self.show_log, self.show_preview))
+        row.addLayout(connected_buttons(self.show_capture, self.show_log, self.show_preview))
         row.addStretch(1)
         self.detail = MaterialComboBox()
         self.detail.addItem("Normal detail", "normal")
         self.detail.addItem("Debug detail", "debug")
         self.detail.setToolTip("Debug adds every candidate, the full reason for each decision and status lines")
-        row.addWidget(self.detail)
         self.clear = button("Clear", on_click=win.clear_log)
-        row.addWidget(self.clear)
         self.open_logs = button("Logs folder", tip="Session logs (send these when reporting a problem)",
                                 on_click=win.open_logs)
-        row.addWidget(self.open_logs)
+        row.addLayout(connected_buttons(self.detail, self.clear, self.open_logs))
         layout.addLayout(row)
-        layout.insertWidget(capture_index, box)
+        layout.addWidget(box)
 
         self.split = QSplitter(Qt.Horizontal)
         self.log = QPlainTextEdit()
@@ -1303,6 +1384,11 @@ class Dashboard(QWidget):
         self.show_log.toggled.connect(self._panels)
         self.show_preview.toggled.connect(self._panels)
         self.detail.currentIndexChanged.connect(lambda _: win.render_log())
+
+    def set_recent_matches(self, matches):
+        lines = [f"{match.finished_at} · {match.mode}\n{match.total:,} chests"
+                 for match in reversed(matches[-3:])]
+        self.recent_matches.setText("\n\n".join(lines) or "No matches saved yet.")
 
     def update_source_summary(self):
         primary = self.source.currentText() or "Scanning..."
@@ -1395,8 +1481,7 @@ class Dashboard(QWidget):
     def update_token_odds(self):
         total = max(0, self.win.counts[1])
         boost = self.token_boost.currentData()
-        probability = -math.expm1(total * math.log1p(-boost / PIRATE_TOKEN_RATE)) if total else 0
-        chance = f"{probability:.6%}"
+        chance = token_odds_text(total, boost)
         self.token_chance = chance
         self.token_odds.setText(chance)
         self.refresh_screen_overlay()
@@ -1435,7 +1520,8 @@ class Dashboard(QWidget):
             total_text += " #"
         total_text = total_text.replace("#", settings.format_count(total, display["use_thousands_separator"]))
         chest_text = C.overlay_text(display, {"certain": certain, "approximate": approx})
-        lines = [f"{chest_text} · {total_text}"]
+        separator = "\n" if C.display_mode(display) == "stacked" else " • "
+        lines = [f"{chest_text}{separator}{total_text}"]
         if display["screen_show_token"]:
             wording = display["screen_token_text"]
             if "#" not in wording:
@@ -1452,12 +1538,11 @@ class Dashboard(QWidget):
         if self.screen_overlay_display is None:
             return
         text = self.screen_overlay_text(self.screen_overlay_display)
-        if self.viewers.text() != text:
-            self.viewers.setText(text)
+        self.overlay_preview.set_text(text)
         if self.screen_overlay is None or not page.show_screen_overlay.isChecked():
             return
         if text != self.screen_overlay.caption.text():
-            self.screen_overlay.caption.setText(text)
+            self.screen_overlay.set_text(text)
             self.screen_overlay.adjustSize()
             self.position_screen_overlay()
 
@@ -1523,8 +1608,12 @@ class OverlayPage(QWidget):
         self.modes = QButtonGroup(self)
         self.mode_buttons = {}
         self.mode_examples = {}
-        choices = (("stacked", "Both counts on two lines"), ("inline", "Both counts on one line"),
+        choices = (("stacked", "Three lines with total"), ("inline", "Counts on one line"),
                    ("approx", "Estimated openings only"), ("certain", "Confirmed openings only"))
+        examples_layout = QGridLayout()
+        examples_layout.setHorizontalSpacing(16)
+        examples_layout.setVerticalSpacing(8)
+        examples_layout.setColumnStretch(1, 1)
         for i, (mode, caption) in enumerate(choices):
             radio = QRadioButton(caption)
             self.modes.addButton(radio, i)
@@ -1532,13 +1621,11 @@ class OverlayPage(QWidget):
             example = label("", "hint", wrap=True)
             example.setTextFormat(Qt.PlainText)
             self.mode_examples[mode] = example
-            row = QHBoxLayout()
-            row.addWidget(radio)
-            row.addWidget(example, 1)
-            box_layout.addLayout(row)
+            examples_layout.addWidget(radio, i, 0, Qt.AlignTop)
+            examples_layout.addWidget(example, i, 1)
             radio.toggled.connect(self._changed)
-        box_layout.addWidget(label("Examples use the combined on-screen counts. The OBS text file still uses the primary source.",
-                                   "hint", wrap=True))
+        box_layout.addLayout(examples_layout)
+        box_layout.addWidget(label("The selected example matches the on-screen preview. OBS uses the primary source and shows only the selected counts.", "hint", wrap=True))
         self.show_token = QCheckBox("Show Pirate Token odds on screen")
         self.show_types = QCheckBox("Show chest types on screen")
         for toggle in (self.show_token, self.show_types):
@@ -1546,7 +1633,7 @@ class OverlayPage(QWidget):
             toggle.toggled.connect(self._changed)
         layout.addWidget(box)
 
-        box, box_layout = card("Wording", "Put # where the number goes, e.g.  Chests opened: #   or   Chest Hunt: #/500")
+        box, box_layout = card("Wording", "Use # for a number, or #C and #A for the combined line.")
         form = QGridLayout()
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(8)
@@ -1558,24 +1645,28 @@ class OverlayPage(QWidget):
         self.total_text.setToolTip("Use # for the total shown next to the on-screen chest counts.")
         self.token_text = QLineEdit()
         self.token_text.setToolTip("Use # for the Pirate Token probability, including the percent sign.")
-        self.line_label = label("One line")
+        self.line_label = label("Confirmed and estimated")
         self.line_text = QLineEdit()
         self.line_text.setToolTip("#C = confirmed number, #A = estimated openings, e.g.  #C confirmed - #A estimated")
         for row, (lab, edit) in enumerate(((self.certain_label, self.certain_text), (self.approx_label, self.approx_text),
-                                           (self.line_label, self.line_text), (label("On-screen total"), self.total_text),
-                                           (label("Pirate Token"), self.token_text))):
+                                           (self.line_label, self.line_text))):
             form.addWidget(lab, row, 0)
             form.addWidget(edit, row, 1)
             edit.textChanged.connect(self._changed)
         form.setColumnStretch(1, 1)
+        self.line_hint = label("#C = confirmed openings · #A = estimated openings", "hint", wrap=True)
+        form.addWidget(self.line_hint, 3, 1)
+        form.addWidget(label("On-screen labels", "cardTitle"), 4, 0, 1, 2)
+        for row, (name, edit) in enumerate((("Total", self.total_text), ("Pirate Token", self.token_text)), 5):
+            form.addWidget(label(name), row, 0)
+            form.addWidget(edit, row, 1)
+            edit.textChanged.connect(self._changed)
         box_layout.addLayout(form)
-        self.line_hint = label("For one line: #C = confirmed openings, #A = estimated openings.", "hint")
-        box_layout.addWidget(self.line_hint)
         self.thousands = QCheckBox("Thousands separator (1,234 instead of 1234)")
         self.thousands.toggled.connect(self._changed)
         box_layout.addWidget(self.thousands)
         row = QHBoxLayout()
-        row.addWidget(button("Original wording", "link", on_click=self._defaults))
+        row.addWidget(button("Restore wording defaults", on_click=self._defaults))
         row.addStretch(1)
         box_layout.addLayout(row)
         layout.addWidget(box)
@@ -1803,10 +1894,6 @@ class OverlayPage(QWidget):
                 texts["approx_text"] = C.text_from_hash(self.approx_text.text())
         return {**C.MODE_SETTINGS[mode], **texts}
 
-    def _state(self):
-        certain, total = self.win.counts
-        return {"certain": certain, "approximate": max(0, total - certain)}
-
     def _changed(self):
         if self._loading:
             return
@@ -1823,16 +1910,19 @@ class OverlayPage(QWidget):
 
     def refresh_preview(self):
         display = {**self.display, **self.changes()}
-        self.preview.caption.setText(self.win.dashboard.screen_overlay_text(display))
+        render = self.win.dashboard.screen_overlay_text
+        preview_text = render(display)
+        self.preview.set_text(preview_text)
         examples = dict(display)
         for key, field, convert in (("certain_text", self.certain_text, C.text_from_hash),
                                     ("approx_text", self.approx_text, C.text_from_hash),
                                     ("combined_status_format", self.line_text, C.line_from_markers)):
             if field.text().strip():
                 examples[key] = convert(field.text().strip())
-        state = self._state()
-        for mode, label_ in self.mode_examples.items():
-            label_.setText(C.overlay_text({**examples, **C.MODE_SETTINGS[mode]}, state).replace("\n", "  /  "))
+        examples.update(screen_show_token=False, screen_show_types=False)
+        selected_mode = C.display_mode(display)
+        for mode, example in self.mode_examples.items():
+            example.setText(preview_text if mode == selected_mode else render({**examples, **C.MODE_SETTINGS[mode]}))
 
     def _defaults(self):
         d = settings.DEFAULTS["display"]
@@ -2054,6 +2144,246 @@ class SettingsPage(QWidget):
         open_path(path)
 
 
+class GroupPage(QWidget):
+    """Local match history, profile ranking and shareable summaries."""
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.matches = []
+        layout = page_layout(self, "Group", "Save finished matches and compare totals across local profiles.")
+        history, history_layout = card("Match history", "Stop counting, then finish the match to save the combined totals. "
+                                      "Use Reset on the Dashboard before starting the next match.")
+        row = QHBoxLayout()
+        row.addWidget(button("Finish match...", "primary", on_click=win.finish_match))
+        self.edit = button("Edit...", on_click=self.edit_match)
+        self.delete = button("Delete...", on_click=self.delete_match)
+        for action in (self.edit, self.delete):
+            action.setEnabled(False)
+        row.addLayout(connected_buttons(self.edit, self.delete))
+        row.addStretch(1)
+        history_layout.addLayout(row)
+        self.stats = label("", "hint", wrap=True)
+        history_layout.addWidget(self.stats)
+        self.history = self._table(("Finished", "Profile", "Mode", "Certain", "Approx", "Total", "Token chance"))
+        self.history.currentItemChanged.connect(self._selection_changed)
+        history_layout.addWidget(self.history)
+        self.feedback = label("", "hint", wrap=True)
+        history_layout.addWidget(self.feedback)
+        layout.addWidget(history)
+
+        ranks, ranks_layout = card("Local leaderboard", "Profiles ranked by total chests across saved matches.")
+        self.ranks = self._table(("Rank", "Profile", "Matches", "Total", "Certain"))
+        ranks_layout.addWidget(self.ranks)
+        layout.addWidget(ranks)
+        layout.addStretch(1)
+
+    @staticmethod
+    def _table(headers):
+        table = QTreeWidget()
+        table.setObjectName("matchTable")
+        table.setHeaderLabels(headers)
+        table.setRootIsDecorated(False)
+        table.setUniformRowHeights(True)
+        table.setMinimumHeight(155)
+        return table
+
+    def load(self):
+        self.feedback.clear()
+        self.history.clear()
+        self.ranks.clear()
+        try:
+            self.matches = match_history.read_history(self.win.match_history_path())
+        except (OSError, ValueError) as error:
+            self.matches = []
+            self.win.dashboard.set_recent_matches(self.matches)
+            self.stats.setText(f"Could not open match history. {error}")
+            return
+        self.win.dashboard.set_recent_matches(self.matches)
+        if not self.matches:
+            self.stats.setText("No matches saved yet.")
+            return
+        totals = [match.total for match in self.matches]
+        self.stats.setText(f"{len(totals):,} matches · {sum(totals):,} chests · "
+                           f"Best {max(totals):,} · Average {sum(totals) / len(totals):.1f}")
+        for index in reversed(range(len(self.matches))):
+            match = self.matches[index]
+            row = QTreeWidgetItem((match.finished_at, match.profile, match.mode, fmt(match.certain),
+                                   fmt(match.estimated), fmt(match.total), match.token_chance))
+            row.setData(0, Qt.UserRole, index)
+            self.history.addTopLevelItem(row)
+        self.history.setCurrentItem(self.history.topLevelItem(0))
+        for position, (profile, matches, total, certain) in enumerate(match_history.leaderboard(self.matches), 1):
+            self.ranks.addTopLevelItem(QTreeWidgetItem((str(position), profile, fmt(matches), fmt(total), fmt(certain))))
+
+    def _selection_changed(self, item, previous):
+        for action in (self.edit, self.delete):
+            action.setEnabled(item is not None)
+
+    def edit_match(self):
+        current = self.history.currentItem()
+        if current is None:
+            return
+        match = self.matches[current.data(0, Qt.UserRole)]
+        dialog = CountsDialog(self, match.certain, match.total)
+        dialog.setWindowTitle("Edit saved match")
+        if dialog.exec() != QDialog.Accepted:
+            return
+        certain, total = dialog.certain.value(), dialog.approx.value()
+        try:
+            saved = match_history.edit_match(self.win.match_history_path(), match.snapshot, certain, total,
+                                             token_odds_text(total, match.boost))
+        except (OSError, ValueError) as error:
+            show_error(self, f"Could not edit the match. {error}")
+            return
+        self.load()
+        if saved:
+            self.feedback.setText("Match updated.")
+
+    def delete_match(self):
+        current = self.history.currentItem()
+        if current is None:
+            return
+        match = self.matches[current.data(0, Qt.UserRole)]
+        if not ask(self, "Delete saved match?", "Remove this match from history and the local leaderboard?",
+                   "Delete", danger=True):
+            return
+        try:
+            removed = match_history.delete_match(self.win.match_history_path(), match.snapshot)
+        except (OSError, ValueError) as error:
+            show_error(self, f"Could not delete the match. {error}")
+            return
+        self.load()
+        if removed:
+            self.feedback.setText("Match deleted.")
+
+class DiscordPage(QWidget):
+    send_result = Signal(str)
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self._sending = False
+        self.send_result.connect(self._sent)
+        layout = page_layout(self, "Discord", "Send a saved match summary to a channel using your bot.")
+        setup, setup_layout = card("Bot setup", "Invite your bot to the server with permission to send messages. "
+                                   "The channel ID and token are stored in Windows Credential Manager.")
+        form = QGridLayout()
+        self.channel = QLineEdit()
+        self.channel.setPlaceholderText("Discord channel ID")
+        self.token = QLineEdit()
+        self.token.setEchoMode(QLineEdit.Password)
+        self.token.setPlaceholderText("Bot token")
+        form.addWidget(label("Channel ID"), 0, 0)
+        form.addWidget(self.channel, 0, 1)
+        form.addWidget(label("Bot token"), 1, 0)
+        form.addWidget(self.token, 1, 1)
+        setup_layout.addLayout(form)
+        row = connected_buttons(button("Save setup", on_click=self.save_setup),
+                                button("Forget setup", on_click=self.forget_setup))
+        row.addStretch(1)
+        setup_layout.addLayout(row)
+        self.setup_status = label("", "hint", wrap=True)
+        setup_layout.addWidget(self.setup_status)
+        layout.addWidget(setup)
+
+        summary, summary_layout = card("Match summary")
+        self.match = MaterialComboBox()
+        self.match.setAccessibleName("Saved match")
+        self.match.currentIndexChanged.connect(self._show_summary)
+        summary_layout.addWidget(self.match)
+        self.preview = QPlainTextEdit()
+        self.preview.setObjectName("report")
+        self.preview.setReadOnly(True)
+        self.preview.setMinimumHeight(110)
+        summary_layout.addWidget(self.preview)
+        self.send = button("Send summary...", "primary", on_click=self.send_summary)
+        self.send.setEnabled(False)
+        summary_layout.addWidget(self.send, 0, Qt.AlignLeft)
+        self.status = label("", "hint", wrap=True)
+        summary_layout.addWidget(self.status)
+        layout.addWidget(summary)
+        layout.addStretch(1)
+
+    def load(self):
+        self.token.clear()
+        try:
+            config = discord_summary.load()
+            self.channel.setText(config.channel if config else "")
+            self.setup_status.setText("Bot setup saved." if config else "No bot configured.")
+        except (OSError, ValueError) as error:
+            self.setup_status.setText(str(error))
+        self.match.clear()
+        try:
+            for match in reversed(match_history.read_history(self.win.match_history_path())):
+                self.match.addItem(f"{match.finished_at} · {match.profile} · {match.mode}", match)
+        except (OSError, ValueError) as error:
+            self.status.setText(str(error))
+        self._show_summary()
+
+    def _show_summary(self, *_):
+        match = self.match.currentData()
+        self.preview.setPlainText(match.summary() if match else "Finish a match to see a summary here.")
+        self.send.setEnabled(match is not None and not self._sending)
+
+    def save_setup(self):
+        try:
+            stored = discord_summary.load() if not self.token.text().strip() else None
+            token = self.token.text().strip() or (stored.token if stored else "")
+            discord_summary.save(discord_summary.BotSettings(self.channel.text().strip(), token))
+        except (OSError, ValueError) as error:
+            self.setup_status.setText(str(error))
+            return
+        self.token.clear()
+        self.setup_status.setText("Bot setup saved.")
+
+    def forget_setup(self):
+        if not ask(self, "Forget Discord setup?", "Remove the saved channel and bot token from this PC?",
+                   "Forget", danger=True):
+            return
+        try:
+            discord_summary.forget()
+        except OSError as error:
+            self.setup_status.setText(str(error))
+            return
+        self.channel.clear()
+        self.token.clear()
+        self.setup_status.setText("Bot setup removed.")
+
+    def send_summary(self):
+        match = self.match.currentData()
+        if match is None or self._sending:
+            return
+        try:
+            config = discord_summary.load()
+        except (OSError, ValueError) as error:
+            self.status.setText(str(error))
+            return
+        if config is None or self.channel.text().strip() != config.channel or self.token.text():
+            self.status.setText("Save the bot setup before sending a summary.")
+            return
+        if not ask(self, "Send match summary?", f"Send this summary to Discord channel {config.channel}?", "Send"):
+            return
+        self._sending = True
+        self.send.setEnabled(False)
+        self.status.setText("Sending to Discord...")
+
+        def deliver():
+            try:
+                discord_summary.send(config, match.summary())
+                result = "Summary sent."
+            except (OSError, ValueError) as error:
+                result = str(error)
+            self.send_result.emit(result)
+
+        threading.Thread(target=deliver, daemon=True).start()
+
+    def _sent(self, message):
+        self._sending = False
+        self.send.setEnabled(self.match.currentData() is not None)
+        self.status.setText(message)
+
+
 class HelpPage(QWidget):
     def __init__(self, win):
         super().__init__()
@@ -2254,9 +2584,10 @@ class UpdateDialog(ThemedDialog):
 def navigation_icon(name, color):
     icon = QPixmap(str(ASSETS / f"nav_{name}.png"))
     if not icon.isNull():
-        with QPainter(icon) as painter:
-            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-            painter.fillRect(icon.rect(), QColor(color))
+        if name != "discord":  # Preserve the official white Discord symbol.
+            with QPainter(icon) as painter:
+                painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+                painter.fillRect(icon.rect(), QColor(color))
         icon.setDevicePixelRatio(2)
     return icon
 
@@ -2395,7 +2726,9 @@ class MainWindow(QMainWindow):
         self.overlay = OverlayPage(self)
         self.settings_page = SettingsPage(self)
         self.help = HelpPage(self)
-        for page in (self.dashboard, self.overlay, self.settings_page, self.help):
+        self.group = GroupPage(self)
+        self.discord = DiscordPage(self)
+        for page in (self.dashboard, self.overlay, self.settings_page, self.help, self.group, self.discord):
             self.pages.addWidget(page)
         outer.addWidget(self._navigation_rail())
         content = QVBoxLayout()
@@ -2423,6 +2756,7 @@ class MainWindow(QMainWindow):
         rec.currentIndexChanged.connect(lambda _: self.recording_changed())
         self.update_recording_ui()
         self.dashboard.reload_screen_overlay()
+        self.group.load()
         self.refresh_sources()
         cfg, warnings = load_cfg()
         for warning in warnings:
@@ -2456,8 +2790,9 @@ class MainWindow(QMainWindow):
         column.setContentsMargins(0, 44, 0, 12)
         column.setSpacing(4)
         self.destinations = QButtonGroup(rail)
-        names = (("dashboard", "Dashboard"), ("overlay", "Overlay"), ("settings", "Settings"), ("help", "Help"))
-        for index, (icon, name) in enumerate(names):
+        destinations = ((0, "dashboard", "Dashboard"), (1, "overlay", "Overlay"), (4, "group", "Group"),
+                        (5, "discord", "Discord"), (2, "settings", "Settings"), (3, "help", "Help"))
+        for index, icon, name in destinations:
             destination = NavigationDestination(icon, name)
             self.destinations.addButton(destination, index)
             column.addWidget(destination, 0, Qt.AlignHCenter)
@@ -2479,6 +2814,10 @@ class MainWindow(QMainWindow):
             self.overlay.load()
         elif index == 2:
             self.settings_page.load()
+        elif self.pages.currentWidget() is self.group:
+            self.group.load()
+        elif self.pages.currentWidget() is self.discord:
+            self.discord.load()
 
     # ---- sources
     def refresh_sources(self):
@@ -3415,12 +3754,57 @@ class MainWindow(QMainWindow):
             return
         self._set(dialog.certain.value(), dialog.approx.value(), "set_count")
 
+    @staticmethod
+    def match_history_path():
+        cfg, _ = load_cfg()
+        return Path(cfg["profile"]["state_base"]).parent / "match_history.json"
+
+    def finish_match(self):
+        cfg, _ = load_cfg()
+        if not cfg["state"]["persist"]:
+            show_error(self, "Enable saving counter state before recording matches.")
+            return
+        primary = Path(cfg["state"]["path"])
+        state_paths = (primary, profiles.secondary_state_path(primary)) if self.secondary_selected else (primary,)
+        if self.workers_active() or any(C.counter_is_running(path) for path in state_paths):
+            show_error(self, "Stop counting to let both sources finish, then save the match.")
+            return
+        if not ask(self, "Finish match?", "Save the current combined totals to Group? "
+                   "Use Reset on the Dashboard before starting the next match.", "Save match"):
+            return
+        try:
+            with ExitStack() as guards:
+                for path in state_paths:
+                    guards.enter_context(C.SingleInstance(path))
+                profile = profiles.apply(cfg)
+                identity = f"{profile['id']}@{profile['created_at'] or ''}"
+                snapshot, certain, total = match_history.read_snapshot(identity, state_paths)
+                boost = self.dashboard.token_boost.currentData()
+                match = match_history.Match(snapshot, datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
+                                            identity, profile["name"], self.dashboard.token_mode.currentText(),
+                                            certain, total - certain,
+                                            token_odds_text(total, boost), boost)
+                saved = match_history.save_match(self.match_history_path(), match)
+        except (C.UserError, OSError, ValueError) as error:
+            show_error(self, f"Could not save the match. {error}")
+            return
+        if self.pages.currentWidget() is self.group:
+            self.group.load()
+        else:
+            self.go_to(4)
+        self.group.feedback.setText("Match saved. Use Reset on the Dashboard before the next match." if saved else
+                                    "These counts have already been saved.")
+
     def reset_counts(self):
         whose = "" if self.dashboard.profile.count() <= 1 else f' of the profile "{self.dashboard.profile.currentText()}"'
-        which = "the counts from both video sources" if self.secondary_selected else "both counts"
+        secondary_path = Path(self._secondary_cfg(self._cfg_for_actions())["state"]["path"])
+        reset_secondary = self.secondary_selected or secondary_path.is_file()
+        which = "the counts from both video sources" if reset_secondary else "both counts"
         if ask(self, "Reset the counter?", f"Set {which}{whose} to 0? This cannot be undone.", "Reset to 0", danger=True):
             if not self.secondary_selected:
                 self._set(0, 0, "reset")
+                if reset_secondary:
+                    self.reset_saved_counts("secondary")
                 return
             for role, worker in (("primary", self.worker), ("secondary", self.secondary_worker)):
                 if role in self._workers_pending:

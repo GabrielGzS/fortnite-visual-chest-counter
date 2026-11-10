@@ -348,7 +348,7 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             assert not win.overlay.share_screen_overlay.isChecked()
             win.overlay.share_screen_overlay.setChecked(True)
             assert overlay.caption.text().splitlines() == [
-                "CERTAIN OPENED CHESTS: 5", "APPROX. OPENED CHESTS: 5 · Total: 10",
+                "CERTAIN OPENED CHESTS: 5", "APPROX. OPENED CHESTS: 5", "Total: 10",
                 "Pirate Token · 0.007272%",
             ]
             win.dashboard.token_mode.setCurrentText("Squad")
@@ -367,10 +367,11 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             win.refresh_types()
             win.overlay.apply()
             assert overlay.caption.text().splitlines() == [
-                "CERTAIN OPENED CHESTS: 0 · Opened 0", "Odds: 0.000000%",
+                "CERTAIN OPENED CHESTS: 0 • Opened 0", "Odds: 0.000000%",
                 "Chest types: not classified 3",
             ]
             assert win.overlay.preview.caption.text() == overlay.caption.text()
+            assert win.overlay.mode_examples["certain"].text() == overlay.caption.text()
             assert win.dashboard.viewers.text() == overlay.caption.text()
             win.overlay.show_token.setChecked(False)
             win.overlay.apply()

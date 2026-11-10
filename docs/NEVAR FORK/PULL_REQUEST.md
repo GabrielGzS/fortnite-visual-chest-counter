@@ -22,6 +22,9 @@ This branch is local and awaiting the contributor's in-game test.
   controls, dropdowns and connected button groups.
 - Show four animated chest variants on the Dashboard and screen overlay. Confirmed openings animate. Later type updates
   replace the illustration without replaying the animation.
+- Add local match history and ranking, with manual match completion and a separate Discord tab for optional bot summaries.
+- Keep overlay wording, the selected example and the preview in sync. Show Total on its own line in stacked mode.
+- Replace the source shell launchers with a buildable Windows development launcher.
 - Add **Help → Clean logs and captures…** with destructive confirmation and a guard against active counting.
 - Retain both source selectors and previews, profile state, the total-based estimate, and the existing sharing option.
 

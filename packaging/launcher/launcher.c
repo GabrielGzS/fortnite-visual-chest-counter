@@ -131,6 +131,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR ignored, int sh
         fail(L"The program folder path is too long. Move the folder somewhere shorter, for example your Desktop.");
         return 1;
     }
+#ifdef FCC_DEV_LAUNCHER
+    join(python, L"\\.venv\\Scripts\\pythonw.exe");
+    if (!exists(python)) {
+        fail(L"The development Python environment was not found. Set up .venv as described in the README.");
+        return 1;
+    }
+#else
     wcscpy(python, folder);
     wcscat(python, L"\\runtime\\python\\pythonw.exe");
     if (finish_interrupted_update())
@@ -141,6 +148,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR ignored, int sh
              APP_NAME L" from the extracted folder.");
         return 1;
     }
+
+#endif
 
     args = arguments(GetCommandLineW());
     if (wcslen(python) + wcslen(args) + 64 >= LONG_PATH + 1024) {
