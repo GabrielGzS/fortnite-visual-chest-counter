@@ -169,13 +169,15 @@ def test_starting_on_an_end_screen_invents_no_match():
     assert s.records == [] and S.ELIMINATED in s.path
 
 
-def test_gameplay_after_an_end_screen_with_no_match_is_a_new_late_record():
+def test_health_after_an_initial_end_screen_needs_a_new_boundary():
     s = Script().show(8, "you_placed")
     assert s.state == S.ELIMINATED and s.machine.open_match_number is None
-    s.show(12, health=HP)
-    assert s.path == [S.ELIMINATED, S.UNKNOWN, S.IN_MATCH] and s.machine.open_match_number == 1
+    s.show(60, health=HP)
+    assert s.path == [S.ELIMINATED] and s.machine.open_match_number is None, "this may still be someone else's HUD"
+    s.show(4, "connecting").show(12, health=HP)
+    assert s.path == [S.ELIMINATED, S.LOADING, S.IN_MATCH] and s.machine.open_match_number == 1
     r = s.finish().records[0]
-    assert r.completion == S.UNCONFIRMED and not r.observed_from_start, "the end screen belonged to a match that was never observed"
+    assert r.completion == S.PARTIAL and not r.observed_from_start and r.english_confirmed, "only the new loading boundary confirms this late record"
 
 
 # ---- brief problems
@@ -339,33 +341,48 @@ def test_you_placed_shown_for_a_long_time_is_one_ending():
     assert first - 2 <= s.records[0].ended_t <= first
 
 
-def test_a_reboot_continues_the_same_match():
+def test_ambiguous_recovery_stays_nonactive_and_a_later_ending_is_partial():
     s = played_match().show(10, "spectating")
     assert s.state == S.ELIMINATED and s.records == []
-    s.show(12, health=HP)
-    assert s.state == S.IN_MATCH and s.machine.open_match_number == 1
+    active_before = s.machine._match.active
+    s.show(60, health=HP)
+    assert s.state == S.ELIMINATED and s.machine.open_match_number == 1
     s.show(6, "you_placed").show(4, "connecting").finish()
     r = s.records[0]
-    assert len(s.records) == 1 and r.respawns == 1 and r.completion == S.COMPLETE
+    assert len(s.records) == 1 and r.respawns == 0 and r.completion == S.PARTIAL and r.complete_duration_seconds is None
+    assert r.active_seconds == active_before and r.ended_by == S.PLACED
+    assert sum("own-player recovery unconfirmed" in reason for reason in r.reasons) == 1
 
 
-def test_coming_back_after_a_break_in_the_video_needs_the_full_ten_samples():
+def test_a_break_followed_by_health_does_not_prove_a_reboot():
     s = played_match().show(6, "spectating").jump(20).show(9, health=HP)
     assert s.state == S.ELIMINATED
-    assert s.show(1, health=HP).state == S.IN_MATCH
+    assert s.show(60, health=HP).state == S.ELIMINATED
+    r = s.finish().records[0]
+    assert r.discontinuity and r.completion == S.PARTIAL and r.respawns == 0
+    assert r.observed_seconds + r.uncertain_seconds == r.closed_t - r.opened_t
 
 
-def test_coming_back_after_you_placed_withdraws_that_ending():
-    s = played_match().show(6, "you_placed").show(12, health=HP)
-    assert s.state == S.IN_MATCH and s.machine.open_match_number == 1
+def test_health_after_you_placed_does_not_withdraw_the_observed_ending():
+    s = played_match()
+    first_end = s.t
+    s.show(6, "you_placed")
+    active_before = s.machine._match.active
+    s.show(30, health=HP)
+    assert s.state == S.ELIMINATED and s.machine.open_match_number == 1
     s.finish()
     r = s.records[0]
-    assert r.ended_by == S.STOPPED and r.ended_t is None and r.completion == S.PARTIAL
+    assert r.ended_by == S.PLACED and r.ended_t == first_end and r.completion == S.COMPLETE
+    assert r.active_seconds == active_before and r.respawns == 0
 
 
-def test_a_later_ending_after_a_withdrawn_one_is_still_only_partial():
-    s = played_match().show(6, "you_placed").show(12, health=HP).show(6, "you_placed").show(4, "connecting").finish()
-    assert s.records[0].completion == S.PARTIAL and s.records[0].ended_by == S.PLACED
+def test_repeated_placement_after_health_keeps_one_original_ending():
+    s = played_match()
+    first_end = s.t
+    s.show(6, "you_placed").show(12, health=HP).show(6, "you_placed").show(4, "connecting").finish()
+    assert len(s.records) == 1 and s.records[0].completion == S.COMPLETE and s.records[0].ended_by == S.PLACED
+    assert s.records[0].ended_t == first_end and s.records[0].respawns == 0
+    assert sum(e.state == S.ELIMINATED for e in s.events if isinstance(e, S.Transition)) == 1
 
 
 def test_elimination_without_placement_is_not_a_complete_match():
@@ -378,12 +395,15 @@ def test_a_win_never_comes_back_as_the_same_match():
     assert s.state == S.ELIMINATED and s.machine.open_match_number == 1
 
 
-def test_long_gameplay_after_a_win_is_another_match_and_never_overlaps():
+def test_long_health_after_a_win_waits_for_a_real_new_boundary():
     s = played_match().show(6, "victory_royale", health=HP).show(60, health=HP)
+    assert s.state == S.ELIMINATED and s.machine.open_match_number == 1 and s.records == []
+    s.show(4, "connecting").show(12, health=HP)
     assert s.state == S.IN_MATCH and s.machine.open_match_number == 2
     s.finish()
     first, second = s.records
     assert first.ended_by == S.VICTORY and not second.observed_from_start and second.opened_t >= first.closed_t
+    assert second.completion == S.PARTIAL and second.complete_duration_seconds is None
 
 
 def test_no_evidence_after_elimination_closes_it():
@@ -574,15 +594,17 @@ def test_clip_2_recovers_from_the_stream_being_rewound():
     assert len(records) == 1 and records[0].completion == S.PARTIAL and not records[0].observed_from_start, "a rewound match can never count as complete"
 
 
-def test_english_gameplay_has_only_its_two_real_endings():
+def test_english_edited_second_match_is_missed_without_boundary_evidence():
     events = replay("new", counted_chests("en"))
     records = [e for e in events if isinstance(e, S.MatchRecord)]
-    assert [r.ended_by for r in records] == [S.VICTORY, S.VICTORY]
-    assert abs(records[0].ended_t - 258) <= 2 and abs(records[1].ended_t - 499) <= 2
-    assert sum(1 for e in events if isinstance(e, S.Transition) and e.state == S.ELIMINATED) == 2
+    # Approved recall tradeoff: M1 sees the second win but not the editorial cut.
+    # Its real occurrence remains in independent M3 truth and must score as missed.
+    assert [r.ended_by for r in records] == [S.VICTORY]
+    assert abs(records[0].ended_t - 258) <= 2
+    assert sum(1 for e in events if isinstance(e, S.Transition) and e.state == S.ELIMINATED) == 1
     assert records[0].english_confirmed and records[0].english_chests == 6
-    assert records[1].completion == S.UNCONFIRMED, "the second win has no English evidence of its own in this edited video"
-    assert records[0].closed_t <= records[1].opened_t and not any(r.completion == S.COMPLETE for r in records)
+    assert records[0].completion == S.PARTIAL and records[0].complete_duration_seconds is None
+    assert any(498 <= t <= 501 and scores.get("victory_royale", 0) >= S.SCORE_THRESHOLD for t, scores, *_ in TIMELINES["new"])
 
 
 def test_portuguese_footage_confirms_no_english_match():

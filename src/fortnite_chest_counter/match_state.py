@@ -21,7 +21,7 @@ Each rule needs a signal in 2 of the last 3 samples, unless the table says other
     PRE_GAME                  IN_MATCH              countdown gone 3 s with no health bar (the bus), or gone 15 s
     UNKNOWN, LOBBY, LOADING   IN_MATCH, joined late health bar in 5 of 8 samples, or a counted chest; no menu or loading text
     any                       ELIMINATED            YOU PLACED, Victory Royale, SPECTATING or ELIMINATED BY
-    ELIMINATED                IN_MATCH, same match  health bar in 8 of 10 samples and no end-of-match text at all (a reboot or respawn)
+    ELIMINATED                stays non-active      a health bar cannot distinguish a reboot from watching another player
     IN_MATCH, ELIMINATED      UNKNOWN               no evidence of play or no picture for 60 s, or video time ran backwards
 
 What it will not claim:
@@ -29,7 +29,11 @@ What it will not claim:
     ending. A break after the ending hides nothing about the match, so it does not count.
   * A match is "unconfirmed" until English text or an English chest belongs to it. A health bar, a Portuguese chest and Victory Royale can
     never confirm one: the health bar and the word ROYALE look the same in other languages. Unconfirmed matches must stay out of statistics.
-  * An elimination does not finish a match on its own. The record stays open through spectating, and if the player comes back it continues.
+  * An elimination does not finish a match on its own. The record stays open through spectating. M1 cannot identify the original player's
+    return: HUD-only recovery stays non-active and makes a later ending partial if the earlier ending was not observed.
+  * Time after a victory cannot prove another match began. A new loading/menu/countdown boundary is needed; edited games may be missed.
+  * Pending English evidence cannot cross missing samples or a long black/frozen picture. Already observed evidence in an open record stays
+    attached to that record, whose continuity is marked separately.
   * A rewind that keeps the clock running cannot be seen directly. A long black or frozen picture marks the match as broken, and gameplay
     reached without a loading screen counts as joined late, so a rewound match stays partial rather than complete.
   * The number after YOU PLACED is not read, so no placement is reported.
@@ -52,12 +56,11 @@ ALL_SIGNALS = ENGLISH_SIGNALS | {"victory_royale"}
 
 CONFIRM_HITS, CONFIRM_WINDOW = 2, 3
 HUD_HITS, HUD_WINDOW = 5, 8
-RESPAWN_HITS, RESPAWN_WINDOW = 8, 10
+AMBIGUOUS_HUD_HITS, AMBIGUOUS_HUD_WINDOW = 8, 10
 COUNTDOWN_GONE_ON_BUS, COUNTDOWN_GONE_ANYWAY = 3.0, 15.0
 NO_EVIDENCE_LIMIT = 60.0
 MAX_SAMPLE_GAP = 5.0                       # samples further apart than this mean part of the video was not seen
 NO_PICTURE_BREAK = 3.0                     # a black or frozen picture this long may hide a jump in the video
-AFTER_VICTORY_NEW_MATCH = 45.0             # gameplay this long after a win, with no banner, is another match
 
 
 def chest_language(popup_template):
@@ -104,16 +107,16 @@ class MatchRecord:
     opened_t: float                        # first evidence of this match
     played_from_t: float                   # the bus left, or the first sign of play when joining late
     ended_t: object                        # YOU PLACED or Victory first seen, or None when the end was not seen
-    closed_t: float
+    closed_t: float                        # when the tracker closes the record, not an inferred match ending
     observed_seconds: float                # usable picture between opening and closing
     active_seconds: float                  # alive on the bus or the map
-    spectating_seconds: float              # after the player was out
+    spectating_seconds: float              # conservatively non-active after the player was out; includes wins/unclear HUD recovery
     uncertain_seconds: float               # black, frozen or missing picture
     complete_duration_seconds: object      # bus to end, only for a complete match; otherwise None
     start_confidence: str
     end_confidence: str
     discontinuity: bool
-    respawns: int
+    respawns: int                          # remains zero until positive own-player recovery evidence exists
     english_chests: int
     portuguese_chests: int
     reasons: tuple                         # why it opened, changed and closed
@@ -134,7 +137,7 @@ class _Match:
     ended_by: object = None
     ended_t: object = None
     end_confidence: str = LOW
-    placement_undone: bool = False
+    ambiguous_recovery: bool = False
     discontinuity: bool = False
     observed: float = 0.0
     active: float = 0.0
@@ -156,6 +159,7 @@ class _Countdown:
     signals: set
     uncertain: float = 0.0
     broken: bool = False
+    uncertain_at_last: float = 0.0         # uncertainty before the last countdown cannot be subtracted from subsequent play
 
 
 class MatchStateMachine:
@@ -166,11 +170,12 @@ class MatchStateMachine:
         self._last_t = None
         self._recent = {signal: deque(maxlen=CONFIRM_WINDOW) for signal in ALL_SIGNALS}
         self._hud = deque(maxlen=HUD_WINDOW)
-        self._after = deque(maxlen=RESPAWN_WINDOW)
+        self._after = deque(maxlen=AMBIGUOUS_HUD_WINDOW)
         self._countdown = None
         self._no_picture_since = None
         self._last_evidence_t = None
         self._last_closed_t = float("-inf")
+        self._loading_english_continuous = False
 
     @property
     def open_match_number(self):
@@ -208,8 +213,15 @@ class MatchStateMachine:
         """Counting stopped or the source changed: close whatever is open. A later run starts a new machine, and a new match record."""
         events = []
         if self._match is not None:
-            if self._last_t is not None and 0 < t - self._last_t <= MAX_SAMPLE_GAP:
-                self._count_time(t - self._last_t)
+            if self._last_t is not None and t > self._last_t:
+                elapsed = t - self._last_t
+                if elapsed > MAX_SAMPLE_GAP or self._no_picture_since is not None:
+                    self._match.uncertain += elapsed
+                    if elapsed > MAX_SAMPLE_GAP:
+                        self._match.discontinuity |= self._match.ended_by is None
+                        self._match.reasons.append(f"{elapsed:.0f} s of video not seen before stopping")
+                else:
+                    self._count_time(elapsed)
             self._close(t, self._match.ended_by or reason, [reason], events)
         self._countdown = None
         if self.state != UNKNOWN:
@@ -238,7 +250,7 @@ class MatchStateMachine:
             self._countdown.uncertain += elapsed
         self._clear_memory()
         if elapsed >= NO_EVIDENCE_LIMIT and match is not None:
-            self._close(self._last_t, match.ended_by or LOST, ["too long without video"], events)
+            self._close(t, match.ended_by or LOST, ["too long without video"], events)
             self._go(t, UNKNOWN, "no_evidence", events)
 
     def _no_picture(self, t, elapsed, events):
@@ -277,6 +289,9 @@ class MatchStateMachine:
             recent.clear()
         self._hud.clear()
         self._after.clear()
+        self._loading_english_continuous = False
+        if self._countdown is not None:
+            self._countdown.signals.clear()               # pending language evidence, not a match already observed
 
     # ------------------------------------------------------------------ evidence
     def _remember(self, observation):
@@ -358,6 +373,7 @@ class MatchStateMachine:
             self._go(t, ELIMINATED, f"{signal}_seen", events)
 
     def _screen(self, t, state, reason, events):
+        self._loading_english_continuous = state == LOADING   # fresh confirmation also restores evidence after a break in LOADING
         if self.state == state:
             return
         if self._match is not None:
@@ -373,6 +389,7 @@ class MatchStateMachine:
             self._countdown = _Countdown(self._first_hit(signal), t, HIGH if signal == "waiting_for_players" else MEDIUM, set())
             self._go(t, PRE_GAME, "countdown_seen", events)
         self._countdown.last_t = t
+        self._countdown.uncertain_at_last = self._countdown.uncertain
         self._countdown.signals.add(signal)
 
     def _after_countdown(self, t, events):
@@ -381,11 +398,15 @@ class MatchStateMachine:
         no_hud_lately = not any(hud for _, hud in list(self._hud)[-3:])
         if not ((gone >= COUNTDOWN_GONE_ON_BUS and no_hud_lately) or gone >= COUNTDOWN_GONE_ANYWAY):
             return
-        match = self._open(t, countdown.first_t, countdown.last_t, not countdown.broken, countdown.confidence, events)
+        unseen_after_countdown = countdown.uncertain - countdown.uncertain_at_last
+        # A break after the last countdown can hide the departure. Use the first
+        # usable observation after it, never date active play inside that break.
+        played_from = t if countdown.broken and unseen_after_countdown else countdown.last_t
+        match = self._open(t, countdown.first_t, played_from, not countdown.broken, countdown.confidence, events)
         match.english |= countdown.signals
         match.observed = max(t - match.opened_t - countdown.uncertain, 0.0)
         match.uncertain = countdown.uncertain
-        match.active = t - match.played_from_t
+        match.active = max(t - match.played_from_t - (unseen_after_countdown if played_from == countdown.last_t else 0.0), 0.0)
         match.discontinuity = countdown.broken
         match.reasons.append("started: countdown ended")
         self._countdown = None
@@ -401,42 +422,31 @@ class MatchStateMachine:
         from_loading = self.state == LOADING
         match = self._open(t, first, first, False, LOW, events)
         match.observed = match.active = t - match.opened_t
-        if from_loading:
+        if from_loading and self._loading_english_continuous:
             match.english.add("connecting")
         match.reasons.append("started: joined late, " + ("health bar" if sustained else "counted chest"))
         self._go(t, IN_MATCH, "health_bar_sustained" if sustained else "chest_counted", events)
 
     def _check_still_playing(self, t, events):
         if t - self._last_evidence_t >= NO_EVIDENCE_LIMIT:
-            self._close(self._last_evidence_t, LOST, ["no evidence of play"], events)
+            self._close(t, LOST, ["no evidence of play"], events)
             self._go(t, UNKNOWN, "no_evidence", events)
 
     def _after_elimination(self, t, events):
         match = self._match
         if t - self._last_evidence_t >= NO_EVIDENCE_LIMIT:
             if match is not None:
-                self._close(self._last_evidence_t, match.ended_by or LOST, ["no evidence after the match"], events)
+                self._close(t, match.ended_by or LOST, ["no evidence after the match"], events)
             self._go(t, UNKNOWN, "no_evidence", events)
             return
-        sustained = sum(1 for _, hud in self._hud if hud) >= HUD_HITS
-        if match is None:
-            if sustained and not any(after for _, after in self._after):
-                self._go(t, UNKNOWN, "gameplay_after_end_screen", events)
+        # A spectated player's HUD and a real reboot look the same to M1.
+        # This applies even when recording began on an end screen (no open match).
+        if match is None or match.ended_by is not None or match.ambiguous_recovery:
             return
-        if match.ended_by == VICTORY:
-            banner_lately = any(seen for _, seen, _ in self._recent["victory_royale"])
-            if sustained and not banner_lately and t - match.ended_t >= AFTER_VICTORY_NEW_MATCH:
-                self._close(t, VICTORY, ["gameplay continued after the win"], events)
-                self._go(t, UNKNOWN, "gameplay_after_victory", events)
-            return
-        full = len(self._after) == RESPAWN_WINDOW
-        if full and sum(1 for hud, _ in self._after if hud) >= RESPAWN_HITS and not any(after for _, after in self._after):
-            match.respawns += 1
-            if match.ended_by == PLACED:
-                match.ended_by, match.ended_t, match.end_confidence, match.placement_undone = None, None, LOW, True
-            match.reasons.append("came back into play")
-            self._after.clear()
-            self._go(t, IN_MATCH, "respawned", events)
+        full = len(self._after) == AMBIGUOUS_HUD_WINDOW
+        if full and sum(1 for hud, _ in self._after if hud) >= AMBIGUOUS_HUD_HITS and not any(after for _, after in self._after):
+            match.ambiguous_recovery = True
+            match.reasons.append("health bar after elimination: own-player recovery unconfirmed")
 
     # ------------------------------------------------------------------ results
     def _open(self, t, opened_t, played_from_t, from_start, confidence, events):
@@ -450,13 +460,15 @@ class MatchStateMachine:
     def _go(self, t, state, reason, events):
         events.append(Transition(t, self.state, state, reason, self.open_match_number))
         self.state = state
+        if state != LOADING:
+            self._loading_english_continuous = False
 
     def _close(self, t, ended_by, reasons, events):
         match = self._match
         finished = ended_by in (PLACED, VICTORY)
         if not match.english:
             completion = UNCONFIRMED
-        elif match.observed_from_start and finished and not match.discontinuity and not match.placement_undone:
+        elif match.observed_from_start and finished and not match.discontinuity and not match.ambiguous_recovery:
             completion = COMPLETE
         else:
             completion = PARTIAL

@@ -238,7 +238,7 @@ def test_legacy_fixture_reproduces_all_five_M2_results():
         assert result["provenance"]["kind"] == "legacy_fixture"
 
 
-def test_frozen_M2_reference_is_reproduced_before_corrections():
+def test_frozen_M2_reference_changes_only_at_the_approved_victory_fallback():
     sources = R.load_timelines(ROOT / "tests/fixtures/match/timelines.json.gz")
     reference = R.load_json(ROOT / "tests/fixtures/match/m2_reference.json")["sources"]
     for name, source in sources.items():
@@ -249,7 +249,12 @@ def test_frozen_M2_reference_is_reproduced_before_corrections():
                   "completions": [r["completion"] for r in result["records"]],
                   "endings": [r["ended_by"] for r in result["records"]],
                   "ended_t": [r["ended_t"] for r in result["records"]]}
-        assert actual == reference[name], (name, actual)
+        if name != "new":
+            assert actual == reference[name], (name, actual)
+        else:
+            assert reference[name]["endings"] == ["victory", "victory"], "the original behavior must remain archived"
+            assert actual == {"transitions": [[5, "IN_MATCH"], [258, "ELIMINATED"]],
+                              "completions": ["partial"], "endings": ["victory"], "ended_t": [257]}, actual
 
 
 def test_independent_annotations_keep_both_English_wins_and_the_real_cut():
@@ -258,6 +263,19 @@ def test_independent_annotations_keep_both_English_wins_and_the_real_cut():
     assert first["ended_by"] == second["ended_by"] == "victory"
     assert first["closed_t"] == [261, 263] and second["opened_t"] == [261, 264]
     assert all(s["review"]["status"] == "provisional" for s in truth["sources"].values())
+
+
+def test_conservative_recovery_still_fails_truth_for_the_real_edited_match():
+    sources = R.load_timelines(ROOT / "tests/fixtures/match/timelines.json.gz")
+    truth = R.load_json(ROOT / "tests/fixtures/match/footage_truth.provisional.json")
+    chests = {"new": R.load_chests(ROOT / "tests/baselines/en_v0.3.0-base.json"),
+              "ps5": R.load_chests(ROOT / "tests/baselines/ps5_v0.3.0-base.json")}
+    report = R.score(sources, truth, chests, allow_provisional=True)
+    assert not report["passed"] and not report["human_reviewed"]
+    assert report["sources"]["new"]["score"]["issues"]["missed_matches"] == [{"truth_id": "english-second-win"}]
+    assert report["counts"]["missed_endings"] == 1 and report["counts"]["invariant_errors"] == 0
+    assert all(report["sources"][name]["score"]["passed"] for name in ("clip1", "clip2", "clip3", "ps5"))
+    assert not any(r["completion"] == "complete" for item in report["sources"].values() for r in item["prediction"]["records"])
 
 
 def test_portuguese_chest_evidence_preserves_unknowns_and_approx_only_events():
