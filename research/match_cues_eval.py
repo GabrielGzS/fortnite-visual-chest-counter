@@ -7,6 +7,7 @@ Exit code 0 only when every signal reaches the threshold on its known screens an
 checks stay under the time budget. Frames close to a labelled boundary are not judged either way, because those labels are approximate.
 """
 import argparse
+import gzip
 import json
 import subprocess
 import sys
@@ -99,7 +100,9 @@ def main():
     parser.add_argument("--capture", required=True)
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--write-fixtures", action="store_true")
+    parser.add_argument("--write-timelines", action="store_true", help="save one-sample-per-second cue timelines for tests/test_match_state.py")
     arguments = parser.parse_args()
+    timelines = {}
     reader = M.CueReader()
     rows, bits, whole_ms, set_ms = [], [], [], {name: [] for name in SETS}
     changes, still, started = {}, [], time.monotonic()
@@ -124,6 +127,8 @@ def main():
                     if evidence.change < 1.0:
                         still.append((source, t, round(evidence.change, 3), round(evidence.mean_luma, 1)))
                 previous = evidence.sample
+                if source in ("clip1", "clip2", "clip3", "ps5", "new"):
+                    timelines.setdefault(source, []).append([round(t, 1), {k: round(v, 3) for k, v in scores.items() if v >= 0.05}, health, int(evidence.black), int(evidence.frozen)])
             step += 1
             fill = {signal: max(float(M._ink_mask(frame[M._CUE[n].box[1]:M._CUE[n].box[3], M._CUE[n].box[0]:M._CUE[n].box[2]], M._CUE[n].ink).mean()) for n in M.SIGNALS[signal]) for signal in M.SIGNALS}
             rows.append({"source": source, "t": t, **scores, "mean_luma": evidence.mean_luma, "health": health, "fill": fill})
@@ -168,6 +173,11 @@ def main():
         folder = ROOT / "tests" / "fixtures" / "match"
         folder.mkdir(parents=True, exist_ok=True)
         write_fixtures(rows, bits, folder / "frames.npz")
+    if arguments.write_timelines:
+        path = ROOT / "tests" / "fixtures" / "match" / "timelines.json.gz"
+        with open(path, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0, filename="") as out:
+            out.write(json.dumps(timelines, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        print(f"\nwrote {path}: {sum(len(v) for v in timelines.values())} samples, {path.stat().st_size // 1024} KiB")
     print("\nRESULT:", "ACCEPTED" if ok else "NOT ACCEPTED")
     sys.exit(0 if ok else 1)
 

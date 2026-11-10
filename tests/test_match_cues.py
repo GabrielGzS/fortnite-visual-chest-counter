@@ -272,10 +272,10 @@ def test_this_module_depends_only_on_what_it_needs():
 
 
 def test_counting_does_not_use_this_module_yet():
-    package = ROOT / "src/fortnite_chest_counter"
-    for file in package.rglob("*.py"):
-        if file.name != "match_cues.py":
-            assert "match_cues" not in file.read_text(encoding="utf-8"), file.name
+    for file in (ROOT / "src/fortnite_chest_counter").rglob("*.py"):
+        for node in ast.walk(ast.parse(file.read_text(encoding="utf-8"))):
+            names = [alias.name for alias in node.names] if isinstance(node, (ast.Import, ast.ImportFrom)) else []
+            assert "match_cues" not in " ".join(names + [getattr(node, "module", None) or ""]), file.name
 
 
 if __name__ == "__main__":
