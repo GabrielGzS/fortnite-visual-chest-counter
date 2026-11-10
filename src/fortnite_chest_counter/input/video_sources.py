@@ -38,13 +38,14 @@ from fortnite_chest_counter.detection import visual as V
 
 WIDTH, HEIGHT = V.NORMALIZED_WIDTH, V.NORMALIZED_HEIGHT
 FRAME_BYTES = WIDTH * HEIGHT * 3
+HDR_PREVIEW_EXPOSURE = 0.25
 SRGB_LUT_MAX = 4095
 _linear = np.linspace(0, 1, SRGB_LUT_MAX + 1, dtype=np.float32)
 SRGB_LUT = np.rint(255 * np.where(_linear <= 0.0031308, 12.92 * _linear,
                                   1.055 * _linear ** (1 / 2.4) - 0.055)).astype(np.uint8)
 
 
-def tone_map_scrgb(frame):
+def tone_map_scrgb(frame, exposure=1.0):
     """Map linear scRGB to sRGB, compressing highlights without clipping individual channels."""
     channels = [frame[..., i].astype(np.float32) for i in range(3)]
     for channel in channels:
@@ -55,8 +56,8 @@ def tone_map_scrgb(frame):
     # Desaturate vivid colors gradually, keeping the pale lavender XP text largely intact.
     mix = np.maximum(0.25 * (peak - low) - 0.1 * peak, 0) / np.maximum(peak, 0.01)
     neutral = 0.5 * peak * mix
-    shoulder = np.maximum(peak - 0.75, 0)
-    scale = SRGB_LUT_MAX * (0.75 + shoulder / (1 + 4 * shoulder)) / np.maximum(peak, 0.75)
+    shoulder = np.maximum(peak * exposure - 0.75, 0)
+    scale = SRGB_LUT_MAX * (0.75 + shoulder / (1 + 4 * shoulder)) / np.maximum(peak, 0.75 / exposure)
     colored_scale = scale * (1 - mix)
     neutral *= scale
     output = np.empty((*frame.shape[:2], 3), dtype=np.uint8)
@@ -206,9 +207,15 @@ class LiveSource:
                 self.frames_processed += 1
                 last = seq
                 t, frame = item
-                yield t, tone_map_scrgb(frame) if self.hdr else frame
+                if self.hdr:
+                    self.scrgb_frame = frame
+                    frame = tone_map_scrgb(frame)
+                yield t, frame
             elif self.on_idle is not None:
                 self.on_idle()
+
+    def hdr_preview(self, height, width):
+        return tone_map_scrgb(self.scrgb_frame[:2 * height:2, :2 * width:2], exposure=HDR_PREVIEW_EXPOSURE)
 
     def elapsed(self):
         return time.monotonic() - self._t0

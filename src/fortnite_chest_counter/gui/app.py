@@ -398,7 +398,7 @@ class CountCard(QFrame):
 
 
 class PreviewPanel(QFrame):
-    def __init__(self):
+    def __init__(self, caption):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -406,10 +406,10 @@ class PreviewPanel(QFrame):
         self.view = QLabel("Start counting to see the video here")
         self.view.setObjectName("previewBox")
         self.view.setAlignment(Qt.AlignCenter)
-        self.view.setMinimumSize(320, 180)
+        self.view.setMinimumSize(240, 135)
         self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.view, 1)
-        self.caption = label("Preview: what the counter analyses (a few pictures per second).", "hint", wrap=True)
+        self.caption = label(caption, "hint", wrap=True)
         layout.addWidget(self.caption)
         self.image = None
 
@@ -848,33 +848,22 @@ class Dashboard(QWidget):
         token_row = QHBoxLayout()
         self.token_mode = QComboBox()
         self.token_mode.addItems(["Solo", "Duo", "Trio", "Squad"])
-        self.token_mode.setToolTip("Mode utilisé pour l’estimation du jeton.")
+        self.token_mode.setToolTip("Game mode used for the token estimate.")
         self.token_boost = QComboBox()
-        for caption, multiplier in (("Normal ×1", 1.0), ("Boost ×1,5", 1.5), ("Boost ×2", 2.0)):
+        for caption, multiplier in (("Normal ×1", 1.0), ("Boost ×1.5", 1.5), ("Boost ×2", 2.0)):
             self.token_boost.addItem(caption, multiplier)
-        self.token_boost.setToolTip("Simulation du même taux pour tous les coffres du total affiché.")
+        self.token_boost.setToolTip("Apply this multiplier to every chest in the estimate.")
         self.token_teammates = QSpinBox()
         self.token_teammates.setRange(0, 999_999)
-        self.token_teammates.setToolTip("Coffres supplémentaires de tes coéquipiers, à saisir manuellement.")
-        self.token_teammate_label = label("Coffres des coéquipiers")
+        self.token_teammates.setToolTip("Enter any extra chests opened by teammates.")
+        self.token_teammate_label = label("Teammate chests")
         self.token_odds = label("", "hint", wrap=True)
-        self.token_odds.setToolTip("Estimation cumulative. Taux normal Epic de 1 sur 137 500 par coffre, "
-                                   "multiplié par le boost choisi pour tout le total affiché.")
+        self.token_odds.setToolTip("Cumulative estimate using Epic's base rate of 1 in 137,500 per chest, "
+                                   "adjusted by the selected boost.")
         for widget in (self.token_mode, self.token_boost, self.token_teammate_label, self.token_teammates, self.token_odds):
             token_row.addWidget(widget)
         token_row.setStretch(4, 1)
         layout.addLayout(token_row)
-        overlay_row = QHBoxLayout()
-        self.show_screen_overlay = QCheckBox("Overlay à l’écran")
-        self.show_screen_overlay.toggled.connect(self.toggle_screen_overlay)
-        overlay_row.addWidget(self.show_screen_overlay)
-        self.share_screen_overlay = QCheckBox("Visible dans le partage d’écran")
-        self.share_screen_overlay.setToolTip("Autorise la capture de l’overlay quand tu partages cet écran sur Discord.")
-        self.share_screen_overlay.setEnabled(False)
-        self.share_screen_overlay.toggled.connect(self.apply_screen_overlay_capture)
-        overlay_row.addWidget(self.share_screen_overlay)
-        overlay_row.addStretch()
-        layout.addLayout(overlay_row)
         self.token_mode.currentIndexChanged.connect(lambda _: self.update_token_odds())
         self.token_boost.currentIndexChanged.connect(lambda _: self.update_token_odds())
         self.token_teammates.valueChanged.connect(lambda _: self.update_token_odds())
@@ -1014,9 +1003,15 @@ class Dashboard(QWidget):
         self.log.setPlaceholderText("Chests appear here as they are counted: green = certain, yellow = estimated only, "
                                     "red = looked like a chest but was not counted.")
         self.log.setMinimumHeight(220)
-        self.preview = PreviewPanel()
+        self.preview = PreviewPanel("Source 1 preview")
+        self.secondary_preview = PreviewPanel("Source 2 preview")
+        self.preview_group = QSplitter(Qt.Vertical)
+        self.preview_group.setChildrenCollapsible(False)
+        self.preview_group.addWidget(self.preview)
+        self.preview_group.addWidget(self.secondary_preview)
         self.split.addWidget(self.log)
-        self.split.addWidget(self.preview)
+        self.split.addWidget(self.preview_group)
+        self.split.setCollapsible(1, False)
         self.split.setStretchFactor(0, 3)
         self.split.setStretchFactor(1, 2)
         layout.addWidget(self.split, 1)
@@ -1032,13 +1027,14 @@ class Dashboard(QWidget):
         total = max(0, self.win.counts[1]) + (self.token_teammates.value() if group else 0)
         boost = self.token_boost.currentData()
         probability = -math.expm1(min(total, 10_000_000) * math.log1p(-boost / PIRATE_TOKEN_RATE)) if total else 0
-        chance = f"{probability:.6%}".replace(".", ",").replace("%", " %")
-        scenario = f" · {self.token_boost.currentText()} sur tout le total" if boost > 1 else ""
-        self.token_odds.setText(f"Jeton pirate · {chance} · {total} coffres{scenario}")
+        chance = f"{probability:.6%}"
+        self.token_chance = chance
+        scenario = f" · {self.token_boost.currentText()}" if boost > 1 else ""
+        self.token_odds.setText(f"Pirate Token · {chance} · {total:,} chests{scenario}")
         self.refresh_screen_overlay()
 
     def toggle_screen_overlay(self, enabled):
-        self.share_screen_overlay.setEnabled(enabled)
+        self.win.overlay.share_screen_overlay.setEnabled(enabled)
         if not enabled:
             if self.screen_overlay is not None:
                 self.screen_overlay.hide()
@@ -1058,20 +1054,33 @@ class Dashboard(QWidget):
     def apply_screen_overlay_capture(self):
         if sys.platform == "win32" and self.screen_overlay is not None:
             hwnd = ctypes.c_void_p(int(self.screen_overlay.winId()))
-            affinity = 0 if self.share_screen_overlay.isChecked() else 0x11  # WDA_NONE or WDA_EXCLUDEFROMCAPTURE
+            affinity = 0 if self.win.overlay.share_screen_overlay.isChecked() else 0x11  # WDA_NONE or WDA_EXCLUDEFROMCAPTURE
             ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, affinity)
 
     def reload_screen_overlay(self):
-        if self.show_screen_overlay.isChecked():
-            self.screen_overlay_display = {**load_cfg()[0]["display"], "show": "both"}
+        if self.win.overlay.show_screen_overlay.isChecked():
+            self.screen_overlay_display = load_cfg()[0]["display"]
             self.refresh_screen_overlay()
 
-    def refresh_screen_overlay(self):
-        if self.screen_overlay is None or not self.show_screen_overlay.isChecked():
-            return
+    def screen_overlay_text(self, display):
         certain, approx = self.win.counts
-        text = C.overlay_text(self.screen_overlay_display, {"certain": certain, "approximate": approx})
-        text = f"{text}\n{self.token_odds.text()}"
+        lines = [C.overlay_text(display, {"certain": certain, "approximate": approx})]
+        if display["screen_show_token"]:
+            wording = display["screen_token_text"]
+            if "#" not in wording:
+                wording += " #"
+            lines.append(wording.replace("#", self.token_chance))
+        if display["screen_show_types"] and self.types.text():
+            lines.append(f"Chest types: {self.types.text()}")
+        return "\n".join(lines)
+
+    def refresh_screen_overlay(self):
+        page = getattr(self.win, "overlay", None)
+        if page is not None and page.isVisible():
+            page.refresh_preview()
+        if self.screen_overlay is None or not page.show_screen_overlay.isChecked():
+            return
+        text = self.screen_overlay_text(self.screen_overlay_display)
         if text != self.screen_overlay.text():
             self.screen_overlay.setText(text)
             self.screen_overlay.adjustSize()
@@ -1094,7 +1103,8 @@ class Dashboard(QWidget):
 
     def _panels(self):
         self.log.setVisible(self.show_log.isChecked())
-        self.preview.setVisible(self.show_preview.isChecked())
+        self.preview_group.setVisible(self.show_preview.isChecked())
+        self.secondary_preview.setVisible(self.win.secondary_selected)
         for widget in (self.detail, self.clear):
             widget.setVisible(self.show_log.isChecked())
         self.split.setVisible(self.show_log.isChecked() or self.show_preview.isChecked())
@@ -1120,9 +1130,21 @@ class OverlayPage(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win = win
-        layout = page_layout(self, "Overlay", "What your viewers see. The counter writes ONE text file; OBS shows it with a "
-                                              "Text source. Fonts, colours and size are set in OBS.")
-        box, box_layout = card("What OBS shows")
+        layout = page_layout(self, "Overlay", "Choose what appears on your screen and in the OBS text output.")
+        box, box_layout = card("On-screen overlay")
+        self.show_screen_overlay = QCheckBox("Show overlay on screen")
+        self.show_screen_overlay.toggled.connect(win.dashboard.toggle_screen_overlay)
+        self.show_screen_overlay.toggled.connect(lambda enabled: self._save_screen_option("screen_overlay_enabled", enabled))
+        box_layout.addWidget(self.show_screen_overlay)
+        self.share_screen_overlay = QCheckBox("Visible when sharing your screen")
+        self.share_screen_overlay.setToolTip("Include the overlay when sharing this screen on Discord.")
+        self.share_screen_overlay.setEnabled(False)
+        self.share_screen_overlay.toggled.connect(win.dashboard.apply_screen_overlay_capture)
+        self.share_screen_overlay.toggled.connect(lambda enabled: self._save_screen_option("screen_overlay_shared", enabled))
+        box_layout.addWidget(self.share_screen_overlay)
+        layout.addWidget(box)
+
+        box, box_layout = card("Chest counts on screen and in OBS")
         self.modes = QButtonGroup(self)
         self.mode_buttons = {}
         for i, mode in enumerate(("stacked", "inline", "approx", "certain")):
@@ -1131,6 +1153,11 @@ class OverlayPage(QWidget):
             self.mode_buttons[mode] = radio
             box_layout.addWidget(radio)
             radio.toggled.connect(self._changed)
+        self.show_token = QCheckBox("Show Pirate Token odds on screen")
+        self.show_types = QCheckBox("Show chest types on screen")
+        for toggle in (self.show_token, self.show_types):
+            box_layout.addWidget(toggle)
+            toggle.toggled.connect(self._changed)
         layout.addWidget(box)
 
         box, box_layout = card("Wording", "Put # where the number goes, e.g.  Chests opened: #   or   Chest Hunt: #/500")
@@ -1141,11 +1168,13 @@ class OverlayPage(QWidget):
         self.certain_text = QLineEdit()
         self.approx_label = label("Estimated total (APPROX)")
         self.approx_text = QLineEdit()
+        self.token_text = QLineEdit()
+        self.token_text.setToolTip("Use # for the Pirate Token probability, including the percent sign.")
         self.line_label = label("One line")
         self.line_text = QLineEdit()
         self.line_text.setToolTip("#C = confirmed number, #A = estimated total, e.g.  #C confirmed - #A total")
         for row, (lab, edit) in enumerate(((self.certain_label, self.certain_text), (self.approx_label, self.approx_text),
-                                           (self.line_label, self.line_text))):
+                                           (self.line_label, self.line_text), (label("Pirate Token"), self.token_text))):
             form.addWidget(lab, row, 0)
             form.addWidget(edit, row, 1)
             edit.textChanged.connect(self._changed)
@@ -1162,7 +1191,7 @@ class OverlayPage(QWidget):
         box_layout.addLayout(row)
         layout.addWidget(box)
 
-        box, box_layout = card("Preview", "Exactly what the text file contains (shown on black, like a stream overlay).")
+        box, box_layout = card("On-screen preview", "Preview of the overlay using the current counts.")
         self.preview = label("", "overlayBox")
         self.preview.setTextFormat(Qt.PlainText)
         box_layout.addWidget(self.preview)
@@ -1242,12 +1271,17 @@ class OverlayPage(QWidget):
         self._loading = True
         cfg, _ = load_cfg()
         self.display = cfg["display"]
+        self.share_screen_overlay.setChecked(cfg["app"]["screen_overlay_shared"])
+        self.show_screen_overlay.setChecked(cfg["app"]["screen_overlay_enabled"])
         self.obs_path.setText(str((paths.APP_DIR / cfg["state"]["obs_dir"] / "chest_counter.txt").resolve()))
         self.mode_buttons[C.display_mode(self.display)].setChecked(True)
         self.certain_text.setText(C.hash_from_text(self.display["certain_text"]))
         self.approx_text.setText(C.hash_from_text(self.display["approx_text"]))
         self.line_text.setText(C.markers_from_line(self.display["combined_status_format"]))
         self.thousands.setChecked(self.display["use_thousands_separator"])
+        self.token_text.setText(self.display["screen_token_text"])
+        self.show_token.setChecked(self.display["screen_show_token"])
+        self.show_types.setChecked(self.display["screen_show_types"])
         ws = cfg["obs_websocket"]
         self.ws_enabled.blockSignals(True)
         self.ws_enabled.setChecked(ws["enabled"])
@@ -1262,6 +1296,10 @@ class OverlayPage(QWidget):
         self.saved.setText("")
         self._changed()
         self.show_obs_status(self.win.obs_link.status()[1])
+
+    def _save_screen_option(self, key, enabled):
+        if not self._loading:
+            self.win.save_app_option(key, enabled)
 
     # ---- OBS WebSocket card
     def _ws_password_hint(self):
@@ -1356,7 +1394,11 @@ class OverlayPage(QWidget):
 
     def changes(self):
         mode = self._mode()
-        texts = {"use_thousands_separator": self.thousands.isChecked()}
+        texts = {"use_thousands_separator": self.thousands.isChecked(),
+                 "screen_show_token": self.show_token.isChecked(),
+                 "screen_show_types": self.show_types.isChecked()}
+        if self.token_text.text().strip():
+            texts["screen_token_text"] = self.token_text.text().strip()
         if mode == "inline":
             if self.line_text.text().strip():
                 texts["combined_status_format"] = C.line_from_markers(self.line_text.text())
@@ -1381,8 +1423,7 @@ class OverlayPage(QWidget):
         self.approx_text.setVisible(mode in ("approx", "stacked"))
         for widget in (self.line_label, self.line_text, self.line_hint):
             widget.setVisible(mode == "inline")
-        preview = {**self.display, **self.changes()}
-        self.preview.setText(C.overlay_text(preview, self._state()))
+        self.refresh_preview()
         state = self._state()
         for m, radio in self.mode_buttons.items():
             example = C.overlay_text({**self.display, **C.MODE_SETTINGS[m]}, state).replace("\n", "  /  ")
@@ -1390,11 +1431,16 @@ class OverlayPage(QWidget):
         pending = any(self.display.get(k) != v for k, v in self.changes().items())
         self.saved.setText("Not applied yet." if pending else "")
 
+    def refresh_preview(self):
+        display = {**self.display, **self.changes()}
+        self.preview.setText(self.win.dashboard.screen_overlay_text(display))
+
     def _defaults(self):
         d = settings.DEFAULTS["display"]
         self.certain_text.setText(C.hash_from_text(d["certain_text"]))
         self.approx_text.setText(C.hash_from_text(d["approx_text"]))
         self.line_text.setText(C.markers_from_line(d["combined_status_format"]))
+        self.token_text.setText(d["screen_token_text"])
 
     def _copy_path(self):
         QApplication.clipboard().setText(self.obs_path.text())
@@ -1842,6 +1888,10 @@ class MainWindow(QMainWindow):
             self.preview_reader = PreviewReader(block_name(uuid.uuid4().hex[:12]))
         except Exception:
             self.preview_reader = None
+        try:
+            self.secondary_preview_reader = PreviewReader(block_name(uuid.uuid4().hex[:12]))
+        except Exception:
+            self.secondary_preview_reader = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.stop_timer = QTimer(self)
@@ -1873,8 +1923,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.pages, 1)
         self.setCentralWidget(root)
 
-        self.dashboard.show_log.setChecked(True)
-        self.dashboard.show_preview.setChecked(False)
+        self.load_home_options()
         self.dashboard._panels()
         self.fill_profiles()
         self.set_mode("stopped")
@@ -1896,6 +1945,22 @@ class MainWindow(QMainWindow):
 
         self.timer.start(50)
         self.slow.start(1000)
+
+    def save_app_option(self, key, value):
+        try:
+            C.update_config_file(config_file(), "app", {key: value})
+        except (C.UserError, OSError) as error:
+            show_error(self, f"Could not save the preference: {error}")
+
+    def load_home_options(self):
+        cfg = load_cfg()[0]["app"]
+        dashboard = self.dashboard
+        for box, key in ((dashboard.token_mode, "token_mode"), (dashboard.token_boost, "token_boost")):
+            box.setCurrentIndex(max(0, box.findText(cfg[key])))
+            box.currentTextChanged.connect(lambda value, key=key: self.save_app_option(key, value))
+        for button, key in ((dashboard.show_log, "show_activity"), (dashboard.show_preview, "live_preview")):
+            button.setChecked(cfg[key])
+            button.toggled.connect(lambda value, key=key: self.save_app_option(key, value))
 
     # ---- layout
     def _sidebar(self):
@@ -1936,6 +2001,7 @@ class MainWindow(QMainWindow):
 
     def _page_changed(self, index):
         self.pages.setCurrentIndex(index)
+        self.preview_visibility_changed()
         if index == 1:
             self.overlay.load()
         elif index == 2:
@@ -2012,8 +2078,16 @@ class MainWindow(QMainWindow):
         if current_secondary is not None and secondary.findData(current_secondary) < 0:
             secondary.addItem(secondary_text.split("   (not found right now)")[0] + "   (not found right now)",
                               current_secondary)
-        secondary.setCurrentIndex(max(0, secondary.findData(current_secondary)))
+        if current_secondary is None:
+            saved_source = load_cfg()[0]["app"]["secondary_source"]
+            index = next((i for i in range(secondary.count())
+                          if json.dumps(secondary.itemData(i), sort_keys=True) == saved_source), 0)
+        else:
+            index = secondary.findData(current_secondary)
+        secondary.setCurrentIndex(max(0, index))
         secondary.blockSignals(False)
+        if secondary.currentData() != current_secondary:
+            self.secondary_source_changed(save=False)
         current = self.dashboard.source.currentData()
         self.dashboard.source.blockSignals(True)
         self.dashboard.source.clear()
@@ -2035,9 +2109,14 @@ class MainWindow(QMainWindow):
         self.update_source_hint()
         self.dashboard.refresh.setEnabled(not self.workers_active())
 
-    def secondary_source_changed(self):
-        self.secondary_selected = self.dashboard.secondary_source.currentData() is not None
+    def secondary_source_changed(self, save=True):
+        source = self.dashboard.secondary_source.currentData()
+        if save and (source is None or source["source"] != "file"):
+            self.save_app_option("secondary_source", json.dumps(source, sort_keys=True))
+        self.secondary_selected = source is not None
         self.dashboard.secondary_status.hide()
+        self.dashboard.secondary_preview.clear()
+        self.dashboard.secondary_preview.setVisible(self.secondary_selected)
         self.read_secondary_state()
 
     def show_secondary_status(self, text, color):
@@ -2263,6 +2342,8 @@ class MainWindow(QMainWindow):
         self._secondary_failed = False
         self.connected = None
         self.last_status = None
+        if self.preview_reader is not None:
+            self.preview_reader.discard()
         try:
             self.worker.start(argv)
         except OSError as error:
@@ -2278,12 +2359,16 @@ class MainWindow(QMainWindow):
             argv = ["live", "--gui", *self.source_args(secondary),
                     "--state", cfg["state"]["path"], "--obs-dir", cfg["state"]["obs_dir"],
                     "--log-dir", cfg["logging"]["dir"], "--capture-mode", "off"]
+            if self.secondary_preview_reader is not None:
+                self.secondary_preview_reader.discard()
+                argv += ["--preview", self.secondary_preview_reader.name]
             try:
                 self.secondary_worker.start(argv)
             except OSError as error:
                 self.show_secondary_status(f"Second source could not start: {error}", theme.REJECT)
                 return
             self._workers_pending.add("secondary")
+            self.preview_visibility_changed()
             self.show_secondary_status("Connecting to the second video source…", theme.INFO)
 
     def stop_counting(self):
@@ -2331,6 +2416,7 @@ class MainWindow(QMainWindow):
             d.metrics.setText("Not counting.")
             d.preview.view.setStyleSheet("")
             d.preview.clear()
+            d.secondary_preview.clear()
         self.preview_visibility_changed()
 
     def _tick(self):
@@ -2620,6 +2706,8 @@ class MainWindow(QMainWindow):
                 self.stop_counting()
         else:
             self.read_secondary_state()
+            self.dashboard.secondary_preview.clear("Second source stopped")
+            self.preview_visibility_changed()
         if self.workers_active():
             return
         self.stop_timer.stop()
@@ -2674,6 +2762,7 @@ class MainWindow(QMainWindow):
                                 for key in ("certain", "approx")}
                          for kind in dict.fromkeys((*self.primary_types, *self.secondary_types))}
         self.dashboard.types.setText(types_text(breakdown))
+        self.dashboard.refresh_screen_overlay()
 
     def refresh_viewers(self):
         cfg, _ = load_cfg()
@@ -2770,22 +2859,31 @@ class MainWindow(QMainWindow):
 
     # ---- preview
     def preview_visibility_changed(self):
-        wanted = (self.preview_reader is not None and self.dashboard.show_preview.isChecked()
+        wanted = (self.pages.currentWidget() is self.dashboard and self.dashboard.show_preview.isChecked()
                   and self.mode in ("connecting", "counting"))
+        primary = wanted and self.preview_reader is not None
+        secondary = wanted and self.secondary_preview_reader is not None and "secondary" in self._workers_pending
         if self.preview_reader is not None:
-            self.preview_reader.set_wanted(wanted)
-        if wanted:
+            self.preview_reader.set_wanted(primary)
+        if self.secondary_preview_reader is not None:
+            self.secondary_preview_reader.set_wanted(secondary)
+        if primary or secondary:
             self.preview_timer.start(1000 // 8)
         else:
             self.preview_timer.stop()
 
     def _tick_preview(self):
-        if self.stream_state in ("buffering", "ad", "reconnecting", "offline"):
-            return                                      # keep the status text instead of the last (stale) picture
-        frame = self.preview_reader.read()
+        if self.preview_reader is not None and self.stream_state not in ("buffering", "ad", "reconnecting", "offline"):
+            self._read_preview(self.preview_reader, self.dashboard.preview)
+        if self.secondary_preview_reader is not None and "secondary" in self._workers_pending:
+            self._read_preview(self.secondary_preview_reader, self.dashboard.secondary_preview)
+
+    @staticmethod
+    def _read_preview(reader, panel):
+        frame = reader.read()
         if frame is not None:
             _, width, height, data = frame
-            self.dashboard.preview.show_frame(width, height, data)
+            panel.show_frame(width, height, data)
 
     # ---- counter actions
     def _cfg_for_actions(self):
@@ -2960,18 +3058,20 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
                 self.quit_when_stopped = True
-                self.dashboard.show_screen_overlay.setChecked(False)
+                self.dashboard.toggle_screen_overlay(False)
                 self.save_layout()               # before hiding: a hidden window has no position to save
                 self.stop_counting()
                 self.hide()
             event.ignore()                       # closes for real when the worker has finished (see handle 'exit')
             return
         self.save_layout()
-        self.dashboard.show_screen_overlay.setChecked(False)
+        self.dashboard.toggle_screen_overlay(False)
         if self.update_dialog is not None:
             self.update_dialog.hide()
         if self.preview_reader is not None:
             self.preview_reader.close()
+        if self.secondary_preview_reader is not None:
+            self.secondary_preview_reader.close()
         self.obs_link.stop(timeout=0.5)
         super().closeEvent(event)
         QApplication.quit()
@@ -3051,6 +3151,7 @@ def self_test(app, report_path):
         result["screenshot"] = str(report_path.with_suffix(".png"))
         result["ok"] = bool(window.grab().save(result["screenshot"])) and bool(result["sources"]) and result["class_icon"]
         window.preview_reader and window.preview_reader.close()
+        window.secondary_preview_reader and window.secondary_preview_reader.close()
     except Exception:
         result["error"] = traceback.format_exc()
     report_path.write_text(json.dumps(result, indent=2), encoding="utf-8")

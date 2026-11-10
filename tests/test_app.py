@@ -302,39 +302,79 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
             win = A.MainWindow()
             win.timer.stop()
             win.set_counts(5, 10)
-            assert "0,007272 % · 10 coffres" in win.dashboard.token_odds.text()
+            assert "0.007272% · 10 chests" in win.dashboard.token_odds.text()
             win.dashboard.token_boost.setCurrentIndex(1)
-            assert "0,010909 % · 10 coffres · Boost ×1,5" in win.dashboard.token_odds.text()
+            assert "0.010909% · 10 chests · Boost ×1.5" in win.dashboard.token_odds.text()
             win.dashboard.token_boost.setCurrentIndex(2)
-            assert "0,014545 % · 10 coffres · Boost ×2" in win.dashboard.token_odds.text()
+            assert "0.014545% · 10 chests · Boost ×2" in win.dashboard.token_odds.text()
             win.dashboard.token_boost.setCurrentIndex(0)
-            win.dashboard.show_screen_overlay.setChecked(True)
+            win.overlay.show_screen_overlay.setChecked(True)
             overlay = win.dashboard.screen_overlay
             assert overlay.windowFlags() & Qt.WindowTransparentForInput
             assert overlay.windowFlags() & Qt.WindowStaysOnTopHint
-            assert win.dashboard.share_screen_overlay.isEnabled()
-            assert not win.dashboard.share_screen_overlay.isChecked()
-            win.dashboard.share_screen_overlay.setChecked(True)
+            assert win.overlay.share_screen_overlay.isEnabled()
+            assert not win.overlay.share_screen_overlay.isChecked()
+            win.overlay.share_screen_overlay.setChecked(True)
             assert overlay.text().splitlines() == [
                 "CERTAIN OPENED CHESTS: 5", "APPROX. OPENED CHESTS: 10",
-                win.dashboard.token_odds.text(),
+                "Pirate Token · 0.007272%",
             ]
             win.dashboard.token_mode.setCurrentText("Squad")
             win.dashboard.token_teammates.setValue(20)
-            assert "0,021816 % · 30 coffres" in win.dashboard.token_odds.text()
-            assert "0,021816 %" in overlay.text()
+            assert "0.021816% · 30 chests" in win.dashboard.token_odds.text()
+            assert "0.021816%" in overlay.text()
             win.dashboard.token_mode.setCurrentText("Solo")
-            assert "0,007272 % · 10 coffres" in win.dashboard.token_odds.text()
+            assert "0.007272% · 10 chests" in win.dashboard.token_odds.text()
             win._set(0, 0, "reset")
             win.dashboard.token_mode.setCurrentText("Duo")
-            assert "0,000000 % · 0 coffres" in win.dashboard.token_odds.text()
-            assert "0,000000 %" in overlay.text()
-            win.dashboard.show_screen_overlay.setChecked(False)
+            assert "0.000000% · 0 chests" in win.dashboard.token_odds.text()
+            assert "0.000000%" in overlay.text()
+            win.overlay.mode_buttons["certain"].setChecked(True)
+            win.overlay.token_text.setText("Odds: #")
+            win.overlay.show_types.setChecked(True)
+            win.primary_types = {"unclassified": {"certain": 0, "approx": 3}}
+            win.refresh_types()
+            win.overlay.apply()
+            assert overlay.text().splitlines() == [
+                "CERTAIN OPENED CHESTS: 0", "Odds: 0.000000%", "Chest types: not classified 3",
+            ]
+            assert win.overlay.preview.text() == overlay.text()
+            win.overlay.show_token.setChecked(False)
+            win.overlay.apply()
+            assert "Odds:" not in overlay.text()
+            win.overlay.show_screen_overlay.setChecked(False)
             assert overlay.isHidden()
-            assert not win.dashboard.share_screen_overlay.isEnabled()
+            assert not win.overlay.share_screen_overlay.isEnabled()
             win.dashboard.token_teammates.setValue(10)
             win.profile_changed()
             assert win.dashboard.token_teammates.value() == 0
+
+            win.dashboard.token_mode.setCurrentText("Squad")
+            win.dashboard.token_boost.setCurrentIndex(1)
+            win.dashboard.show_preview.setChecked(True)
+            win.dashboard.show_log.setChecked(False)
+            monitors = [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)]
+            win._fill_sources([], monitors)
+            second = {"source": "desktop", "monitor": 2}
+            win.dashboard.secondary_source.setCurrentIndex(win.dashboard.secondary_source.findData(second))
+            win.overlay.show_screen_overlay.setChecked(True)
+            win.overlay.share_screen_overlay.setChecked(True)
+            if win._source_scan is not None:
+                win._source_scan.join(30)
+            win.close()
+            qt.processEvents()
+
+            win = A.MainWindow()
+            win.timer.stop()
+            win._fill_sources([], monitors)
+            assert win.dashboard.token_mode.currentText() == "Squad"
+            assert win.dashboard.token_boost.currentData() == 1.5
+            assert win.dashboard.show_preview.isChecked() and not win.dashboard.show_log.isChecked()
+            assert win.dashboard.secondary_source.currentData() == second
+            assert win.overlay.show_screen_overlay.isChecked() and win.overlay.share_screen_overlay.isChecked()
+            assert win.overlay.show_types.isChecked() and not win.overlay.show_token.isChecked()
+            assert win.overlay.mode_buttons["certain"].isChecked()
+            assert win.overlay.token_text.text() == "Odds: #"
         finally:
             if win is not None:
                 if win._source_scan is not None:
@@ -347,13 +387,18 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
 def test_hdr_tone_map_preserves_chromatic_highlights():
     from fortnite_chest_counter.input.video_sources import tone_map_scrgb
 
-    pixels = np.array([[[2, 1.5, 1.1, 1], [1, 0.65, 1.1, 1], [0, 0, 0, 1]]], dtype=np.float16)
-    converted = tone_map_scrgb(pixels)
+    pixels = np.array([[[8, 6, 4.4, 1], [4, 2.6, 4.4, 1], [0, 0, 0, 1],
+                        [1.2, 1.2, 1.2, 1]]], dtype=np.float16)
+    converted = tone_map_scrgb(pixels, exposure=0.25)
+    detector = tone_map_scrgb(pixels / 4)
+    assert detector[0, 1].tolist() == converted[0, 1].tolist()
+    assert min(detector[0, 1, 0], detector[0, 1, 2]) > 170
     assert converted.dtype == np.uint8
     assert 255 >= converted[0, 0, 0] > converted[0, 0, 1] > converted[0, 0, 2]
     red, green, blue = map(int, converted[0, 1])
     assert green + 8 < min(red, blue)
     assert not converted[0, 2].any()
+    assert 145 <= converted[0, 3, 0] <= 151
 
 
 def test_second_source_combines_counts_resets_and_can_stop_independently():
@@ -422,13 +467,18 @@ def test_second_source_combines_counts_resets_and_can_stop_independently():
             win.start_counting()
             assert "--profile" in win.worker.argv and "--state" not in win.worker.argv
             assert win.secondary_worker.argv[2:6] == ["--source", "desktop", "--monitor", "2"]
-            assert win.secondary_worker.argv[-2:] == ["--capture-mode", "off"]
+            capture_arg = win.secondary_worker.argv.index("--capture-mode")
+            assert win.secondary_worker.argv[capture_arg + 1] == "off"
+            if win.secondary_preview_reader is not None:
+                preview_arg = win.secondary_worker.argv.index("--preview")
+                assert win.secondary_worker.argv[preview_arg + 1] == win.secondary_preview_reader.name
+                assert win.secondary_preview_reader.name != win.preview_reader.name
             win.handle({"type": "connected"})
             win.handle_secondary({"type": "connected"})
             win.handle({"type": "counts", "certain": 5, "approx": 10})
             win.handle_secondary({"type": "counts", "certain": 2, "approx": 4})
             assert win.counts == (7, 14)
-            assert "14 coffres" in dashboard.token_odds.text()
+            assert "14 chests" in dashboard.token_odds.text()
             assert dashboard.token_mode.currentText() == "Duo" and dashboard.token_teammates.isHidden()
             assert "10" in dashboard.viewers.text()
             win.reset_counts()
@@ -463,7 +513,7 @@ def test_second_source_combines_counts_resets_and_can_stop_independently():
             assert win._workers_pending == {"primary"}
             dashboard.token_teammates.setValue(8)
             assert not dashboard.token_teammates.isHidden()
-            assert "8 coffres" in dashboard.token_odds.text()
+            assert "8 chests" in dashboard.token_odds.text()
             win.worker.alive = False
             win.handle({"type": "exit", "code": 0})
             secondary.setCurrentIndex(secondary.findData(screen2))

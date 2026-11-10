@@ -34,6 +34,9 @@ DEFAULTS = {
         "approx_text": "APPROX. OPENED CHESTS: {count}",
         "combined_status_format": "{certain} certain • ~{approximate} estimated",
         "use_thousands_separator": True,
+        "screen_token_text": "Pirate Token · #",
+        "screen_show_token": True,
+        "screen_show_types": False,
         # v0.1.0 names, still understood: a config that sets only these gets "<label>: {count}" as its text.
         "certain_label": "CERTAIN OPENED CHESTS",
         "approximate_label": "APPROX. OPENED CHESTS",
@@ -80,6 +83,13 @@ DEFAULTS = {
         "source_uuid": "",                      # its OBS id, so a rename in OBS is followed (set by the app)
     },
     "app": {
+        "screen_overlay_enabled": False,
+        "screen_overlay_shared": False,
+        "token_mode": "Solo",
+        "token_boost": "Normal ×1",
+        "live_preview": False,
+        "show_activity": True,
+        "secondary_source": "null",
         "remember_window": True,                # the desktop app reopens with the size, position and maximised state it closed with
     },
     "update": {
