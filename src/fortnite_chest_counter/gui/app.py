@@ -23,8 +23,8 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QPoint, QRect, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap
+from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, QSize, Qt, QTimer, QUrl, QVariantAnimation
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
@@ -383,7 +383,8 @@ class CountCard(QFrame):
         self.value = label("0", "countValue")
         self.value.setStyleSheet(f"color: {color};")
         box.addWidget(self.value)
-        box.addWidget(label(subtitle, "countSub", wrap=True))
+        if subtitle:
+            box.addWidget(label(subtitle, "countSub", wrap=True))
         layout.addLayout(box, 1)
         self._flash = QTimer(self)
         self._flash.setSingleShot(True)
@@ -395,6 +396,53 @@ class CountCard(QFrame):
             self.setStyleSheet(f"#countCard {{ border: 1px solid {self.color}; background: {theme.rgba(self.color, 0.08)}; }}")
             self._flash.start(900)
         self.value.setText(text)
+
+
+class ChestIllustration(QWidget):
+    """A small dashboard illustration, repainted only during a confirmed opening."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(160, 112)
+        self._lift = 0.0
+        self._opening = QVariantAnimation(self)
+        self._opening.setDuration(480)
+        self._opening.setStartValue(0.0)
+        self._opening.setKeyValueAt(0.36, 1.0)
+        self._opening.setKeyValueAt(0.65, 1.0)
+        self._opening.setEndValue(0.0)
+        self._opening.valueChanged.connect(self._set_lift)
+
+    def _set_lift(self, lift):
+        self._lift = lift
+        self.update()
+
+    def celebrate(self):
+        if self.isVisible():
+            self._opening.stop()
+            self._opening.start()
+
+    def paintEvent(self, event):
+        with QPainter(self) as painter:
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#282440"))
+            painter.drawEllipse(QRectF(5, 1, 150, 110))
+            painter.setBrush(QColor("#141323"))
+            painter.drawEllipse(QRectF(27, 94, 106, 10))
+            painter.setBrush(QColor("#6e488b"))
+            painter.drawRoundedRect(QRectF(26, 57, 108, 38), 8, 8)
+            painter.setBrush(QColor("#e4b66a"))
+            for x in (38, 110):
+                painter.drawRoundedRect(QRectF(x, 56, 12, 39), 3, 3)
+            painter.save()
+            painter.translate(0, -18 * self._lift)
+            painter.drawRoundedRect(QRectF(22, 36, 116, 29), 9, 9)
+            painter.setBrush(QColor("#9765b8"))
+            painter.drawRoundedRect(QRectF(29, 41, 102, 15), 5, 5)
+            painter.setBrush(QColor("#f4cf86"))
+            painter.drawRoundedRect(QRectF(70, 56, 20, 16), 4, 4)
+            painter.restore()
 
 
 class PreviewPanel(QFrame):
@@ -778,8 +826,7 @@ class Dashboard(QWidget):
         self.win = win
         self.screen_overlay = None
         self.screen_overlay_display = None
-        layout = page_layout(self, "Dashboard", "Counts the chests in Fortnite video - a livestream, a screen or OBS - "
-                                                "and keeps the numbers (also in a text file OBS can show on stream).")
+        layout = page_layout(self, "Dashboard", None)
         header = layout.itemAt(0).widget()
         layout.removeWidget(header)
         top = QHBoxLayout()
@@ -787,6 +834,9 @@ class Dashboard(QWidget):
         top.addStretch(1)
         self.pill = label("", "pill")
         top.addWidget(self.pill, 0, Qt.AlignVCenter)
+        top.addWidget(button("Reset...", tip="Set both counts to 0", on_click=win.reset_counts))
+        self.start = button("Start counting", "primary", on_click=win.toggle_counting)
+        top.addWidget(self.start)
         layout.insertLayout(0, top)
 
         # error banner
@@ -812,43 +862,28 @@ class Dashboard(QWidget):
         self.notice.hide()
         layout.addWidget(self.notice)
 
-        # count profile (v0.2.2): whose chests these are. One profile counts at a time.
-        prow = QHBoxLayout()
-        prow.setSpacing(8)
-        prow.addWidget(label("Profile"))
-        self.profile = QComboBox()
-        self.profile.setMinimumWidth(220)
-        self.profile.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.profile.setToolTip("Each profile keeps its own counts and its own video source (for example one profile per "
-                                "streamer). One profile counts at a time; OBS always shows the selected profile.")
-        self.profile.activated.connect(win.switch_profile)
-        prow.addWidget(self.profile, 1)
-        self.profile_new = button("New profile...", tip="A new profile with its own counts, starting at 0",
-                                  on_click=win.new_profile)
-        self.profile_rename = button("Rename...", tip="Change the name of the selected profile (its counts stay)",
-                                     on_click=win.rename_profile)
-        self.profile_delete = button("Delete...", tip="Remove the selected profile (its counts are kept in a backup "
-                                                      "file)", on_click=win.delete_profile)
-        for widget in (self.profile_new, self.profile_rename, self.profile_delete):
-            prow.addWidget(widget)
-        layout.addLayout(prow)
+        sources, sources_layout = card()
+        self.source_summary = label("", "hint", wrap=True)
+        self.source_summary.setTextFormat(Qt.PlainText)
+        sources_layout.addWidget(self.source_summary)
+        self.secondary_status = label("", "hint", wrap=True)
+        self.secondary_status.hide()
+        sources_layout.addWidget(self.secondary_status)
+        layout.addWidget(sources)
 
-        # Breakdown and total
-        counts = QHBoxLayout()
-        counts.setSpacing(14)
-        self.certain = CountCard("CERTAIN", "Chests confirmed by strong evidence", theme.CERTAIN)
-        self.approx = CountCard("APPROX", "Estimated openings only", theme.APPROX)
-        self.total = CountCard("TOTAL", "Certain + Approx", theme.INFO)
-        for count_card in (self.certain, self.approx, self.total):
-            counts.addWidget(count_card, 1)
-        actions = QVBoxLayout()
-        actions.setSpacing(8)
-        actions.addWidget(button("Edit counts...", tip="Start from the chests you already opened, or correct the counter",
-                                 on_click=win.edit_counts))
-        actions.addWidget(button("Reset...", tip="Set both counts to 0", on_click=win.reset_counts))
-        actions.addStretch(1)
-        counts.addLayout(actions)
-        layout.addLayout(counts)
+        board = QHBoxLayout()
+        board.setSpacing(14)
+        stage, stage_layout = card()
+        stage.setObjectName("chestStage")
+        stage_layout.addStretch(1)
+        self.chest = ChestIllustration()
+        stage_layout.addWidget(self.chest, 0, Qt.AlignHCenter)
+        total_title = label("TOTAL CHESTS", "countLabel")
+        stage_layout.addWidget(total_title, 0, Qt.AlignHCenter)
+        self.total = label("0", "stageTotal")
+        stage_layout.addWidget(self.total, 0, Qt.AlignHCenter)
+        odds_title = label("PIRATE TOKEN CHANCE", "countLabel")
+        stage_layout.addWidget(odds_title, 0, Qt.AlignHCenter)
         token_row = QHBoxLayout()
         self.token_mode = QComboBox()
         self.token_mode.addItems(["Solo", "Duo", "Trio", "Squad"])
@@ -857,15 +892,40 @@ class Dashboard(QWidget):
         for caption, multiplier in (("Normal ×1", 1.0), ("Boost ×1.5", 1.5), ("Boost ×2", 2.0)):
             self.token_boost.addItem(caption, multiplier)
         self.token_boost.setToolTip("Apply this multiplier to every chest in the estimate.")
-        self.token_odds = label("", "hint", wrap=True)
+        self.token_odds = label("", "stageOdds")
         self.token_odds.setToolTip("Estimated chance that at least one chest in the shown total would drop a Pirate Token. "
                                    "The model assumes independent rolls at 1 in 137,500 per chest before the selected boost. "
                                    "The calculation uses the TOTAL card.")
-        for widget in (self.token_mode, self.token_boost, self.token_odds):
-            token_row.addWidget(widget)
-        token_row.setStretch(2, 1)
-        layout.addLayout(token_row)
+        stage_layout.addWidget(self.token_odds, 0, Qt.AlignHCenter)
+        token_row.addStretch(1)
+        token_row.addWidget(self.token_mode)
+        token_row.addWidget(self.token_boost)
+        token_row.addStretch(1)
+        stage_layout.addLayout(token_row)
+        stage_layout.addStretch(1)
+        board.addWidget(stage, 5)
         self.token_boost.currentIndexChanged.connect(lambda _: self.update_token_odds())
+
+        rail, rail_layout = card()
+        counts = QHBoxLayout()
+        self.certain = CountCard("CERTAIN", None, theme.CERTAIN)
+        self.approx = CountCard("APPROX", None, theme.APPROX)
+        self.certain.setToolTip("Chests confirmed by strong evidence")
+        self.approx.setToolTip("Estimated openings only")
+        counts.addWidget(self.certain, 1)
+        counts.addWidget(self.approx, 1)
+        rail_layout.addLayout(counts)
+        rail_layout.addWidget(label("Recent openings", "cardTitle"))
+        self.recent = QListWidget()
+        self.recent.setObjectName("recentOpenings")
+        self.recent.setSelectionMode(QListWidget.NoSelection)
+        self.recent.setFocusPolicy(Qt.NoFocus)
+        self.recent.setWordWrap(True)
+        rail_layout.addWidget(self.recent, 1)
+        self.clear_recent()
+        rail_layout.addWidget(button("Edit counts...", "link", on_click=win.edit_counts), 0, Qt.AlignLeft)
+        board.addWidget(rail, 4)
+        layout.addLayout(board)
         self.update_token_odds()
         types = QHBoxLayout()                                 # v0.2.2: read-only chest-type split of the APPROX total
         types.addWidget(label("Chest types:", "hint"), 0, Qt.AlignTop)
@@ -887,22 +947,38 @@ class Dashboard(QWidget):
         self.obs_line.hide()
         layout.addWidget(self.obs_line)
 
-        # source + start
+        # Capture and diagnostics are available together below the board.
         box, box_layout = card()
+        # count profile (v0.2.2): whose chests these are. One profile counts at a time.
+        prow = QHBoxLayout()
+        prow.setSpacing(8)
+        prow.addWidget(label("Profile"))
+        self.profile = QComboBox()
+        self.profile.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.profile.setToolTip("Each profile keeps its own counts and its own video source (for example one profile per "
+                                "streamer). One profile counts at a time; OBS always shows the selected profile.")
+        self.profile.activated.connect(win.switch_profile)
+        prow.addWidget(self.profile, 1)
+        self.profile_new = button("New profile...", tip="A new profile with its own counts, starting at 0",
+                                  on_click=win.new_profile)
+        self.profile_rename = button("Rename...", tip="Change the name of the selected profile (its counts stay)",
+                                     on_click=win.rename_profile)
+        self.profile_delete = button("Delete...", tip="Remove the selected profile (its counts are kept in a backup "
+                                                      "file)", on_click=win.delete_profile)
+        for widget in (self.profile_new, self.profile_rename, self.profile_delete):
+            prow.addWidget(widget)
+        box_layout.addLayout(prow)
+
         row = QHBoxLayout()
         row.setSpacing(10)
         row.addWidget(label("Video source"))
         self.source = QComboBox()
-        self.source.setMinimumWidth(220)
         self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.source.setMinimumContentsLength(24)
         self.source.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         row.addWidget(self.source, 1)
         self.refresh = button("Refresh", tip="Look for video devices and screens again", on_click=win.refresh_sources)
         row.addWidget(self.refresh)
-        self.start = button("Start counting", "primary", on_click=win.toggle_counting)
-        self.start.setMinimumWidth(160)
-        row.addWidget(self.start)
         box_layout.addLayout(row)
         row = QHBoxLayout()
         row.addWidget(label("Second video source"))
@@ -915,9 +991,9 @@ class Dashboard(QWidget):
         self.secondary_source.currentIndexChanged.connect(lambda _: win.secondary_source_changed())
         row.addWidget(self.secondary_source, 1)
         box_layout.addLayout(row)
-        self.secondary_status = label("", "hint", wrap=True)
-        self.secondary_status.hide()
-        box_layout.addWidget(self.secondary_status)
+        self.source.currentTextChanged.connect(self.update_source_summary)
+        self.secondary_source.currentTextChanged.connect(self.update_source_summary)
+        self.update_source_summary()
         self.url_row = QWidget()                            # only for "Livestream URL"
         url_layout = QVBoxLayout(self.url_row)
         url_layout.setContentsMargins(0, 0, 0, 0)
@@ -971,10 +1047,13 @@ class Dashboard(QWidget):
         box_layout.addLayout(row)
         self.rec_status = label("", "hint", wrap=True)
         box_layout.addWidget(self.rec_status)
-        layout.addWidget(box)
-
         # optional panels
         row = QHBoxLayout()
+        capture = button("Capture settings", "toggle")
+        capture.setCheckable(True)
+        box.hide()
+        capture.toggled.connect(box.setVisible)
+        row.addWidget(capture)
         self.show_log = button("Activity", "toggle", tip="What the counter sees and decides, live")
         self.show_log.setCheckable(True)
         self.show_preview = button("Live preview", "toggle", tip="The video the counter is analysing")
@@ -993,6 +1072,7 @@ class Dashboard(QWidget):
                                 on_click=win.open_logs)
         row.addWidget(self.open_logs)
         layout.addLayout(row)
+        layout.addWidget(box)
 
         self.split = QSplitter(Qt.Horizontal)
         self.log = QPlainTextEdit()
@@ -1019,14 +1099,56 @@ class Dashboard(QWidget):
         self.show_preview.toggled.connect(self._panels)
         self.detail.currentIndexChanged.connect(lambda _: win.render_log())
 
+    def update_source_summary(self):
+        primary = self.source.currentText() or "Scanning..."
+        secondary = self.secondary_source.currentText() or "None (optional)"
+        self.source_summary.setText(f"Source 1  ·  {primary}     |     Source 2  ·  {secondary}")
+
+    def clear_recent(self):
+        self.recent.clear()
+        item = QListWidgetItem("Open a chest in Fortnite to see it here.")
+        item.setForeground(QColor(theme.MUTED))
+        self.recent.addItem(item)
+
+    def show_opening(self, message, source):
+        if message.get("type") == "type_update":
+            for index in range(self.recent.count()):
+                item = self.recent.item(index)
+                data = item.data(Qt.UserRole)
+                if data and (data["source"], data["event_id"]) == (source, message.get("event_id")):
+                    data["chest_type"] = message.get("chest_type")
+                    self._describe_opening(item, data)
+                    break
+            return
+        verdict = message.get("verdict")
+        if message.get("type") != "event" or verdict not in ("certain", "approx"):
+            return
+        if self.recent.item(0).data(Qt.UserRole) is None:
+            self.recent.clear()
+        item = QListWidgetItem()
+        self._describe_opening(item, {**message, "source": source})
+        self.recent.insertItem(0, item)
+        if self.recent.count() > 20:
+            self.recent.takeItem(20)
+        self.recent.scrollToTop()
+        if verdict == "certain":
+            self.chest.celebrate()
+
+    @staticmethod
+    def _describe_opening(item, data):
+        chest = chest_types.LABELS.get(data.get("chest_type"), chest_types.LABELS[chest_types.UNKNOWN])
+        verdict = data["verdict"]
+        item.setData(Qt.UserRole, data)
+        item.setText(f"{chest}  ·  {verdict.title()}\n{data['clock']}  ·  Source {data['source']}")
+        item.setForeground(QColor(theme.LOG_COLORS[verdict]))
+
     def update_token_odds(self):
         total = max(0, self.win.counts[1])
         boost = self.token_boost.currentData()
         probability = -math.expm1(total * math.log1p(-boost / PIRATE_TOKEN_RATE)) if total else 0
         chance = f"{probability:.6%}"
         self.token_chance = chance
-        scenario = f" · {self.token_boost.currentText()}" if boost > 1 else ""
-        self.token_odds.setText(f"Pirate Token · {chance} · {total:,} chests{scenario}")
+        self.token_odds.setText(chance)
         self.refresh_screen_overlay()
 
     def toggle_screen_overlay(self, enabled):
@@ -2114,6 +2236,7 @@ class MainWindow(QMainWindow):
                 break
         self.dashboard.source.setCurrentIndex(index)
         self.dashboard.source.blockSignals(False)
+        self.dashboard.update_source_summary()
         self.dashboard.position_screen_overlay()
         self.dashboard.url_row.setVisible((self.dashboard.source.currentData() or {}).get("source") == "stream")
         self._obs_camera_found = "OBS Virtual Camera" in devices
@@ -2229,6 +2352,7 @@ class MainWindow(QMainWindow):
     def profile_changed(self):
         """After a switch / new profile: its counts, its OBS text, its video source."""
         reg = self.fill_profiles()
+        self.dashboard.clear_recent()
         self.read_state(force=True)
         self.read_secondary_state()
         self.write_obs_files(quiet=True)              # OBS shows the selected profile
@@ -2604,6 +2728,7 @@ class MainWindow(QMainWindow):
     def handle(self, message):
         kind = message.get("type")
         self.add_log(message)
+        self.dashboard.show_opening(message, 1)
         if kind == "connected":
             self.connected = message
             if self.mode != "stopping":
@@ -2681,6 +2806,7 @@ class MainWindow(QMainWindow):
 
     def handle_secondary(self, message):
         kind = message.get("type")
+        self.dashboard.show_opening(message, 2)
         if kind == "connected" and self.mode != "stopping":
             self.show_secondary_status("Counting the second video source.", theme.CERTAIN)
         elif kind in ("counts", "event", "status", "progress"):
@@ -2760,7 +2886,7 @@ class MainWindow(QMainWindow):
         self.counts = (certain, approx)
         self.dashboard.certain.set_value(certain, flash=flash and changed)
         self.dashboard.approx.set_value(max(0, approx - certain), flash=flash and changed)
-        self.dashboard.total.set_value(approx, flash=flash and changed)
+        self.dashboard.total.setText(fmt(approx))
         self.dashboard.update_token_odds()
 
     def refresh_types(self):
@@ -2854,6 +2980,7 @@ class MainWindow(QMainWindow):
     def clear_log(self):
         self.entries.clear()
         self.dashboard.log.clear()
+        self.dashboard.clear_recent()
 
     def open_logs(self):
         cfg, _ = load_cfg()

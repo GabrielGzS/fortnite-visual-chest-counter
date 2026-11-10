@@ -42,6 +42,13 @@ QToolTip {{ background: {SURFACE_3}; color: {TEXT}; border: 1px solid {BORDER}; 
 #hint, .hint {{ color: {MUTED}; font-size: 9pt; }}
 #metrics {{ color: {MUTED}; font-size: 9pt; }}
 
+#chestStage {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #24203a, stop:1 #151824);
+              border: 1px solid #3f3557; border-radius: 14px; }}
+#stageTotal {{ color: {TEXT}; font-size: 44pt; font-weight: 700; }}
+#stageOdds {{ color: #f4cf86; font-size: 20pt; font-weight: 600; }}
+#recentOpenings {{ background: transparent; border: none; min-height: 120px; }}
+#recentOpenings::item {{ border-bottom: 1px solid {BORDER}; padding: 5px 2px; }}
+
 #countCard {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 12px; }}
 #countLabel {{ color: {MUTED}; font-size: 9pt; font-weight: 600; letter-spacing: 1px; }}
 #countValue {{ font-size: 40pt; font-weight: 700; }}

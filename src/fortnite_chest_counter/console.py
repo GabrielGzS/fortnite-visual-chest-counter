@@ -101,7 +101,7 @@ def event_message(ev, certain_text, approx_text, certain=None, approx=None):
             "generic": ev.get("source") == "interaction_object" and not (counted_certain or counted_approx),
             "clock": time.strftime("%H:%M:%S"), "why": _why(ev), "evidence": _evidence(ev),
             "event_id": ev.get("event_id", ""), "stamp": ev.get("stamp", ""), "source": ev.get("source", ""),
-            "tier": ev.get("adjusted_tier", ""), "latency_s": ev.get("latency_s"), "reason": ev.get("reason", ""),
+            "chest_type": ev.get("chest_type"), "tier": ev.get("adjusted_tier", ""), "latency_s": ev.get("latency_s"), "reason": ev.get("reason", ""),
             "certain_text": certain_text, "approx_text": approx_text, "certain": certain, "approx": approx}
 
 
