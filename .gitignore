@@ -10,6 +10,7 @@ build-venv/
 # Local / runtime data (every user has their own)
 state/
 logs/
+captures/
 obs_output/
 video_output/
 config.toml

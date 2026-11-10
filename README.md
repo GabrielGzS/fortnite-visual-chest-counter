@@ -290,12 +290,13 @@ All frames are processed in memory with a latest-frame policy (no growing queue)
 
 Python 3.11+, FFmpeg on PATH when running from source.
 
-On Windows, after setting up the local environment below, double-click **Launch Chest Counter.cmd**. Select **French**
-in **Settings → Fortnite language** for the French HUD. The Dashboard shows **Certain**, **Approx** (estimated openings
+After setting up the local environment below, double-click **Launch Chest Counter.cmd** on Windows or run
+`./launch-chest-counter.sh` from a shell. Select **French** in **Settings → Fortnite language** for the French HUD. The Dashboard shows **Certain**, **Approx** (estimated openings
 only), and **Total** across the selected video sources. The Pirate Shop Token estimate uses that total, a normal-match
 rate of one in 137,500 per chest, and the selected boost. See the
 [Fortnite Status announcement](https://x.com/FortniteStatus/status/2119202610322227327) and compare scenarios with the
 [Pirate Token Quest calculator](https://piratetoken.quest/drop-rate/).
+See [Fork changes and verification](docs/FORK_CHANGES.md) for the Windows and detector changes.
 
 ```text
 python -m venv .venv
