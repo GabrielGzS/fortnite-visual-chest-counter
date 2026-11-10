@@ -1,6 +1,6 @@
-# Fork changes and verification
+# French Match Tracker
 
-## Using the fork
+## Setup and features
 
 After installing the development environment, use **launch-chest-counter.cmd** on Windows or run
 `./launch-chest-counter.sh` from a shell. The shell script can also use a Windows virtual environment from Git Bash.
