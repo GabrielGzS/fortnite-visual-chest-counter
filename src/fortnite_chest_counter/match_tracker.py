@@ -1,0 +1,149 @@
+"""
+Follows the match beside the chest counter (v0.3.0, M4). Shadow mode only: it watches, writes diagnostics, and changes nothing else.
+
+The live loop calls these after each frame has been counted:
+
+    chest(ev)         a finished event; a counted chest becomes evidence for the next sample
+    offer(t, frame)   an analysed frame; about one per second of source time is actually read
+    close(reason)     counting stopped: closes whatever is open
+
+It reuses the frames the detector already decoded and only reads them. Its one output is "match_state" lines in the session log, which
+never carry a "time" key: research/regress.py and research/match_replay.py read any line with one as a chest event.
+
+No failure here may reach the counter. Every call contains its own errors: the first one gives one warning and tracking stops for the rest
+of the run, leaving any open match unrecorded. KeyboardInterrupt is left alone, because that is the user stopping the counter.
+
+Evidence rules, matching the offline replay (research/match_replay.py) and M2's rule that pending evidence cannot cross a break:
+  * A chest reaches M2 with the next sample. On a black or frozen sample M2 ignores it, and it is not carried over to a later one.
+  * A chest that began before a break in the video is dropped. The detector finishes events late, so without this a chest from before a
+    long outage could arrive just after it and open a match that nothing on screen supports.
+  * Chests still waiting when counting stops are counted in the summary, never given to M2.
+"""
+
+import math
+import time
+from dataclasses import asdict
+
+from fortnite_chest_counter import match_cues as M
+from fortnite_chest_counter import match_state as S
+
+LOG_EVENT = "match_state"
+LOG_SCHEMA = 1
+MODE = "shadow"
+SAMPLE_SECONDS = 1.0
+SAMPLE_TOLERANCE = 1e-6                    # frame times are sums of 1/fps: fifteen of them can add up to 0.9999999 s
+SOURCE_LOST_REASONS = frozenset({"video source stopped"})
+
+
+class MatchTracker:
+    def __init__(self, write, warn, cues=M, machine=None):
+        """`write` takes one dict for the session log, `warn` one message for the user. Raises if the templates cannot be loaded."""
+        self._write, self._warn, self._cues = write, warn, cues
+        self._reader = cues.CueReader()
+        self._machine = machine if machine is not None else S.MatchStateMachine()
+        self._picture = None               # a small copy of the last sample's picture, never the frame itself
+        self._pending = []                 # languages of the chests counted since the last sample
+        self._last_sample_t = self._last_seen_t = self._break_t = None
+        self._samples, self._sample_s, self._total_s, self._max_s, self._source_s = 0, 0.0, 0.0, 0.0, 0.0
+        self._chests = {"delivered": 0, "no_picture": 0, "dropped_at_break": 0}
+        self.failed = self.closed = False
+        self._log("started", mode=MODE, schema=LOG_SCHEMA, sample_seconds=SAMPLE_SECONDS)
+
+    # ------------------------------------------------------------------ the three calls
+    def offer(self, t, frame):
+        if self.failed or self.closed:
+            return
+        begin = time.perf_counter()
+        try:
+            sampled = self._offer(t, frame)
+        except Exception as error:
+            self._fail("offer", error)
+            return
+        spent = time.perf_counter() - begin
+        self._total_s += spent
+        if sampled:
+            self._samples += 1
+            self._sample_s += spent
+            self._max_s = max(self._max_s, spent)
+
+    def chest(self, ev):
+        if self.failed or self.closed:
+            return
+        try:
+            if not (ev.get("certain_counted") or ev.get("approx_counted")):
+                return
+            if self._break_t is not None and ev["time"] < self._break_t:
+                self._chests["dropped_at_break"] += 1
+                return
+            self._pending.append(S.chest_language(ev.get("popup_template")))
+        except Exception as error:
+            self._fail("chest", error)
+
+    def close(self, reason):
+        if self.failed or self.closed:
+            return
+        self.closed = True
+        try:
+            if self._last_seen_t is not None:
+                ended_by = S.LOST if reason in SOURCE_LOST_REASONS else S.STOPPED
+                self._report(self._machine.finish(self._last_seen_t, ended_by))
+            self._log("summary", stop_reason=reason, chests_undelivered=len(self._pending), **{f"chests_{k}": v for k, v in self._chests.items()},
+                      **self.stats())
+        except Exception as error:
+            self._fail("close", error)
+
+    def stats(self):
+        """Time spent here, apart from chest detection. Measured on the wall clock in the counting thread, so at worst an overestimate of
+        its CPU. The share of one core is per second of source time, which also holds when a recording runs faster than real time."""
+        return {"match_mode": MODE, "match_failed": self.failed, "match_samples": self._samples,
+                "match_ms_avg": round(1000 * self._sample_s / self._samples, 3) if self._samples else None,
+                "match_ms_max": round(1000 * self._max_s, 3) if self._samples else None,
+                "match_total_s": round(self._total_s, 4), "match_source_seconds": round(self._source_s, 1),
+                "match_percent_of_one_core": round(100 * self._total_s / self._source_s, 3) if self._source_s else None}
+
+    # ------------------------------------------------------------------ inside
+    def _offer(self, t, frame):
+        t = float(t)
+        if not math.isfinite(t):
+            raise ValueError(f"frame time is not a number: {t}")
+        if self._last_seen_t is not None and t > self._last_seen_t:
+            self._source_s += t - self._last_seen_t
+        self._last_seen_t = t
+        last = self._last_sample_t
+        if last is not None and 0 <= t - last < SAMPLE_SECONDS - SAMPLE_TOLERANCE:
+            return False
+        if last is not None and (t < last or t - last > S.MAX_SAMPLE_GAP):
+            self._chests["dropped_at_break"] += len(self._pending)
+            self._pending.clear()
+            self._break_t = t
+        self._last_sample_t = t
+        picture = self._cues.picture_evidence(frame, self._picture)
+        self._picture = picture.sample
+        scores, health = self._reader.read(frame), self._cues.health_bar_pixels(frame)
+        chests, self._pending = tuple(self._pending), []
+        self._chests["no_picture" if picture.black or picture.frozen else "delivered"] += len(chests)
+        self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests)))
+        return True
+
+    def _report(self, events):
+        for event in events:
+            if isinstance(event, S.MatchRecord):
+                record = event.to_dict()
+                record["evidence"] = sorted(record["evidence"], key=lambda item: (item[0], item[1]))      # M2 gathers these from a set
+                self._log("record", **record)
+            else:
+                self._log("transition" if isinstance(event, S.Transition) else "opened", **asdict(event))
+
+    def _log(self, kind, **fields):
+        self._write({"event": LOG_EVENT, "kind": kind, **fields})
+
+    def _fail(self, where, error):
+        self.failed = True
+        self._pending.clear()
+        detail = f"{type(error).__name__}: {error}"
+        for report in (lambda: self._warn(f"match tracking stopped for this run ({detail}); counting is not affected"),
+                       lambda: self._log("tracker_disabled", where=where, error=detail, last_t=self._last_seen_t)):
+            try:
+                report()
+            except Exception:
+                pass

@@ -25,11 +25,13 @@ KEYS = ("time", "source", "popup_score", "popup_template", "base_tier", "adjuste
         "interaction_score", "sprite_present", "certain_counted", "approx_counted")
 
 
-def run_clip(video, tmp, sets=()):
+def run_clip(video, tmp, sets=(), match_mode=None, until=None):
     """Run `simulate` in a fresh process; `sets` = ["NAME=python-literal", ...] overrides estimator constants first."""
     tmp = Path(tmp)
     argv = ["simulate", "--video", str(video), "--reset", "--no-evaluate",
             "--state", str(tmp / "s.json"), "--obs-dir", str(tmp / "o"), "--log-dir", str(tmp / "l")]
+    argv += ["--match-mode", match_mode] if match_mode else []
+    argv += ["--until", str(until)] if until is not None else []
     lines = ["import ast, sys", "import fortnite_chest_counter.estimator as E"]
     lines += [f"setattr(E, {k!r}, ast.literal_eval({v!r}))" for k, v in (x.split("=", 1) for x in sets)]
     lines += ["from fortnite_chest_counter.counter import main", f"sys.exit(main({argv!r}))"]
@@ -100,6 +102,7 @@ def main():
     ap.add_argument("--clips", nargs="*", default=DEFAULT_CLIPS, help=f"any of {list(CLIPS)}")
     ap.add_argument("--set", dest="sets", action="append", default=[], help="NAME=VALUE estimator constant override (experiments)")
     ap.add_argument("--jobs", type=int, default=2, help="clips to run in parallel")
+    ap.add_argument("--match-mode", help="run with [match] mode set to this (off or shadow)")
     a = ap.parse_args()
     override = dict(v.split("=", 1) for v in a.video)
     bad = 0
@@ -107,7 +110,7 @@ def main():
 
     def one(clip):
         with tempfile.TemporaryDirectory() as tmp:
-            return clip, run_clip(override.get(clip, CLIPS[clip][1]), tmp, a.sets)
+            return clip, run_clip(override.get(clip, CLIPS[clip][1]), tmp, a.sets, a.match_mode)
     with ThreadPoolExecutor(max_workers=a.jobs) as pool:
         results = dict(pool.map(one, a.clips))
     if a.sets:

@@ -564,8 +564,10 @@ def test_this_module_touches_no_images_files_or_clocks():
     assert not names & {"open", "time", "datetime", "random", "print", "Path"}, names
 
 
-def test_counting_does_not_use_this_module_yet():
+def test_only_the_tracker_uses_this_module():
     for file in (ROOT / "src/fortnite_chest_counter").rglob("*.py"):
+        if file.name == "match_tracker.py":                # M4's adapter; tests/test_match_tracker.py keeps it away from counting
+            continue
         for node in ast.walk(ast.parse(file.read_text(encoding="utf-8"))):
             names = [alias.name for alias in node.names] if isinstance(node, (ast.Import, ast.ImportFrom)) else []
             assert "match_state" not in " ".join(names + [getattr(node, "module", None) or ""]), file.name

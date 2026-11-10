@@ -111,6 +111,14 @@ mark_after_seconds = 10
 # Folder for the recordings (one sub-folder per counting session).
 dir = "captures"
 
+[match]
+# Match recognition (in development, OFF by default). English games only for now.
+#   "off"    = nothing runs (the default)
+#   "shadow" = follow the match and write what it sees to the session log in logs/, for testing. It needs [logging] enabled.
+#              It never changes your counts, your profiles, the OBS text or the app.
+# "on" is not available yet.
+mode = "off"
+
 [live]
 # Where the video comes from (the app's Video source list sets this for you; most used first):
 #   "stream"     = a Twitch / YouTube livestream URL (set "url" below) - no OBS needed. Video can arrive in bursts or

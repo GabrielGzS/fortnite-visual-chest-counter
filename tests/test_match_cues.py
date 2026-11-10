@@ -271,8 +271,10 @@ def test_this_module_depends_only_on_what_it_needs():
                         visual + "best_template_correlation"}, imported
 
 
-def test_counting_does_not_use_this_module_yet():
+def test_only_the_tracker_uses_this_module():
     for file in (ROOT / "src/fortnite_chest_counter").rglob("*.py"):
+        if file.name == "match_tracker.py":                # M4's adapter; tests/test_match_tracker.py keeps it away from counting
+            continue
         for node in ast.walk(ast.parse(file.read_text(encoding="utf-8"))):
             names = [alias.name for alias in node.names] if isinstance(node, (ast.Import, ast.ImportFrom)) else []
             assert "match_cues" not in " ".join(names + [getattr(node, "module", None) or ""]), file.name
