@@ -28,6 +28,8 @@
 - Use static Google Sans faces, animate the selection indicator and dropdowns with reduced-motion support, and keep
   mouse selection free of the extra navigation focus outline. Connect dialog actions and round the floating overlay.
 - Update overlay examples from the combined live counts and draft wording. The OBS text file still uses the primary source.
+- Reuse the animated on-screen overlay preview on the Dashboard. Add source and profile chips, centered numeric values,
+  corrected connected button corners, and reduced-motion-aware page, dialog and capture panel transitions.
 - Draw and animate normal, Sprite, blue rare, and unknown chests on the Dashboard and on-screen overlay. Honour the
   Windows reduced-motion preference and keep the latest displayed type in sync with classification corrections.
 - Add cleanup for recognized diagnostic videos, session logs and snapshots, including logs from retired secondary

@@ -371,7 +371,7 @@ def test_token_odds_use_total_and_separate_estimated_chests():
                 "Chest types: not classified 3",
             ]
             assert win.overlay.preview.caption.text() == overlay.caption.text()
-            assert win.dashboard.viewers.text() == overlay.caption.text().replace("\n", "   /   ")
+            assert win.dashboard.viewers.text() == overlay.caption.text()
             win.overlay.show_token.setChecked(False)
             win.overlay.apply()
             assert "Odds:" not in overlay.caption.text()

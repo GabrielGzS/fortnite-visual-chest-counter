@@ -68,6 +68,8 @@ QPushButton#navDestination:focus {{ border-color: {ACCENT}; }}
 #countSub {{ color: {MUTED}; font-size: 9pt; }}
 
 #pill {{ border-radius: 11px; padding: 3px 12px; font-size: 9pt; font-weight: 500; }}
+#sourceChip {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 12px;
+                padding: 3px 9px; color: {MUTED}; font-size: 9pt; }}
 #banner {{ background: #3a1d22; border: 1px solid #6b2a33; border-radius: 8px; }}
 #bannerText {{ color: #ffd7dc; }}
 #notice {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 8px; }}
@@ -88,16 +90,24 @@ QPushButton#toggle {{ background: transparent; border: 1px solid {BORDER}; borde
 QPushButton#toggle:checked {{ background: {SURFACE_2}; color: {TEXT}; border-color: {ACCENT}; }}
 QPushButton[groupPosition="middle"] {{ border-radius: 4px; }}
 QPushButton[groupPosition="first"], QPushButton#primary[groupPosition="first"],
-QPushButton#danger[groupPosition="first"], QPushButton#toggle[groupPosition="first"] {{
+QPushButton#danger[groupPosition="first"] {{
     border-top-left-radius: 16px; border-bottom-left-radius: 16px;
     border-top-right-radius: 4px; border-bottom-right-radius: 4px;
 }}
 QPushButton[groupPosition="last"], QPushButton#primary[groupPosition="last"],
-QPushButton#danger[groupPosition="last"], QPushButton#toggle[groupPosition="last"] {{
+QPushButton#danger[groupPosition="last"] {{
     border-top-left-radius: 4px; border-bottom-left-radius: 4px;
     border-top-right-radius: 16px; border-bottom-right-radius: 16px;
 }}
-QPushButton#toggle[groupPosition]:checked {{ background: {SURFACE_3}; border-color: {ACCENT}; border-radius: 16px; }}
+QPushButton#toggle[groupPosition="first"] {{
+    border-top-left-radius: 12px; border-bottom-left-radius: 12px;
+    border-top-right-radius: 4px; border-bottom-right-radius: 4px;
+}}
+QPushButton#toggle[groupPosition="last"] {{
+    border-top-left-radius: 4px; border-bottom-left-radius: 4px;
+    border-top-right-radius: 12px; border-bottom-right-radius: 12px;
+}}
+QPushButton#toggle[groupPosition]:checked {{ background: {SURFACE_3}; border-color: {ACCENT}; border-radius: 12px; }}
 QPushButton#link {{ background: transparent; border: none; color: {ACCENT}; padding: 0; }}
 QPushButton#link:hover {{ color: {ACCENT_HOVER}; text-decoration: underline; }}
 
@@ -111,7 +121,9 @@ QComboBox::down-arrow {{ image: url("{ASSET_DIR}/dropdown_arrow.png"); width: 12
 QComboBox:disabled {{ color: {DIM}; }}
 QComboBox::down-arrow:disabled {{ image: url("{ASSET_DIR}/dropdown_arrow_disabled.png"); }}
 #comboPopup {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 12px; }}
-QComboBox QAbstractItemView, QMenu {{ background: {SURFACE}; border: 1px solid {BORDER};
+QComboBox QAbstractItemView {{ background: {SURFACE}; border: none; outline: none; padding: 4px;
+                               selection-background-color: {SURFACE_3}; selection-color: {TEXT}; }}
+QMenu {{ background: {SURFACE}; border: 1px solid {BORDER};
                                       outline: none; border-radius: 12px; padding: 4px; selection-background-color: {SURFACE_3};
                                       selection-color: {TEXT}; }}
 QComboBox QAbstractItemView::item, QMenu::item {{ padding: 6px 10px; }}
@@ -133,7 +145,7 @@ QRadioButton::indicator:checked {{ border-color: {ACCENT}; image: url("{ASSET_DI
 QRadioButton::indicator:checked:disabled {{ border-color: {DIM}; image: url("{ASSET_DIR}/radio_dot_disabled.png"); }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color: {ACCENT}; }}
 
-QSpinBox {{ padding-right: 23px; }}
+QSpinBox {{ padding-left: 23px; padding-right: 23px; }}
 QSpinBox::up-button, QSpinBox::down-button {{ subcontrol-origin: border; width: 22px; height: 15px;
                                             border: none; background: transparent; }}
 QSpinBox::up-button {{ subcontrol-position: top right; border-top-right-radius: 12px; }}

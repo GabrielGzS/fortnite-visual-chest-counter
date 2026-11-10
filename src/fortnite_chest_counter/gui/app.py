@@ -26,7 +26,7 @@ from pathlib import Path
 from PySide6.QtCore import QByteArray, QEasingCurve, QPoint, QRect, QRectF, QSize, Qt, QTimer, QUrl, QUrlQuery, QVariantAnimation
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPalette, QPixmap, QRegion
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
-                               QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
                                QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QStyledItemDelegate, QVBoxLayout, QWidget)
 
@@ -292,6 +292,12 @@ def hline():
     return line
 
 
+def rounded_region(rect, radius):
+    shape = QPainterPath()
+    shape.addRoundedRect(QRectF(rect), radius, radius)
+    return QRegion(shape.toFillPolygon().toPolygon())
+
+
 def apply_window_theme(widget):
     if sys.platform != "win32" or QGuiApplication.platformName() != "windows":
         return
@@ -303,10 +309,28 @@ def apply_window_theme(widget):
 
 
 class ThemedDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._entrance = QVariantAnimation(self)
+        self._entrance.setDuration(140)
+        self._entrance.setStartValue(0.45)
+        self._entrance.setEndValue(1.0)
+        self._entrance.setEasingCurve(QEasingCurve.OutCubic)
+        self._entrance.valueChanged.connect(self.setWindowOpacity)
+
     def showEvent(self, event):
         super().showEvent(event)
         if not self.windowFlags() & Qt.FramelessWindowHint:
             apply_window_theme(self)
+        if theme.animations_enabled() and QGuiApplication.platformName() == "windows":
+            self.setWindowOpacity(0.45)
+            self._entrance.start()
+
+    def hideEvent(self, event):
+        self._entrance.stop()
+        if self.windowOpacity() != 1.0:
+            self.setWindowOpacity(1.0)
+        super().hideEvent(event)
 
 
 class PromptDialog(ThemedDialog):
@@ -507,15 +531,16 @@ class MaterialComboBox(QComboBox):
         if not isinstance(popup, QFrame) or popup.windowType() != Qt.Popup:
             super().showPopup()
             return
-        popup.setObjectName("comboPopup")
-        popup.setFrameShape(QFrame.NoFrame)
         self._popup_motion.stop()
         if self._popup_window is None:
             self._popup_window = popup
+            popup.setObjectName("comboPopup")
+            popup.setFrameShape(QFrame.NoFrame)
             self._popup_motion.valueChanged.connect(popup.setWindowOpacity)
         animate = theme.animations_enabled()
         popup.setWindowOpacity(0.2 if animate else 1.0)
         super().showPopup()
+        popup.setMask(rounded_region(popup.rect(), 12))
         if animate:
             self._popup_motion.start()
 
@@ -542,15 +567,13 @@ class ScreenOverlayCard(QFrame):
         self.caption = label("", "screenOverlayCaption", wrap=True)
         self.caption.setTextFormat(Qt.PlainText)
         self.caption.setMaximumWidth(720)
-        layout.addWidget(self.caption, 1)
-
+        layout.addWidget(self.caption, 0, Qt.AlignLeft)
+        layout.addStretch(1)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._floating:
-            shape = QPainterPath()
-            shape.addRoundedRect(QRectF(self.rect()), 14, 14)
-            self.setMask(QRegion(shape.toFillPolygon().toPolygon()))
+            self.setMask(rounded_region(self.rect(), 14))
 
 
 class PreviewPanel(QFrame):
@@ -614,6 +637,7 @@ class CountsDialog(ThemedDialog):
         self.approx = QSpinBox()
         self.certain = QSpinBox()
         for spin, value in ((self.approx, approx), (self.certain, certain)):
+            spin.setAlignment(Qt.AlignCenter)
             spin.setRange(0, C.MAX_STARTING_COUNT)
             spin.setGroupSeparatorShown(True)
             spin.setValue(value)
@@ -929,6 +953,34 @@ class ReviewDialog(ThemedDialog):
         super().closeEvent(event)
 
 
+class AnimatedPages(QStackedWidget):
+    """Move the incoming page a short distance in the direction of the rail."""
+
+    def __init__(self):
+        super().__init__()
+        self._entrance = QVariantAnimation(self)
+        self._entrance.setDuration(160)
+        self._entrance.setEasingCurve(QEasingCurve.OutCubic)
+        self._entrance.valueChanged.connect(self._position_page)
+
+    def setCurrentIndex(self, index):
+        previous = self.currentIndex()
+        if index == previous or not 0 <= index < self.count():
+            return
+        self._entrance.stop()
+        self._position_page(0)
+        super().setCurrentIndex(index)
+        if self.isVisible() and theme.animations_enabled():
+            self._entrance.setStartValue(12 if index > previous else -12)
+            self._entrance.setEndValue(0)
+            self._entrance.start()
+
+    def _position_page(self, offset):
+        page = self.currentWidget()
+        if page is not None:
+            page.move(self.contentsRect().topLeft() + QPoint(0, offset))
+
+
 class Dashboard(QWidget):
     def __init__(self, win):
         super().__init__()
@@ -978,11 +1030,17 @@ class Dashboard(QWidget):
         sources_layout = QVBoxLayout()
         sources_layout.setSpacing(4)
         source_row = QHBoxLayout()
-        source_row.setSpacing(12)
+        source_row.setSpacing(8)
         source_row.addWidget(self.pill, 0, Qt.AlignVCenter)
-        self.source_summary = label("", "hint", wrap=True)
-        self.source_summary.setTextFormat(Qt.PlainText)
-        source_row.addWidget(self.source_summary, 1)
+        self.source_chips = []
+        for width in (140, 240, 220):
+            chip = label("", "sourceChip")
+            chip.setTextFormat(Qt.PlainText)
+            chip.setMaximumWidth(width)
+            chip.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+            source_row.addWidget(chip, 0, Qt.AlignVCenter)
+            self.source_chips.append(chip)
+        source_row.addStretch(1)
         sources_layout.addLayout(source_row)
         self.metrics = label("", "metrics", wrap=True)
         self.metrics.hide()
@@ -1071,9 +1129,9 @@ class Dashboard(QWidget):
                               "OBS still shows only the two totals.")
         types.addWidget(self.types, 1)
         overlay_layout.addLayout(types)
-        self.viewers = label("", wrap=True)
-        self.viewers.setTextFormat(Qt.PlainText)
-        overlay_layout.addWidget(self.viewers)
+        self.overlay_preview = ScreenOverlayCard()
+        self.viewers = self.overlay_preview.caption
+        overlay_layout.addWidget(self.overlay_preview)
         self.obs_line = label("", "hint", wrap=True)          # OBS WebSocket output status (only while it is on)
         self.obs_line.hide()
         overlay_layout.addWidget(self.obs_line)
@@ -1181,7 +1239,27 @@ class Dashboard(QWidget):
         # optional panels
         row = QHBoxLayout()
         box.hide()
-        self.show_capture.toggled.connect(box.setVisible)
+        fade = QGraphicsOpacityEffect(box)
+        fade.setEnabled(False)
+        box.setGraphicsEffect(fade)
+        entrance = QVariantAnimation(box)
+        entrance.setDuration(150)
+        entrance.setStartValue(0.4)
+        entrance.setEndValue(1.0)
+        entrance.setEasingCurve(QEasingCurve.OutCubic)
+        entrance.valueChanged.connect(fade.setOpacity)
+        entrance.finished.connect(lambda: fade.setEnabled(False))
+
+        def show_capture(opened):
+            entrance.stop()
+            animate = opened and self.isVisible() and theme.animations_enabled()
+            fade.setOpacity(0.4 if animate else 1.0)
+            fade.setEnabled(animate)
+            box.setVisible(opened)
+            if animate:
+                entrance.start()
+
+        self.show_capture.toggled.connect(show_capture)
         self.show_log = button("Activity", "toggle", tip="What the counter sees and decides, live")
         self.show_log.setCheckable(True)
         self.show_preview = button("Live preview", "toggle", tip="The video the counter is analysing")
@@ -1238,8 +1316,10 @@ class Dashboard(QWidget):
                     video = QUrlQuery(url).queryItemValue("v")
                     if video:
                         primary += f"?v={video}"
-        self.source_summary.setText(f"{profile + '  |  ' if profile else ''}"
-                                    f"Source 1  ·  {primary}  |  Source 2  ·  {secondary}")
+        for chip, text in zip(self.source_chips, (f"Profile · {profile or 'Default'}",
+                                                  f"Source 1 · {primary}", f"Source 2 · {secondary}")):
+            chip.setText(chip.fontMetrics().elidedText(text, Qt.ElideRight, chip.maximumWidth() - 22))
+            chip.setToolTip(text)
 
     def clear_recent(self, source=None):
         if source is None:
@@ -1294,7 +1374,7 @@ class Dashboard(QWidget):
             self._display_chest(message.get("chest_type"), restart=True, animate=verdict == "certain")
 
     def _display_chest(self, kind, *, restart=False, animate=False):
-        illustrations = [self.chest, self.win.overlay.preview.chest]
+        illustrations = [self.chest, self.overlay_preview.chest, self.win.overlay.preview.chest]
         if self.screen_overlay is not None:
             illustrations.append(self.screen_overlay.chest)
         for illustration in illustrations:
@@ -1372,9 +1452,8 @@ class Dashboard(QWidget):
         if self.screen_overlay_display is None:
             return
         text = self.screen_overlay_text(self.screen_overlay_display)
-        summary = text.replace("\n", "   /   ")
-        if self.viewers.text() != summary:
-            self.viewers.setText(summary)
+        if self.viewers.text() != text:
+            self.viewers.setText(text)
         if self.screen_overlay is None or not page.show_screen_overlay.isChecked():
             return
         if text != self.screen_overlay.caption.text():
@@ -1541,6 +1620,7 @@ class OverlayPage(QWidget):
         self.ws_host = QLineEdit()
         self.ws_host.setToolTip("127.0.0.1 = OBS runs on this PC. For OBS on another PC: that PC's IPv4 address.")
         self.ws_port = QSpinBox()
+        self.ws_port.setAlignment(Qt.AlignCenter)
         self.ws_port.setRange(1, 65535)
         self.ws_password = QLineEdit()
         self.ws_password.setEchoMode(QLineEdit.Password)
@@ -1851,6 +1931,7 @@ class SettingsPage(QWidget):
         self.update_bandwidth.currentIndexChanged.connect(self._bandwidth_changed)
         row.addWidget(self.update_bandwidth, 1)
         self.update_limit = QSpinBox()
+        self.update_limit.setAlignment(Qt.AlignCenter)
         row.addWidget(self.update_limit)
         self.update_unit = MaterialComboBox()
         self.update_unit.addItem("KB/s", 1)
@@ -2309,7 +2390,7 @@ class MainWindow(QMainWindow):
         outer = QHBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        self.pages = QStackedWidget()
+        self.pages = AnimatedPages()
         self.dashboard = Dashboard(self)
         self.overlay = OverlayPage(self)
         self.settings_page = SettingsPage(self)
