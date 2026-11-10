@@ -28,7 +28,8 @@ ACCENT_HOVER = "#ffe1bd"
 CERTAIN = "#62ddb0"
 APPROX = "#f0bd70"
 REJECT = "#f87171"
-DANGER = "#ef4444"
+DANGER = "#ffb4ab"
+DANGER_INK = "#690005"
 WARN = "#c084fc"
 INFO = "#67c7e8"
 STAGE = "#34251c"
@@ -38,30 +39,27 @@ LOG_COLORS = {"certain": CERTAIN, "approx": APPROX, "rejected": REJECT, "generic
               "error": REJECT, "line": MUTED, "status": DIM, "detail": DIM}
 
 STYLE = f"""
-* {{ font-family: "Segoe UI", "Segoe UI Variable Text", sans-serif; font-size: 10pt; color: {TEXT}; }}
+* {{ font-family: "Google Sans", "Segoe UI", sans-serif; font-size: 10pt; color: {TEXT}; }}
 QMainWindow, QDialog, #page {{ background: {BG}; }}
 QToolTip {{ background: {SURFACE_3}; color: {TEXT}; border: 1px solid {BORDER}; padding: 4px 6px; }}
 
-#sidebar {{ background: {SIDEBAR}; border-right: 1px solid {SURFACE_2}; }}
-#brandName {{ font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 17pt; }}
-#menuToggle {{ padding: 0; font-size: 16pt; border-radius: 18px; }}
-#brandSub {{ color: {MUTED}; font-size: 8.5pt; }}
-#nav {{ background: transparent; border: none; outline: none; }}
-#nav::item {{ padding: 10px 14px; margin: 2px 4px; border-radius: 18px; color: {MUTED}; }}
-#nav::item:hover {{ background: {SURFACE}; color: {TEXT}; }}
-#nav::item:selected {{ background: {SURFACE_3}; color: {ACCENT}; font-weight: 600; }}
-#version {{ color: {DIM}; font-size: 8.5pt; }}
+#navigationRail {{ background: {SURFACE}; }}
+QPushButton#navDestination {{ background: transparent; border: 1px solid transparent; border-radius: 16px; padding: 0; }}
+QPushButton#navDestination:hover {{ background: {SURFACE_2}; }}
+QPushButton#navDestination:focus {{ border-color: {ACCENT}; }}
+#navIndicatorSelected {{ background: {SURFACE_3}; border-radius: 16px; }}
+#navCaption {{ font-size: 12px; font-weight: 500; }}
 
-#pageTitle {{ font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 25pt; }}
+#pageTitle {{ font-size: 32px; font-weight: 500; }}
 #pageSub {{ color: {MUTED}; }}
 #card {{ background: {SURFACE}; border: 1px solid transparent; border-radius: 18px; }}
-#cardTitle {{ font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 15pt; }}
+#cardTitle {{ font-size: 16px; font-weight: 500; }}
 #hint, .hint {{ color: {MUTED}; font-size: 9pt; }}
 #metrics {{ color: {MUTED}; font-size: 9pt; }}
 
 #chestStage {{ background: {STAGE}; border: 1px solid transparent; border-radius: 28px; }}
-#stageTotal {{ color: {ACCENT}; font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 53pt; }}
-#stageOdds {{ color: {ACCENT_HOVER}; font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 22pt; }}
+#stageTotal {{ color: {ACCENT}; font-size: 53pt; }}
+#stageOdds {{ color: {ACCENT_HOVER}; font-size: 22pt; }}
 #recentOpenings {{ background: transparent; border: none; min-height: 120px; }}
 #recentOpenings::item {{ padding: 6px 2px; }}
 
@@ -85,10 +83,14 @@ QPushButton:disabled {{ color: {DIM}; background: {SURFACE}; }}
 QPushButton#primary {{ background: {ACCENT}; border: 1px solid {ACCENT}; color: {BG}; font-weight: 600; border-radius: 18px; padding: 9px 22px; }}
 QPushButton#primary:hover {{ background: {ACCENT_HOVER}; border-color: {ACCENT_HOVER}; }}
 QPushButton#primary:disabled {{ background: {SURFACE_3}; border-color: {SURFACE_3}; color: {MUTED}; }}
-QPushButton#danger {{ background: {DANGER}; border: 1px solid {DANGER}; color: white; font-weight: 600; border-radius: 18px; padding: 9px 22px; }}
-QPushButton#danger:hover {{ background: #f05a5a; }}
+QPushButton#danger {{ background: {DANGER}; border: 1px solid {DANGER}; color: {DANGER_INK}; font-weight: 600; border-radius: 18px; padding: 9px 22px; }}
+QPushButton#danger:hover {{ background: #ffc8c1; }}
 QPushButton#toggle {{ background: transparent; border: 1px solid {BORDER}; border-radius: 14px; padding: 5px 14px; color: {MUTED}; }}
 QPushButton#toggle:checked {{ background: {SURFACE_2}; color: {TEXT}; border-color: {ACCENT}; }}
+QPushButton[groupPosition], QPushButton#toggle[groupPosition] {{ border-radius: 4px; }}
+QPushButton[groupPosition="first"], QPushButton#toggle[groupPosition="first"] {{ border-top-left-radius: 16px; border-bottom-left-radius: 16px; }}
+QPushButton[groupPosition="last"], QPushButton#toggle[groupPosition="last"] {{ border-top-right-radius: 16px; border-bottom-right-radius: 16px; }}
+QPushButton#toggle[groupPosition]:checked {{ background: {SURFACE_3}; border-color: {ACCENT}; border-radius: 16px; }}
 QPushButton#link {{ background: transparent; border: none; color: {ACCENT}; padding: 0; }}
 QPushButton#link:hover {{ color: {ACCENT_HOVER}; text-decoration: underline; }}
 
@@ -109,12 +111,29 @@ QMenu::item:selected {{ background: {SURFACE_3}; color: {ACCENT}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 7px; }}
 QLineEdit:read-only {{ color: {MUTED}; }}
 
-QCheckBox, QRadioButton {{ spacing: 8px; padding: 3px 0; }}
+QCheckBox, QRadioButton {{ spacing: 10px; padding: 3px 0; }}
 QCheckBox:focus, QRadioButton:focus {{ color: {ACCENT}; }}
-QRadioButton::indicator {{ width: 12px; height: 12px; border: 1px solid {DIM};
-                            border-radius: 7px; background: {BG}; }}
-QRadioButton::indicator:checked {{ border: 4px solid {ACCENT}; width: 6px; height: 6px; }}
+QCheckBox::indicator {{ width: 14px; height: 14px; border: 2px solid {DIM};
+                        border-radius: 2px; background: {BG}; }}
+QCheckBox::indicator:checked {{ border-color: {ACCENT}; background: {ACCENT};
+                                image: url("{ASSET_DIR}/check_mark.png"); }}
+QCheckBox::indicator:checked:disabled {{ border-color: {DIM}; background: {DIM}; }}
+QCheckBox::indicator:unchecked:disabled, QRadioButton::indicator:unchecked:disabled {{ border-color: {BORDER}; }}
+QRadioButton::indicator {{ width: 16px; height: 16px; border: 2px solid {DIM};
+                            border-radius: 10px; background: {BG}; }}
+QRadioButton::indicator:checked {{ border-color: {ACCENT}; image: url("{ASSET_DIR}/radio_dot.png"); }}
+QRadioButton::indicator:checked:disabled {{ border-color: {DIM}; image: url("{ASSET_DIR}/radio_dot_disabled.png"); }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color: {ACCENT}; }}
+
+QSpinBox {{ padding-right: 23px; }}
+QSpinBox::up-button, QSpinBox::down-button {{ subcontrol-origin: border; width: 22px; height: 15px;
+                                            border: none; background: transparent; }}
+QSpinBox::up-button {{ subcontrol-position: top right; border-top-right-radius: 12px; }}
+QSpinBox::down-button {{ subcontrol-position: bottom right; border-bottom-right-radius: 12px; }}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background: {SURFACE_3}; }}
+QSpinBox::up-arrow {{ image: url("{ASSET_DIR}/stepper_up.png"); width: 10px; height: 6px; }}
+QSpinBox::down-arrow {{ image: url("{ASSET_DIR}/dropdown_arrow.png"); width: 10px; height: 6px; }}
+QSpinBox::up-arrow:disabled, QSpinBox::down-arrow:disabled {{ image: none; }}
 
 QPlainTextEdit#log, QPlainTextEdit#report {{ background: #1c1814; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px;
                                             font-family: "Cascadia Mono", "Consolas", monospace; font-size: 9pt; }}
@@ -131,7 +150,13 @@ QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
 QScrollBar::handle:horizontal {{ background: {SURFACE_3}; border-radius: 4px; min-width: 30px; }}
 QSplitter::handle {{ background: transparent; }}
-QMessageBox QLabel {{ min-width: 340px; }}
+#promptDialog {{ background: transparent; }}
+#promptSurface {{ background: {SURFACE_2}; border-radius: 28px; }}
+#dialogHeading {{ font-size: 24px; font-weight: 500; }}
+#dialogBody {{ color: {MUTED}; font-size: 14px; }}
+QDialogButtonBox QPushButton:default {{ background: {ACCENT}; border-color: {ACCENT}; color: {BG}; }}
+QDialogButtonBox QPushButton:default:focus {{ border-color: {TEXT}; }}
+QDialogButtonBox QPushButton:default:disabled {{ background: {SURFACE_3}; border-color: {BORDER}; color: {DIM}; }}
 """
 
 

@@ -296,7 +296,7 @@ only), and **Total** across the selected video sources. The Pirate Shop Token es
 rate of one in 137,500 per chest, and the selected boost. See the
 [Fortnite Status announcement](https://x.com/FortniteStatus/status/2119202610322227327) and compare scenarios with the
 [Pirate Token Quest calculator](https://piratetoken.quest/drop-rate/).
-See [French Match Tracker](docs/FRENCH_MATCH_TRACKER.md) for the Windows and detector changes.
+See [French Match Tracker](docs/NEVAR%20FORK/FRENCH_MATCH_TRACKER.md) for the Windows and detector changes.
 
 ```text
 python -m venv .venv

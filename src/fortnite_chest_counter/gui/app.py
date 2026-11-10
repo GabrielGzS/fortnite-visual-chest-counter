@@ -23,15 +23,15 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QEasingCurve, QPoint, QRect, QSignalBlocker, QSize, Qt, QTimer, QUrl, QUrlQuery, QVariantAnimation
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap
+from PySide6.QtCore import QByteArray, QPoint, QRect, QSize, Qt, QTimer, QUrl, QUrlQuery
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon, QImage, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-                               QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
+                               QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QMainWindow, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
                                QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
-from fortnite_chest_counter import paths, profiles, settings
+from fortnite_chest_counter import diagnostics_cleanup, paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -232,6 +232,16 @@ def button(text, name=None, tip=None, on_click=None):
     return widget
 
 
+def connected_buttons(*buttons):
+    row = QHBoxLayout()
+    row.setSpacing(2)
+    for index, item in enumerate(buttons):
+        position = "first" if index == 0 else "last" if index == len(buttons) - 1 else "middle"
+        item.setProperty("groupPosition", position)
+        row.addWidget(item)
+    return row
+
+
 def restyle(widget, name):
     """Give a widget another style name (e.g. primary -> danger). Qt only re-reads the style sheet after a re-polish."""
     widget.setObjectName(name)
@@ -282,20 +292,95 @@ def hline():
     return line
 
 
+def apply_window_theme(widget):
+    if sys.platform != "win32" or QGuiApplication.platformName() != "windows":
+        return
+    hwnd = ctypes.c_void_p(int(widget.winId()))
+    for attribute, color in ((34, theme.BORDER), (35, theme.SURFACE), (36, theme.TEXT)):
+        rgb = QColor(color)
+        value = ctypes.c_uint32(rgb.red() | rgb.green() << 8 | rgb.blue() << 16)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value))
+
+
+class ThemedDialog(QDialog):
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.windowFlags() & Qt.FramelessWindowHint:
+            apply_window_theme(self)
+
+
+class PromptDialog(ThemedDialog):
+    def __init__(self, parent, title, text):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlag(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setObjectName("promptDialog")
+        self.setMinimumWidth(380)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        surface = QFrame()
+        surface.setObjectName("promptSurface")
+        outer.addWidget(surface)
+        self.content = QVBoxLayout(surface)
+        self.content.setContentsMargins(24, 24, 24, 24)
+        self.content.setSpacing(14)
+        heading = label(title, "dialogHeading", wrap=True)
+        heading.setTextFormat(Qt.PlainText)
+        self.content.addWidget(heading)
+        message = label(text, "dialogBody", wrap=True)
+        message.setTextFormat(Qt.PlainText)
+        message.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        message.setMaximumWidth(480)
+        self.content.addWidget(message)
+
+    def add_actions(self, yes, no=None, *, danger=False):
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        confirm = button(yes, "danger" if danger else "primary", on_click=self.accept)
+        if no is not None:
+            cancel = button(no, on_click=self.reject)
+            cancel.setAutoDefault(False)
+            actions.addWidget(cancel)
+        actions.addWidget(confirm)
+        self.content.addLayout(actions)
+        if danger and no is not None:
+            confirm.setAutoDefault(False)
+            cancel.setDefault(True)
+            cancel.setFocus()
+        else:
+            confirm.setDefault(True)
+        return confirm
+
+
 def ask(parent, title, text, yes="Yes", no="Cancel", danger=False):
-    box = QMessageBox(parent)
-    box.setWindowTitle(title)
-    box.setText(text)
-    box.setIcon(QMessageBox.Warning if danger else QMessageBox.Question)
-    ok = box.addButton(yes, QMessageBox.AcceptRole)
-    box.addButton(no, QMessageBox.RejectRole)
-    box.setDefaultButton(ok)
-    box.exec()
-    return box.clickedButton() is ok
+    dialog = PromptDialog(parent, title, text)
+    dialog.add_actions(yes, no, danger=danger)
+    return dialog.exec() == QDialog.Accepted
+
+
+def show_notice_dialog(parent, title, text):
+    dialog = PromptDialog(parent, title, text)
+    dialog.add_actions("OK")
+    dialog.exec()
 
 
 def show_error(parent, text):
-    QMessageBox.warning(parent, APP_NAME, text)
+    show_notice_dialog(parent, "Something went wrong", text)
+
+
+def prompt_name(parent, title, text, action, initial=""):
+    dialog = PromptDialog(parent, title, text)
+    field = QLineEdit(initial)
+    field.setAccessibleName("Profile name")
+    dialog.content.addWidget(field)
+    confirm = dialog.add_actions(action, "Cancel")
+    confirm.setEnabled(bool(initial.strip()))
+    field.textChanged.connect(lambda value: confirm.setEnabled(bool(value.strip())))
+    field.setFocus()
+    field.selectAll()
+    accepted = dialog.exec() == QDialog.Accepted
+    return field.text(), accepted
 
 
 # ==================================================================
@@ -454,7 +539,7 @@ class PreviewPanel(QFrame):
 # dialogs
 # ==================================================================
 
-class CountsDialog(QDialog):
+class CountsDialog(ThemedDialog):
     """Set the counter (also: start from the chests already opened)."""
 
     def __init__(self, parent, certain, approx):
@@ -503,7 +588,7 @@ class CountsDialog(QDialog):
             self.accept()
 
 
-class VideoDialog(QDialog):
+class VideoDialog(ThemedDialog):
     """Count the chests in a recorded gameplay video (the `video` command). Never touches the live counter."""
 
     def __init__(self, parent):
@@ -661,7 +746,7 @@ class VideoDialog(QDialog):
 # pages
 # ==================================================================
 
-class ReviewDialog(QDialog):
+class ReviewDialog(ThemedDialog):
     """Runs `review --gui` over the captures folder: which capture, how much video, time left, then each report."""
 
     MODES = {"events": "around chest decisions and marks", "marks": "around marks", "session": "whole session"}
@@ -949,8 +1034,7 @@ class Dashboard(QWidget):
                                      on_click=win.rename_profile)
         self.profile_delete = button("Delete...", tip="Remove the selected profile (its counts are kept in a backup "
                                                       "file)", on_click=win.delete_profile)
-        for widget in (self.profile_new, self.profile_rename, self.profile_delete):
-            profile_row.addWidget(widget)
+        profile_row.addLayout(connected_buttons(self.profile_new, self.profile_rename, self.profile_delete))
         inputs.addLayout(profile_row, 0, 1, 1, 2)
 
         inputs.addWidget(label("Source 1"), 1, 0)
@@ -1037,8 +1121,7 @@ class Dashboard(QWidget):
         self.show_log.setCheckable(True)
         self.show_preview = button("Live preview", "toggle", tip="The video the counter is analysing")
         self.show_preview.setCheckable(True)
-        row.addWidget(self.show_log)
-        row.addWidget(self.show_preview)
+        row.addLayout(connected_buttons(self.show_log, self.show_preview))
         row.addStretch(1)
         self.detail = QComboBox()
         self.detail.addItem("Normal detail", "normal")
@@ -1836,6 +1919,7 @@ class HelpPage(QWidget):
         self.copy.setEnabled(False)
         row.addWidget(self.copy)
         row.addWidget(button("Open logs folder", on_click=win.open_logs))
+        row.addWidget(button("Clean logs and captures...", on_click=win.clean_diagnostics))
         row.addStretch(1)
         box_layout.addLayout(row)
         self.report = QPlainTextEdit()
@@ -1903,7 +1987,7 @@ class HelpPage(QWidget):
 # main window
 # ==================================================================
 
-class UpdateDialog(QDialog):
+class UpdateDialog(ThemedDialog):
     """Not modal: counting and the rest of the app stay usable while an update is prepared, and closing this only hides it."""
 
     def __init__(self, win):
@@ -1998,6 +2082,42 @@ class UpdateDialog(QDialog):
         self.primary.setText({UM.AVAILABLE: "Try again" if m.error else "Download && Install", UM.READY: "Restart && Install"}.get(state, "Please wait..."))
 
 
+def navigation_icon(name, color):
+    icon = QPixmap(str(ASSETS / f"nav_{name}.png"))
+    if not icon.isNull():
+        with QPainter(icon) as painter:
+            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.fillRect(icon.rect(), QColor(color))
+        icon.setDevicePixelRatio(2)
+    return icon
+
+
+class NavigationDestination(QPushButton):
+    def __init__(self, icon, caption):
+        super().__init__()
+        self.setObjectName("navDestination")
+        self.setCheckable(True)
+        self.setAccessibleName(caption)
+        self.setFixedSize(80, 64)
+        self._icons = (navigation_icon(icon, theme.MUTED), navigation_icon(icon, theme.TEXT))
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 5, 6, 4)
+        layout.setSpacing(3)
+        self.indicator = label("", "navIndicator")
+        self.indicator.setAlignment(Qt.AlignCenter)
+        self.indicator.setFixedSize(56, 32)
+        text = label(caption, "navCaption")
+        for child in (self.indicator, text):
+            child.setAttribute(Qt.WA_TransparentForMouseEvents)
+            layout.addWidget(child, 0, Qt.AlignHCenter)
+        self.toggled.connect(self._update_indicator)
+        self._update_indicator(False)
+
+    def _update_indicator(self, selected):
+        self.indicator.setPixmap(self._icons[int(selected)])
+        restyle(self.indicator, "navIndicatorSelected" if selected else "navIndicator")
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -2065,12 +2185,6 @@ class MainWindow(QMainWindow):
         outer = QHBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        self.sidebar = self._sidebar()
-        self._sidebar_motion = QVariantAnimation(self)
-        self._sidebar_motion.setEasingCurve(QEasingCurve.OutCubic)
-        self._sidebar_motion.valueChanged.connect(self.sidebar.setFixedWidth)
-        self._sidebar_motion.finished.connect(self._sync_navigation_content)
-        outer.addWidget(self.sidebar)
         self.pages = QStackedWidget()
         self.dashboard = Dashboard(self)
         self.overlay = OverlayPage(self)
@@ -2078,7 +2192,15 @@ class MainWindow(QMainWindow):
         self.help = HelpPage(self)
         for page in (self.dashboard, self.overlay, self.settings_page, self.help):
             self.pages.addWidget(page)
-        outer.addWidget(self.pages, 1)
+        outer.addWidget(self._navigation_rail())
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(0)
+        content.addWidget(self.pages, 1)
+        self.update_link = button("", "link", on_click=self.open_update_dialog)
+        self.update_link.hide()
+        content.addWidget(self.update_link, 0, Qt.AlignRight)
+        outer.addLayout(content, 1)
         self.setCentralWidget(root)
 
         self.load_home_options()
@@ -2121,65 +2243,29 @@ class MainWindow(QMainWindow):
             button.toggled.connect(lambda value, key=key: self.save_app_option(key, value))
 
     # ---- layout
-    def _sidebar(self):
-        side = QFrame()
-        side.setObjectName("sidebar")
-        side.setFixedWidth(214)
-        layout = QVBoxLayout(side)
-        layout.setContentsMargins(8, 16, 8, 14)
-        layout.setSpacing(8)
-        header = QHBoxLayout()
-        self.menu_toggle = button("\u2630", "menuToggle", tip="Toggle navigation", on_click=self.toggle_navigation)
-        self.menu_toggle.setCheckable(True)
-        self.menu_toggle.setChecked(True)
-        self.menu_toggle.setAccessibleName("Toggle navigation")
-        self.menu_toggle.setFixedSize(36, 36)
-        header.addWidget(self.menu_toggle)
-        self.brand = label("Chest Counter", "brandName")
-        header.addWidget(self.brand, 1)
-        layout.addLayout(header)
-        self.nav = QListWidget()
-        self.nav.setObjectName("nav")
-        for name in ("Dashboard", "Overlay", "Settings", "Help & diagnostics"):
-            QListWidgetItem(name, self.nav)
-        self.nav.setCurrentRow(0)
-        self.nav.currentRowChanged.connect(self._page_changed)
-        layout.addWidget(self.nav, 1)
-        layout.addStretch()
-        self.update_link = button("", "link", on_click=self.open_update_dialog)
-        self.update_link.hide()
-        layout.addWidget(self.update_link)
-        self.nav_version = label(f"v{__version__} · {RELEASE_CHANNEL}", "version")
-        self.nav_version.setContentsMargins(8, 0, 0, 0)
-        layout.addWidget(self.nav_version)
-        return side
-
-    def toggle_navigation(self):
-        expanded = self.menu_toggle.isChecked()
-        self.menu_toggle.setToolTip("Collapse navigation" if expanded else "Expand navigation")
-        self._sidebar_motion.stop()
-        target = 214 if expanded else 54
-        if not theme.animations_enabled() or self.sidebar.width() == target:
-            self.sidebar.setFixedWidth(target)
-            self._sync_navigation_content()
-            return
-        self._sync_navigation_content(visible=False)
-        width = self.sidebar.width()
-        with QSignalBlocker(self._sidebar_motion):
-            self._sidebar_motion.setDuration(280 if expanded else 220)
-            self._sidebar_motion.setStartValue(width)
-            self._sidebar_motion.setEndValue(target)
-        self._sidebar_motion.start()
-
-    def _sync_navigation_content(self, visible=None):
-        if visible is None:
-            visible = self.menu_toggle.isChecked()
-        for widget in (self.brand, self.nav, self.nav_version):
-            widget.setVisible(visible)
-        self.update_link.setVisible(visible and bool(self.update_link.text()))
+    def _navigation_rail(self):
+        rail = QFrame()
+        rail.setObjectName("navigationRail")
+        rail.setFixedWidth(96)
+        column = QVBoxLayout(rail)
+        column.setContentsMargins(0, 44, 0, 12)
+        column.setSpacing(4)
+        self.destinations = QButtonGroup(rail)
+        names = (("dashboard", "Dashboard"), ("overlay", "Overlay"), ("settings", "Settings"), ("help", "Help"))
+        for index, (icon, name) in enumerate(names):
+            destination = NavigationDestination(icon, name)
+            self.destinations.addButton(destination, index)
+            column.addWidget(destination, 0, Qt.AlignHCenter)
+        self.destinations.button(0).setChecked(True)
+        self.destinations.idClicked.connect(self.go_to)
+        column.addStretch(1)
+        return rail
 
     def go_to(self, index):
-        self.nav.setCurrentRow(index)
+        destination = self.destinations.button(index)
+        if destination is not None and self.pages.currentIndex() != index:
+            destination.setChecked(True)
+            self._page_changed(index)
 
     def _page_changed(self, index):
         self.pages.setCurrentIndex(index)
@@ -2420,8 +2506,7 @@ class MainWindow(QMainWindow):
         if self._profile_busy():
             show_error(self, "Stop counting before making a new profile.")
             return
-        name, ok = QInputDialog.getText(self, "New profile", "Name of the new profile (for example the streamer's name).\n"
-                                                             "It starts at 0 and keeps its own counts and video source:")
+        name, ok = prompt_name(self, "New profile", "Each profile keeps its own counts and video source.", "Create")
         if not ok:
             return
         try:
@@ -2434,8 +2519,7 @@ class MainWindow(QMainWindow):
     def rename_profile(self):
         cfg, _ = load_cfg()
         current = cfg["profile"]
-        name, ok = QInputDialog.getText(self, "Rename profile", "New name (the counts stay the same):",
-                                        QLineEdit.Normal, current["name"])
+        name, ok = prompt_name(self, "Rename profile", "Enter a new name for this profile.", "Rename", current["name"])
         if not ok or name.strip() == current["name"]:
             return
         try:
@@ -2670,7 +2754,7 @@ class MainWindow(QMainWindow):
         m = self.updates
         text = m.indicator_text()
         self.update_link.setText(text)
-        self.update_link.setVisible(self.menu_toggle.isChecked() and not self.nav.isHidden() and bool(text))
+        self.update_link.setVisible(bool(text))
         self.settings_page.update_status.setText(m.check_message)
         self.settings_page.check_button.setEnabled(not m.busy())
         self.dashboard.start.setEnabled(m.state != UM.INSTALLING and self.mode != "stopping")
@@ -3045,6 +3129,36 @@ class MainWindow(QMainWindow):
         folder.mkdir(parents=True, exist_ok=True)
         open_path(folder)
 
+    def clean_diagnostics(self):
+        cfg, _ = load_cfg()
+        def counting():
+            return self.workers_active() or any(
+                C.counter_is_running(path) for path in diagnostics_cleanup.counter_states(paths.APP_DIR, cfg))
+
+        if counting():
+            show_error(self, "Stop counting before cleaning logs and captures.")
+            return
+        try:
+            artifacts = diagnostics_cleanup.diagnostic_artifacts(paths.APP_DIR, cfg)
+        except OSError as error:
+            show_error(self, f"Could not list diagnostic files.\n{error}")
+            return
+        if not artifacts:
+            show_notice_dialog(self, "Diagnostics storage", "There are no session logs or diagnostic captures to clean.")
+            return
+        if not ask(self, "Clean logs and captures?", "Delete the saved session logs, snapshots and diagnostic video "
+                   "recordings? Your profiles, counts and settings are kept.", "Delete", danger=True):
+            return
+        if counting():
+            show_error(self, "Stop counting before cleaning logs and captures.")
+            return
+        removed, failed = diagnostics_cleanup.remove_diagnostic_artifacts(artifacts)
+        message = f"Removed {removed:,} log files or recording folders."
+        if failed:
+            show_error(self, f"{message}\n\nCould not remove {len(failed):,}. Close any app using them and retry.")
+        else:
+            show_notice_dialog(self, "Diagnostics storage", message)
+
     # ---- preview
     def preview_visibility_changed(self):
         wanted = (self.pages.currentWidget() is self.dashboard and self.dashboard.show_preview.isChecked()
@@ -3283,7 +3397,7 @@ def _crash_hook(window_ref):
         except OSError:
             pass
         try:
-            QMessageBox.critical(window_ref(), APP_NAME,
+            show_error(window_ref(),
                                  f"Something unexpected went wrong in the app window ({kind.__name__}: {value}).\n\n"
                                  "Counting is not affected: it runs separately and saves after every chest."
                                  + (f"\n\nDetails were saved to:\n{where}" if where else ""))
@@ -3361,16 +3475,18 @@ def main(argv=None):
     app.setApplicationVersion(__version__)
     app.setWindowIcon(app_icon())
     app.setStyle("Fusion")
+    QFontDatabase.addApplicationFont(str(ASSETS / "GoogleSans.ttf"))
     app.setPalette(_palette())
     app.setStyleSheet(theme.STYLE)
     if len(args) == 2 and args[0] == "--self-test":
         return self_test(app, args[1])
     lock = _single_instance()
     if lock is None:
-        QMessageBox.information(None, APP_NAME, f"{APP_NAME} is already open.\n\nLook for it in the taskbar.")
+        show_notice_dialog(None, APP_NAME, f"{APP_NAME} is already open.\n\nLook for it in the taskbar.")
         return 0
     window = MainWindow()
     set_class_icon(window)
+    apply_window_theme(window)
     sys.excepthook = _crash_hook(lambda: window)
     window.restore_layout()
     window.show()

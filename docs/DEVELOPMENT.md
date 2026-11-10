@@ -18,7 +18,7 @@ src/fortnite_chest_counter/
                     that the live path imports only for constants.
   input/            video_sources.py: OBS Virtual Camera / capture device / desktop / file via ffmpeg
   gui/              the desktop app (v0.2.0, PySide6): app.py (window, pages, dialogs), worker.py (runs + observes the
-                    counting worker), update_manager.py (update state, no widgets), theme.py, assets/ (icon PNGs)
+                    counting worker), update_manager.py (update state, no widgets), theme.py, assets/ (icons, bundled font and their license notices)
   preview.py        shared-memory picture for the app's optional live preview (no Qt)
   capture.py        optional diagnostic recording of the detector's input + decisions + marks ([capture], CAPTURE.md)
   review.py         `review` command: replay captures through the current detector, compare with live + labels
@@ -59,6 +59,16 @@ Python 3.11+. FFmpeg must be on PATH when running from source (the packaged app 
 When running from source, user data (`config.toml`, `state/`, `logs/`, `obs_output/`) lives in the **current directory**
 (or `FCC_HOME`), never inside `src/`.
 
+## Desktop UI and local data
+
+Keep visual tokens in the shared Qt theme, application assets beside that theme, and engine behavior outside the GUI.
+The navigation rail follows [Material 3](https://m3.material.io/components/navigation-rail/overview). Its icons come from
+[Google Material Icons](https://github.com/google/material-design-icons) and its typeface is
+[Google Sans](https://github.com/googlefonts/googlesans). Their licenses ship alongside the assets.
+
+The Help page can remove generated diagnostics from `logs/` and `captures/`. Keep these folders, user state, and BMAD
+working artifacts out of commits. Run UI and worker tests with isolated settings and a temporary working directory.
+
 ## Regression on recordings
 
 `samples/` is not in Git. With the recordings present locally (and, for the compressed variants, after
@@ -83,7 +93,7 @@ build-venv\Scripts\python packaging\build_release.py --python-embed python-3.13.
     --ffmpeg-zip <ffmpeg-win64-lgpl.zip> --ffmpeg-source <ffmpeg-source-COMMIT.tar.gz> --mingw C:\MinGW\bin --out build_out\vX.Y.Z
 ```
 
-On the development PC the exact inputs of the current builds are kept in `build_out\inputs\` (git-ignored):
+On the development PC the exact inputs of the current builds are kept in `build_out\inputs` (git-ignored):
 `python-3.13.17-embed-amd64.zip` (same archive as v0.1.1, SHA-256 9e35319b...), `ffmpeg-v0.1.1-shipped-win64-lgpl.zip`
 (the v0.1.1 ffmpeg.exe, SHA-256 7a1cc6f3...) and `ffmpeg-source-db8537d8cc.tar.gz`; the `.venv` has numpy, scipy and
 PySide6-Essentials 6.12.0.
@@ -177,7 +187,7 @@ launchers (.bat/.cmd/.ps1/.vbs/.lnk) or any executable other than the launcher, 
   variant with evaluation against verified timestamps.
 * **Errors:** expected problems raise `UserError` (plain message, exit 1); unexpected exceptions write `logs/crash_*.txt` (exit 2).
   The console's QuickEdit mode is disabled in `live` (a click would pause the process and stall counting).
-* **Finding the program folder:** `paths.APP_DIR` is derived from `runtime\python\` when running the release runtime, so the
+* **Finding the program folder:** `paths.APP_DIR` is derived from `runtime\python` when running the release runtime, so the
   app and the command line work whatever the current directory is. The launcher also starts pythonw by full path.
 * **Bundled FFmpeg:** `runtime/ffmpeg/ffmpeg.exe`, found by `paths.bundled_ffmpeg_dir()` and prepended to `PATH` at startup. We ship an **LGPL v3** build (no GPL parts) run as a
   separate process, with its licence and `FFMPEG-NOTICE.txt`. Do not ship a `--enable-gpl` build unless you also offer the complete
