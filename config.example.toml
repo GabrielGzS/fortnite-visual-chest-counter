@@ -153,6 +153,11 @@ source_uuid = ""
 # The desktop app reopens with the size, position and maximised state it was closed with (saved in state/window.json).
 # false = always open at the default size. If the saved place is no longer on any screen, the window is moved back.
 remember_window = true
+close_to_tray = false
+start_in_tray = false
+auto_match_lifecycle = false
+auto_discord_summary = false
+auto_start_discord_sender = true
 
 [update]
 # Look for a new version shortly after the app opens. Nothing is downloaded or installed unless you choose to.

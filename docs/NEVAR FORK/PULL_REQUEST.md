@@ -23,6 +23,8 @@ This branch is local and awaiting the contributor's in-game test.
 - Show four animated chest variants on the Dashboard and screen overlay. Confirmed openings animate. Later type updates
   replace the illustration without replaying the animation.
 - Add local match history and ranking, with manual match completion and a separate Discord tab for optional bot summaries.
+- Offer opt-in Battle Royale detection from Fortnite's local log, a system tray mode, and automatic or manual
+  Discord reports with a bot setup guide and a channel-scoped permissions checklist.
 - Keep overlay wording, the selected example and the preview in sync. Show Total on its own line in stacked mode.
 - Replace the source shell launchers with a buildable Windows development launcher.
 - Add **Help → Clean logs and captures…** with destructive confirmation and a guard against active counting.

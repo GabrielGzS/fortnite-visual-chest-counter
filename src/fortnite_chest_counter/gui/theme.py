@@ -131,7 +131,7 @@ QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: top rig
 QComboBox::down-arrow {{ image: url("{ASSET_DIR}/dropdown_arrow.png"); width: 12px; height: 8px; }}
 QComboBox:disabled {{ color: {DIM}; }}
 QComboBox::down-arrow:disabled {{ image: url("{ASSET_DIR}/dropdown_arrow_disabled.png"); }}
-#comboPopup {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 12px; }}
+#comboPopup {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 16px; }}
 QComboBox QAbstractItemView {{ background: transparent; border: none; outline: none;
                                selection-background-color: {SURFACE_3}; selection-color: {TEXT}; }}
 QMenu {{ background: {SURFACE}; border: 1px solid {BORDER};

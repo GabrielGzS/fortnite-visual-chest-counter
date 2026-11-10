@@ -16,8 +16,10 @@
 ## Local UI follow-up
 
 - Add a dedicated recent-match card and a Group tab for editing and deleting saved matches and viewing local ranks.
-  Finish and reset a match manually. Save a match from both capture sources.
-- Add a Discord tab for bot setup and optional manual match summaries. Store credentials in Windows Credential Manager.
+  Save a match from both capture sources, manually or with opt-in local Battle Royale detection.
+- Add a Discord tab for bot setup, manual reports and optional automatic reports after a new match saves.
+  Store credentials in Windows Credential Manager.
+- Add optional start in system tray and close to tray. Use the tray menu to reopen or quit the app.
 - Show Total on its own line in the stacked on-screen overlay. Render the selected layout example and preview from
   the same wording and counts. Use a tonal button to restore wording defaults.
 - Replace the shell launchers with a buildable local Windows executable and a console-only debug batch file. Update the app icon to the skull chest.

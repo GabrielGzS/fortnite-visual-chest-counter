@@ -28,11 +28,11 @@ from PySide6.QtCore import QByteArray, QEasingCurve, QPoint, QRect, QRectF, QSiz
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPalette, QPixmap, QRegion
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
                                QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMainWindow, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
-                               QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QMainWindow, QMenu, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
+                               QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QSystemTrayIcon, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
-from fortnite_chest_counter import diagnostics_cleanup, discord_summary, match_history, paths, profiles, settings
+from fortnite_chest_counter import diagnostics_cleanup, discord_summary, match_history, match_lifecycle, paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -531,7 +531,7 @@ class MaterialMenuItems(QStyledItemDelegate):
 
 
 class MaterialComboBox(QComboBox):
-    """Use Qt's menu interaction with a themed popup and a brief fade."""
+    """Use Qt's menu interaction with a themed popup and a short slide."""
 
     def __init__(self):
         super().__init__()
@@ -544,11 +544,16 @@ class MaterialComboBox(QComboBox):
         self._popup_motion.setEndValue(1.0)
         self._popup_motion.setEasingCurve(QEasingCurve.OutCubic)
         self._popup_motion.valueChanged.connect(self._show_progress)
+        self._popup_motion.finished.connect(self._round_popup)
 
     def _show_progress(self, amount):
         if self._popup_window is not None:
-            self._popup_window.setWindowOpacity(amount)
             self._popup_window.move(self._popup_origin + QPoint(0, round(-6 * (1 - amount))))
+
+    def _round_popup(self):
+        popup = self._popup_window
+        if popup is not None and popup.isVisible():
+            popup.setMask(rounded_region(popup.rect(), 16))
 
     def showPopup(self):
         if not self.count():
@@ -565,7 +570,6 @@ class MaterialComboBox(QComboBox):
             if popup.layout() is not None:
                 popup.layout().setContentsMargins(5, 5, 5, 5)
         animate = theme.animations_enabled()
-        popup.setWindowOpacity(0.2 if animate else 1.0)
         super().showPopup()
         screen = popup.screen()
         if screen is not None and popup.layout() is not None:
@@ -575,7 +579,6 @@ class MaterialComboBox(QComboBox):
             popup.resize(popup.width(), height)
             if popup.geometry().bottom() > available.bottom():
                 popup.move(popup.x(), available.bottom() - popup.height() + 1)
-        popup.setMask(rounded_region(popup.rect(), 12))
         self._popup_origin = popup.pos()
         if (screen is not None and popup.y() >= self.mapToGlobal(QPoint(0, self.height())).y() - 2
                 and popup.geometry().bottom() + 6 <= screen.availableGeometry().bottom()):
@@ -585,13 +588,11 @@ class MaterialComboBox(QComboBox):
             self._popup_motion.start()
         else:
             popup.move(self._popup_origin)
+        self._round_popup()
 
     def hidePopup(self):
         self._popup_motion.stop()
         super().hidePopup()
-        popup = self.view().window()
-        if popup.windowType() == Qt.Popup:
-            popup.setWindowOpacity(1.0)
 
 
 class ScreenOverlayCard(QFrame):
@@ -616,9 +617,13 @@ class ScreenOverlayCard(QFrame):
         if self.caption.text() == text:
             return
         if self._floating:
+            self.ensurePolished()
+            self.caption.ensurePolished()
             metrics = self.caption.fontMetrics()
-            width = max((metrics.horizontalAdvance(line) for line in text.splitlines()), default=0)
-            self.caption.setMinimumWidth(min(self.caption.maximumWidth(), width + 2))
+            width = max((metrics.horizontalAdvance(line) for line in text.splitlines()), default=0) + 4
+            limit = self.caption.maximumWidth()
+            self.caption.setWordWrap(width > limit)
+            self.caption.setMinimumWidth(min(limit, width))
         self.caption.setText(text)
 
     def resizeEvent(self, event):
@@ -2008,6 +2013,16 @@ class SettingsPage(QWidget):
         box, box_layout = card("Window")
         self.remember_window = QCheckBox("Remember window size and position (the app reopens the way you closed it)")
         box_layout.addWidget(self.remember_window)
+        self.close_to_tray = QCheckBox("Keep counting in the system tray when the window closes")
+        self.start_in_tray = QCheckBox("Start in the system tray")
+        box_layout.addWidget(self.close_to_tray)
+        box_layout.addWidget(self.start_in_tray)
+        layout.addWidget(box)
+
+        box, box_layout = card("Match automation", "Use the local Fortnite log to start both sources in Battle Royale "
+                               "warmup and save their combined totals when you return to the lobby.")
+        self.auto_match = QCheckBox("Automatically reset, start and save local Battle Royale matches")
+        box_layout.addWidget(self.auto_match)
         layout.addWidget(box)
 
         box, box_layout = card("Updates", "Nothing is downloaded or installed unless you choose to. Your counts, profiles and settings are kept.")
@@ -2077,6 +2092,9 @@ class SettingsPage(QWidget):
         self.snapshots.setEnabled(cfg["logging"]["enabled"])
         self.lossless.setChecked(cfg["capture"]["quality"] == "lossless")
         self.remember_window.setChecked(cfg["app"]["remember_window"])
+        self.close_to_tray.setChecked(cfg["app"]["close_to_tray"])
+        self.start_in_tray.setChecked(cfg["app"]["start_in_tray"])
+        self.auto_match.setChecked(self.win._match_tail is not None)
         update = cfg["update"]
         self.update_auto.setChecked(update["check_automatically"])
         self.update_bandwidth.setCurrentIndex(max(self.update_bandwidth.findData(update["download_bandwidth"]), 0))
@@ -2115,17 +2133,22 @@ class SettingsPage(QWidget):
             C.update_config_file(config_file(), "logging", {"enabled": self.logging.isChecked(),
                                                             "save_snapshots": self.snapshots.isChecked()})
             C.update_config_file(config_file(), "capture", {"quality": "lossless" if self.lossless.isChecked() else "standard"})
-            C.update_config_file(config_file(), "app", {"remember_window": self.remember_window.isChecked()})
             C.update_config_file(config_file(), "update", {"check_automatically": self.update_auto.isChecked(),
                                                            "download_bandwidth": self.update_bandwidth.currentData(),
                                                            "custom_limit_kb_per_second": self.update_limit.value() * self.update_unit.currentData()})
             if not self.remember_window.isChecked():
                 window_file().unlink(missing_ok=True)   # off = back to the default layout, also if switched on again later
+            C.update_config_file(config_file(), "app", {"remember_window": self.remember_window.isChecked(),
+                                                        "auto_match_lifecycle": self.auto_match.isChecked(),
+                                                        "close_to_tray": self.close_to_tray.isChecked(),
+                                                        "start_in_tray": self.start_in_tray.isChecked()})
         except (C.UserError, OSError) as error:
             show_error(self, str(error))
             return
         self.saved.setText("Saved." + (" Stop and start counting to use the new settings."
                                        if self.win.worker.running() else ""))
+        self.win.set_match_automation(self.auto_match.isChecked())
+        self.win.configure_tray(self.close_to_tray.isChecked() or self.start_in_tray.isChecked())
 
     def _open_captures(self):
         cfg, _ = load_cfg()
@@ -2264,13 +2287,30 @@ class DiscordPage(QWidget):
         super().__init__()
         self.win = win
         self._sending = False
+        self.sender_started = load_cfg()[0]["app"]["auto_start_discord_sender"]
+        self._configured = False
         self.send_result.connect(self._sent)
         layout = page_layout(self, "Discord", "Send a saved match summary to a channel using your bot.")
-        setup, setup_layout = card("Bot setup", "Invite your bot to the server with permission to send messages. "
-                                   "The channel ID and token are stored in Windows Credential Manager.")
+        setup, setup_layout = card("Bot setup", "Use a Discord bot to post plain-text summaries in one text channel.")
+        links = connected_buttons(
+            button("Discord Developer Portal", on_click=lambda: QDesktopServices.openUrl(
+                QUrl("https://discord.com/developers/applications"))),
+            button("Invite bot", on_click=self.invite_bot),
+            button("Chest Tracker setup guide", on_click=lambda: QDesktopServices.openUrl(
+                QUrl("https://github.com/Xxoris190/chest-tracker#set-up-the-discord-bot"))),
+        )
+        links.addStretch(1)
+        setup_layout.addLayout(links)
+        setup_layout.addWidget(label("1. Copy the Application ID from General Information and the token from the Bot page.\n"
+                                     "2. Invite it with the bot scope. Grant View Channel and Send Messages "
+                                     "only in the destination text channel. Leave privileged intents off.\n"
+                                     "3. In Discord, enable Developer Mode, right-click the text channel and "
+                                     "choose Copy Channel ID.", "hint", wrap=True))
         form = QGridLayout()
         self.channel = QLineEdit()
         self.channel.setPlaceholderText("Discord channel ID")
+        self.application_id = QLineEdit()
+        self.application_id.setPlaceholderText("Discord application ID")
         self.token = QLineEdit()
         self.token.setEchoMode(QLineEdit.Password)
         self.token.setPlaceholderText("Bot token")
@@ -2278,39 +2318,61 @@ class DiscordPage(QWidget):
         form.addWidget(self.channel, 0, 1)
         form.addWidget(label("Bot token"), 1, 0)
         form.addWidget(self.token, 1, 1)
+        form.addWidget(label("Application ID"), 2, 0)
+        form.addWidget(self.application_id, 2, 1)
         setup_layout.addLayout(form)
+        setup_layout.addWidget(label("The channel ID and token are stored in Windows Credential Manager.",
+                                     "hint", wrap=True))
         row = connected_buttons(button("Save setup", on_click=self.save_setup),
                                 button("Forget setup", on_click=self.forget_setup))
         row.addStretch(1)
         setup_layout.addLayout(row)
+        sender_row = QHBoxLayout()
+        title = layout.itemAt(0).widget()
+        layout.removeWidget(title)
+        sender_row.addWidget(title)
+        sender_row.addStretch(1)
+        self.sender_status = label("", "pill")
+        self.sender_toggle = button("", on_click=self.toggle_sender)
+        self.auto_start = QCheckBox("Start bot sender with the app")
+        self.auto_start.setChecked(self.sender_started)
+        self.auto_start.toggled.connect(self.save_sender_start)
+        sender_row.addWidget(self.sender_status)
+        sender_row.addWidget(self.sender_toggle)
+        layout.insertLayout(0, sender_row)
+        setup_layout.addWidget(self.auto_start)
         self.setup_status = label("", "hint", wrap=True)
         setup_layout.addWidget(self.setup_status)
         layout.addWidget(setup)
 
-        summary, summary_layout = card("Match summary")
+        summary, summary_layout = card("Match reports", "Send a saved match manually, or post each new match after it is saved.")
+        self.auto_report = QCheckBox("Automatically send new match reports")
+        self.auto_report.toggled.connect(self.save_report_mode)
+        summary_layout.addWidget(self.auto_report)
         self.match = MaterialComboBox()
         self.match.setAccessibleName("Saved match")
+        self.match.setPlaceholderText("No saved matches yet")
         self.match.currentIndexChanged.connect(self._show_summary)
-        summary_layout.addWidget(self.match)
-        self.preview = QPlainTextEdit()
-        self.preview.setObjectName("report")
-        self.preview.setReadOnly(True)
-        self.preview.setMinimumHeight(110)
-        summary_layout.addWidget(self.preview)
-        self.send = button("Send summary...", "primary", on_click=self.send_summary)
+        self.send = button("Send report", "primary", on_click=self.send_summary)
         self.send.setEnabled(False)
-        summary_layout.addWidget(self.send, 0, Qt.AlignLeft)
+        row = QHBoxLayout()
+        row.addWidget(self.match, 1)
+        row.addWidget(self.send)
+        summary_layout.addLayout(row)
         self.status = label("", "hint", wrap=True)
         summary_layout.addWidget(self.status)
         layout.addWidget(summary)
         layout.addStretch(1)
+        self.refresh_sender_status()
 
     def load(self):
         self.token.clear()
+        self.auto_report.blockSignals(True)
+        self.auto_report.setChecked(load_cfg()[0]["app"]["auto_discord_summary"])
+        self.auto_report.blockSignals(False)
         try:
             config = discord_summary.load()
-            self.channel.setText(config.channel if config else "")
-            self.setup_status.setText("Bot setup saved." if config else "No bot configured.")
+            self.show_saved_setup(config)
         except (OSError, ValueError) as error:
             self.setup_status.setText(str(error))
         self.match.clear()
@@ -2323,19 +2385,63 @@ class DiscordPage(QWidget):
 
     def _show_summary(self, *_):
         match = self.match.currentData()
-        self.preview.setPlainText(match.summary() if match else "Finish a match to see a summary here.")
-        self.send.setEnabled(match is not None and not self._sending)
+        self.match.setEnabled(self.match.count() > 0)
+        self.send.setEnabled(match is not None and self.sender_started and self._configured and not self._sending)
+
+    def save_report_mode(self, enabled):
+        try:
+            C.update_config_file(config_file(), "app", {"auto_discord_summary": enabled})
+        except (C.UserError, OSError) as error:
+            self.auto_report.blockSignals(True)
+            self.auto_report.setChecked(not enabled)
+            self.auto_report.blockSignals(False)
+            self.status.setText(f"Could not save the report preference: {error}")
+            return
+        self.status.setText("Automatic reports enabled." if enabled else "Manual reports selected.")
+
+    def invite_bot(self):
+        app_id = self.application_id.text().strip()
+        if not discord_summary.valid_id(app_id):
+            self.setup_status.setText("Enter the Application ID from General Information first.")
+            self.application_id.setFocus()
+            return
+        QDesktopServices.openUrl(QUrl(f"https://discord.com/oauth2/authorize?client_id={app_id}&scope=bot&permissions=0"))
+
+    def show_saved_setup(self, config):
+        self._configured = config is not None
+        self.channel.setText(config.channel if config else "")
+        self.application_id.setText(config.application_id if config else "")
+        self.token.setPlaceholderText("••••••••  (saved)" if config else "Bot token")
+        self.setup_status.setText("Bot setup saved." if config else "No bot configured.")
+        self.refresh_sender_status()
+
+    def refresh_sender_status(self):
+        running = self._configured and self.sender_started
+        text = "Sender ready" if running else "Sender stopped" if self._configured else "Setup required"
+        self.sender_status.setText(f"●  {text}")
+        self.sender_status.setStyleSheet(theme.pill_style(theme.CERTAIN if running else theme.MUTED))
+        self.sender_toggle.setText("Stop sender" if running else "Start sender")
+        self.sender_toggle.setEnabled(self._configured)
+        self._show_summary()
+
+    def toggle_sender(self):
+        self.sender_started = not self.sender_started
+        self.refresh_sender_status()
+
+    def save_sender_start(self, enabled):
+        self.win.save_app_option("auto_start_discord_sender", enabled)
 
     def save_setup(self):
         try:
             stored = discord_summary.load() if not self.token.text().strip() else None
             token = self.token.text().strip() or (stored.token if stored else "")
-            discord_summary.save(discord_summary.BotSettings(self.channel.text().strip(), token))
+            config = discord_summary.BotSettings(self.channel.text().strip(), token, self.application_id.text().strip())
+            discord_summary.save(config)
         except (OSError, ValueError) as error:
             self.setup_status.setText(str(error))
             return
         self.token.clear()
-        self.setup_status.setText("Bot setup saved.")
+        self.show_saved_setup(config)
 
     def forget_setup(self):
         if not ask(self, "Forget Discord setup?", "Remove the saved channel and bot token from this PC?",
@@ -2346,13 +2452,13 @@ class DiscordPage(QWidget):
         except OSError as error:
             self.setup_status.setText(str(error))
             return
-        self.channel.clear()
         self.token.clear()
+        self.show_saved_setup(None)
         self.setup_status.setText("Bot setup removed.")
 
     def send_summary(self):
         match = self.match.currentData()
-        if match is None or self._sending:
+        if match is None or self._sending or not self.sender_started:
             return
         try:
             config = discord_summary.load()
@@ -2362,7 +2468,7 @@ class DiscordPage(QWidget):
         if config is None or self.channel.text().strip() != config.channel or self.token.text():
             self.status.setText("Save the bot setup before sending a summary.")
             return
-        if not ask(self, "Send match summary?", f"Send this summary to Discord channel {config.channel}?", "Send"):
+        if not ask(self, "Send match summary?", f"Send to Discord channel {config.channel}?\n\n{match.summary()}", "Send"):
             return
         self._sending = True
         self.send.setEnabled(False)
@@ -2380,7 +2486,7 @@ class DiscordPage(QWidget):
 
     def _sent(self, message):
         self._sending = False
-        self.send.setEnabled(self.match.currentData() is not None)
+        self._show_summary()
         self.status.setText(message)
 
 
@@ -2655,10 +2761,15 @@ class NavigationDestination(QPushButton):
 
 
 class MainWindow(QMainWindow):
+    auto_discord_result = Signal(str)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
+        self._tray = None
+        self._tray_exit = False
+        self._hidden_in_tray = False
         self.resize(1120, 800)
         self.setMinimumSize(920, 640)
         self.window_file = None                 # set by restore_layout() for the real app window only (not tests / self-test)
@@ -2666,6 +2777,11 @@ class MainWindow(QMainWindow):
         self.secondary_worker = Worker()
         self._workers_pending = set()
         self._pending_resets = set()
+        self._match_tail = None
+        self._match_events = deque()
+        self._match_active = False
+        self._match_action = None
+        self._match_stop_acks = set()
         self._worker_failed = False
         self._secondary_failed = False
         self.updates = UM.UpdateManager(is_counting=self.workers_active)
@@ -2706,6 +2822,9 @@ class MainWindow(QMainWindow):
         self.stop_timer = QTimer(self)
         self.stop_timer.setSingleShot(True)
         self.stop_timer.timeout.connect(self._stop_timeout)
+        self.match_timer = QTimer(self)
+        self.match_timer.timeout.connect(self.poll_match_log)
+        self.auto_discord_result.connect(lambda result: self.add_log({"type": "info", "text": result}))
         self.slow = QTimer(self)
         self.slow.timeout.connect(self._tick_slow)
         self.preview_timer = QTimer(self)
@@ -2750,6 +2869,7 @@ class MainWindow(QMainWindow):
             self.write_obs_files(quiet=True)          # a fresh unzip/update carries zero placeholders
         self.apply_obs_settings()
         self.overlay.load()
+        self.set_match_automation(load_cfg()[0]["app"]["auto_match_lifecycle"])
         self.settings_page.load()
         rec = self.dashboard.rec_mode
         rec.setCurrentIndex(max(rec.findData(load_cfg()[0]["capture"]["mode"]), 0))
@@ -3090,6 +3210,148 @@ class MainWindow(QMainWindow):
         self.profile_changed()
 
     # ---- counting
+    def set_match_automation(self, enabled):
+        if enabled == (self._match_tail is not None):
+            return
+        self._match_events.clear()
+        self._match_active = False
+        self._match_action = None
+        self._match_stop_acks.clear()
+        if not enabled:
+            self.match_timer.stop()
+            self._match_tail = None
+            return
+        try:
+            self._match_tail = match_lifecycle.LogTail(match_lifecycle.local_log_path())
+        except OSError:
+            self.match_automation_failed("Could not open the local Fortnite log.")
+            return
+        self.match_timer.start(250)
+
+    def match_automation_failed(self, message):
+        self.set_match_automation(False)
+        self.settings_page.auto_match.setChecked(False)
+        try:
+            C.update_config_file(config_file(), "app", {"auto_match_lifecycle": False})
+        except (C.UserError, OSError):
+            message += " The setting could not be turned off in config.toml."
+        message += " Match automation is off for this session."
+        self.dashboard.show_banner(message)
+        self.add_log({"type": "warn", "text": message})
+
+    def poll_match_log(self):
+        if (self._match_tail is None or self._match_action == "finish" or self.quit_when_stopped
+                or self._install_pending or self.updates.state == UM.INSTALLING):
+            return
+        if not self._match_events:
+            try:
+                restarted, events = self._match_tail.poll()
+            except OSError:
+                self.match_automation_failed("Could not read the local Fortnite log.")
+                return
+            if restarted:
+                if self._match_active:
+                    self.match_automation_failed("Fortnite's log restarted during a match. Finish the match manually.")
+                    return
+                self._match_action = None
+            self._match_events.extend(events)
+        while self._match_events:
+            event = self._match_events.popleft()
+            if not self._match_active:
+                # A start followed by a lobby in unread data never gets a reset.
+                self._match_action = "start" if event == "start" else None
+            elif event == "finish":
+                self._match_action = "finish"
+                self._match_stop_acks.clear()
+                self.stop_counting()
+                return
+        if (self._match_action == "start" and self._match_tail.caught_up
+                and self._source_scan is None and self.dashboard.source.currentData()
+                and QApplication.activeModalWidget() is None):
+            if self.workers_active():
+                self.stop_counting()
+            else:
+                self.complete_match_action()
+
+    def complete_match_action(self):
+        action, self._match_action = self._match_action, None
+        if action == "start":
+            if self.quit_when_stopped or self._install_pending:
+                return
+            try:
+                started = self.start_counting(before_start=self.reset_match_sources)
+            except (C.UserError, OSError) as error:
+                self.match_automation_failed(f"Could not reset both sources. {error}")
+                return
+            if not started:
+                self.stop_counting()
+                self.match_automation_failed("Could not start both configured sources.")
+                return
+            self._match_active = True
+        elif action == "finish":
+            self._match_active = False
+            try:
+                saved = self.save_current_match()
+            except (C.UserError, OSError, ValueError) as error:
+                self.match_automation_failed(f"Could not save the match. {error}")
+                return
+            if saved:
+                self.add_log({"type": "info", "text": "Battle Royale match saved to Group."})
+                if self.pages.currentWidget() is self.group:
+                    self.group.load()
+
+    def reset_match_sources(self):
+        primary = self._cfg_for_actions()
+        if not primary["state"]["persist"]:
+            raise C.UserError("Enable saving counter state before recording matches.")
+        configs = (primary, self._secondary_cfg(primary)) if self.secondary_selected else (primary,)
+        backups = {}
+        recovery = []
+        with ExitStack() as guards:
+            for cfg in configs:
+                C.preflight(cfg, needs_video=False)
+                guards.enter_context(C.SingleInstance(cfg["state"]["path"]))
+            try:
+                for cfg in configs:
+                    path = Path(cfg["state"]["path"])
+                    try:
+                        prior = path.read_bytes()
+                    except FileNotFoundError:
+                        backups[path] = None
+                    else:
+                        backup = path.with_name(f"{path.name}.{uuid.uuid4().hex}.before-reset")
+                        backup.write_bytes(prior)
+                        backups[path] = backup
+                try:
+                    for cfg in configs:
+                        path = Path(cfg["state"]["path"])
+                        reset = C.set_counts(cfg, 0, 0, "reset")
+                        if json.loads(path.read_text(encoding="utf-8")) != reset.state:
+                            raise OSError("The reset counter state was not saved.")
+                except (C.UserError, OSError, ValueError) as error:
+                    for path, backup in backups.items():
+                        try:
+                            if backup is None:
+                                path.unlink(missing_ok=True)
+                            else:
+                                os.replace(backup, path)
+                        except OSError:
+                            recovery.append(str(backup or path))
+                    message = str(error)
+                    if recovery:
+                        message += " Could not restore the state automatically. Recovery files: " + ", ".join(recovery)
+                    raise C.UserError(message) from error
+            finally:
+                for backup in backups.values():
+                    if backup is not None and str(backup) not in recovery:
+                        try:
+                            backup.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                self.read_state(force=True)
+                self.read_secondary_state()
+        self.dashboard.clear_recent()
+
     def workers_active(self):
         return bool(self._workers_pending) or self.worker.running() or self.secondary_worker.running()
 
@@ -3110,7 +3372,7 @@ class MainWindow(QMainWindow):
             argv += ["--start", os.environ["FCC_DEV_VIDEO_START"]]
         return argv
 
-    def start_counting(self):
+    def start_counting(self, *, before_start=None):
         data = self.dashboard.source.currentData()
         if not data or self.workers_active() or self._install_pending or self.updates.state == UM.INSTALLING:
             return
@@ -3150,6 +3412,8 @@ class MainWindow(QMainWindow):
             except (C.UserError, OSError, profiles.ProfileError) as error:
                 show_error(self, f"Could not save the video source choice: {error}")
                 return
+        if before_start is not None:
+            before_start()
         if data["source"] == "stream" and url != cfg["live"]["url"]:
             self.dashboard.clear_recent(source=1)
         self.dashboard.banner.hide()
@@ -3187,6 +3451,7 @@ class MainWindow(QMainWindow):
             self._workers_pending.add("secondary")
             self.preview_visibility_changed()
             self.show_secondary_status("Connecting to the second video source…", theme.INFO)
+        return True
 
     def stop_counting(self):
         if self.workers_active() and self.mode != "stopping":
@@ -3471,6 +3736,8 @@ class MainWindow(QMainWindow):
                               f"{message.get('marks', 0)} marks -> {message.get('folder', '')}"})
             self.update_recording_ui()
         elif kind == "stopped":
+            if self._match_action == "finish" and message.get("stop_reason") == "stopped in the app":
+                self._match_stop_acks.add("primary")
             minutes = (message.get("seconds") or 0) / 60
             self.add_log({"type": "line", "text": f"Stopped ({message.get('stop_reason', '')}). Analysed "
                           f"{message.get('frames_processed', 0):,} frames in {minutes:.1f} min, "
@@ -3503,6 +3770,8 @@ class MainWindow(QMainWindow):
         elif kind == "error":
             self._secondary_failed = True
             self.show_secondary_status(f"Second source could not continue: {message.get('text', '')}", theme.REJECT)
+        elif kind == "stopped" and self._match_action == "finish" and message.get("stop_reason") == "stopped in the app":
+            self._match_stop_acks.add("secondary")
         elif kind == "exit":
             if self.mode != "stopping" and not self._secondary_failed:
                 detail = "\n".join(self.secondary_worker.stderr_tail[-6:])
@@ -3514,6 +3783,11 @@ class MainWindow(QMainWindow):
 
     def worker_exited(self, role, code):
         self._workers_pending.discard(role)
+        failed_finish = self._match_action == "finish" and (code != 0 or role not in self._match_stop_acks)
+        early_exit = self._match_action != "finish" and not (self.quit_when_stopped or self._install_pending)
+        if self._match_active and (failed_finish or early_exit):
+            self.match_automation_failed("A video source did not finish counting normally. Finish the match manually.")
+            self.stop_counting()
         if self._install_pending and code not in (0, None):
             self._worker_failed = True
         if role in self._pending_resets:
@@ -3531,6 +3805,8 @@ class MainWindow(QMainWindow):
             return
         self.stop_timer.stop()
         self.set_mode("error" if self.error_seen else "stopped")
+        if self._match_action == "finish":
+            self.complete_match_action()
         if self._install_pending:
             if self._worker_failed:
                 self._refuse_install_after_stop()
@@ -3703,7 +3979,7 @@ class MainWindow(QMainWindow):
 
     # ---- preview
     def preview_visibility_changed(self):
-        wanted = (self.pages.currentWidget() is self.dashboard and self.dashboard.show_preview.isChecked()
+        wanted = (not self._hidden_in_tray and self.pages.currentWidget() is self.dashboard and self.dashboard.show_preview.isChecked()
                   and self.mode in ("connecting", "counting"))
         primary = wanted and self.preview_reader is not None
         secondary = wanted and self.secondary_preview_reader is not None and "secondary" in self._workers_pending
@@ -3773,18 +4049,7 @@ class MainWindow(QMainWindow):
                    "Use Reset on the Dashboard before starting the next match.", "Save match"):
             return
         try:
-            with ExitStack() as guards:
-                for path in state_paths:
-                    guards.enter_context(C.SingleInstance(path))
-                profile = profiles.apply(cfg)
-                identity = f"{profile['id']}@{profile['created_at'] or ''}"
-                snapshot, certain, total = match_history.read_snapshot(identity, state_paths)
-                boost = self.dashboard.token_boost.currentData()
-                match = match_history.Match(snapshot, datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
-                                            identity, profile["name"], self.dashboard.token_mode.currentText(),
-                                            certain, total - certain,
-                                            token_odds_text(total, boost), boost)
-                saved = match_history.save_match(self.match_history_path(), match)
+            saved = self.save_current_match()
         except (C.UserError, OSError, ValueError) as error:
             show_error(self, f"Could not save the match. {error}")
             return
@@ -3794,6 +4059,47 @@ class MainWindow(QMainWindow):
             self.go_to(4)
         self.group.feedback.setText("Match saved. Use Reset on the Dashboard before the next match." if saved else
                                     "These counts have already been saved.")
+
+    def save_current_match(self):
+        cfg, _ = load_cfg()
+        if not cfg["state"]["persist"]:
+            raise C.UserError("Enable saving counter state before recording matches.")
+        primary = Path(cfg["state"]["path"])
+        state_paths = (primary, profiles.secondary_state_path(primary)) if self.secondary_selected else (primary,)
+        with ExitStack() as guards:
+            for path in state_paths:
+                guards.enter_context(C.SingleInstance(path))
+            profile = profiles.apply(cfg)
+            identity = f"{profile['id']}@{profile['created_at'] or ''}"
+            snapshot, certain, total = match_history.read_snapshot(identity, state_paths)
+            boost = self.dashboard.token_boost.currentData()
+            match = match_history.Match(snapshot, datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
+                                        identity, profile["name"], self.dashboard.token_mode.currentText(),
+                                        certain, total - certain, token_odds_text(total, boost), boost)
+            saved = match_history.save_match(self.match_history_path(), match)
+        if saved and cfg["app"]["auto_discord_summary"] and self.discord.sender_started:
+            self.deliver_saved_match(match)
+        return saved
+
+    def deliver_saved_match(self, match):
+        try:
+            config = discord_summary.load()
+            if config is None:
+                raise ValueError("Save the Discord bot setup first.")
+        except (OSError, ValueError) as error:
+            self.auto_discord_result.emit(f"Discord delivery failed. {error}")
+            return
+
+        def deliver():
+            try:
+                discord_summary.send(config, match.summary())
+                result = "Match summary sent to Discord."
+            except (OSError, ValueError) as error:
+                result = f"Discord delivery failed. {error}"
+            self.auto_discord_result.emit(result)
+
+        # Discord's REST request has a timeout. Allow it to finish after the window closes.
+        threading.Thread(target=deliver, daemon=False).start()
 
     def reset_counts(self):
         whose = "" if self.dashboard.profile.count() <= 1 else f' of the profile "{self.dashboard.profile.currentText()}"'
@@ -3940,8 +4246,54 @@ class MainWindow(QMainWindow):
         cfg, _ = load_cfg()
         return cfg["app"]["remember_window"] and save_window(self, self.window_file)
 
+    def configure_tray(self, enabled):
+        if not enabled:
+            if self._tray is not None:
+                self._tray.hide()
+            return False
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return False
+        if self._tray is None:
+            self._tray = QSystemTrayIcon(self.windowIcon(), self)
+            self._tray.setToolTip(APP_NAME)
+            menu = QMenu(self)
+            menu.addAction("Open", self.open_from_tray)
+            menu.addAction("Quit", self.quit_from_tray)
+            self._tray.setContextMenu(menu)
+            self._tray.activated.connect(self.tray_activated)
+        self._tray.show()
+        return True
+
+    def tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self.open_from_tray()
+
+    def open_from_tray(self):
+        self._hidden_in_tray = False
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.preview_visibility_changed()
+
+    def quit_from_tray(self):
+        self._tray_exit = True
+        try:
+            self.close()
+        finally:
+            self._tray_exit = False
+
     # ---- closing
     def closeEvent(self, event):
+        if (not self._tray_exit and not self.quit_when_stopped and not self._install_pending
+                and self.updates.state != UM.INSTALLING and self._tray is not None and self._tray.isVisible()
+                and load_cfg()[0]["app"]["close_to_tray"]):
+            self.save_layout()
+            self._hidden_in_tray = True
+            self.hide()
+            self.preview_visibility_changed()
+            event.ignore()
+            return
         if self.workers_active():
             if not self.quit_when_stopped:
                 if not ask(self, "Stop counting?", "The counter is running. Stop counting and close the app?\n\n"
@@ -3949,12 +4301,14 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
                 self.quit_when_stopped = True
+                self.match_timer.stop()
                 self.dashboard.toggle_screen_overlay(False)
                 self.save_layout()               # before hiding: a hidden window has no position to save
                 self.stop_counting()
                 self.hide()
             event.ignore()                       # closes for real when the worker has finished (see handle 'exit')
             return
+        self.match_timer.stop()
         self.save_layout()
         self.dashboard.toggle_screen_overlay(False)
         if self.update_dialog is not None:
@@ -3964,6 +4318,8 @@ class MainWindow(QMainWindow):
         if self.secondary_preview_reader is not None:
             self.secondary_preview_reader.close()
         self.obs_link.stop(timeout=0.5)
+        if self._tray is not None:
+            self._tray.hide()
         super().closeEvent(event)
         QApplication.quit()
 
@@ -4070,15 +4426,19 @@ def main(argv=None):
         return self_test(app, args[1])
     lock = _single_instance()
     if lock is None:
-        show_notice_dialog(None, APP_NAME, f"{APP_NAME} is already open.\n\nLook for it in the taskbar.")
+        show_notice_dialog(None, APP_NAME, f"{APP_NAME} is already open.\n\nLook for it in the taskbar or system tray.")
         return 0
     window = MainWindow()
     set_class_icon(window)
     apply_window_theme(window)
     sys.excepthook = _crash_hook(lambda: window)
     window.restore_layout()
-    window.show()
     installing = len(args) == 3 and args[0] == "--update-health"
+    app_options = load_cfg()[0]["app"]
+    tray_available = window.configure_tray(app_options["close_to_tray"] or app_options["start_in_tray"])
+    window._hidden_in_tray = tray_available and app_options["start_in_tray"] and not installing
+    if not window._hidden_in_tray:
+        window.show()
     if installing:                                             # started by the updater: report only once the app is really up
         from fortnite_chest_counter.update import health
         QTimer.singleShot(UPDATE_HEALTH_DELAY_MS, lambda: health.write_report(args[1], args[2]))

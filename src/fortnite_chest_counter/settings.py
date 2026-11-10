@@ -93,6 +93,11 @@ DEFAULTS = {
         "show_activity": True,
         "secondary_source": "null",
         "remember_window": True,                # the desktop app reopens with the size, position and maximised state it closed with
+        "close_to_tray": False,
+        "start_in_tray": False,
+        "auto_match_lifecycle": False,
+        "auto_discord_summary": False,
+        "auto_start_discord_sender": True,
     },
     "update": {
         "check_automatically": True,            # look for a new version shortly after the app opens (nothing is downloaded by itself)

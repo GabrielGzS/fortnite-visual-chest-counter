@@ -17,6 +17,26 @@ The Pirate Token estimate uses **Total** and the selected boost. It models indep
 [Fortnite Status announcement](https://x.com/FortniteStatus/status/2119202610322227327).
 [Independent probability calculator](https://piratetoken.quest/drop-rate/).
 
+## Automatic match reports
+
+Enable **Settings → Match automation** and save. The app watches new lines in Fortnite's local Windows log.
+Battle Royale warmup resets and starts the configured sources. Returning to the local lobby stops both workers
+and saves their combined counts. Totals stay visible in the lobby. For a match already underway when opening
+the app, use the manual controls.
+
+In **Discord → Match reports**, enable **Automatically send new match reports** to send newly saved matches.
+Manual sending is also available. Use a standard text channel and grant the bot **View Channel** and
+**Send Messages** in that channel. Enter the Application ID to use **Invite bot**, which requests no server-wide
+permissions. Use **Start sender**, **Stop sender**, and **Start bot sender with the app** to control delivery.
+The sender posts through Discord's HTTP API. Slash commands require a separate persistent connection.
+
+- [Discord Developer Portal](https://discord.com/developers/applications)
+- [Discord channel permissions](https://docs.discord.com/developers/topics/permissions)
+- [Original Chest Tracker setup guide](https://github.com/Xxoris190/chest-tracker#set-up-the-discord-bot)
+
+Under **Settings → Window**, enable **Start in the system tray** or **Keep counting in the system tray when the window
+closes**. Choose **Open** or **Quit** from the tray icon's menu.
+
 ## Detector and capture changes
 
 - French classification uses the XP line and agreement across multiple frames. It recognises normal, rare and sprite

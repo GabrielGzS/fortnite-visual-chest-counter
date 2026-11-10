@@ -16,6 +16,7 @@ _TARGET = "Fortnite Visual Chest Counter/Discord Bot"
 class BotSettings:
     channel: str
     token: str
+    application_id: str = ""
 
 
 class _NoRedirects(HTTPRedirectHandler):
@@ -35,11 +36,17 @@ def load():
         raise ValueError("The saved Discord settings are invalid. Save the setup again.") from error
 
 
+def valid_id(value):
+    return isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{14,21}", value) is not None
+
+
 def _validate(values):
-    if not isinstance(values.channel, str) or not re.fullmatch(r"[1-9][0-9]{14,21}", values.channel):
+    if not valid_id(values.channel):
         raise ValueError("Enter a valid Discord channel ID.")
     if not isinstance(values.token, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{8,300}", values.token):
         raise ValueError("Enter a Discord bot token.")
+    if values.application_id != "" and not valid_id(values.application_id):
+        raise ValueError("Enter a valid Discord Application ID.")
 
 
 def save(values):
