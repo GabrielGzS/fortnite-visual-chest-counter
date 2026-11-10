@@ -57,7 +57,7 @@ The tray menu opens the window or quits the app. Closing the window can keep cou
 
 The chest illustration changes with the detected type. Give each Personal, Team and All matches section its own heading and multiline template, including cumulative match count. Configure transparency and screen-share visibility, then preview the same overlay in the app. You can also display token odds, chest types and your saved match count.
 
-OBS can read `obs_output\chest_counter.txt` with **Text (GDI+)**, or receive direct updates through OBS WebSocket. The OBS and CLI **APPROX** total includes **CERTAIN**. See the [overlay guide](docs/guides/obs-overlay.md).
+OBS can read `obs_output\chest_counter.txt` with **Text (GDI+)**, or receive direct updates through OBS WebSocket. The app writes the same enabled custom sections to that file and the floating overlay. Separate legacy CLI output files retain their original count conventions. See the [overlay guide](docs/guides/obs-overlay.md).
 
 ### Pirate Token estimates
 
@@ -72,7 +72,7 @@ One person runs the **Host** bot. Other players use **Guest**, their own name an
 - Show the ranking in the Dashboard and Group page, with totals, confidence, chest types and saved match counts where available.
 - Choose the public leaderboard's destination from the online bot's available Discord channels. Publish it from the app or from a Discord command.
 - Send match summaries manually or automatically after saving. Start or stop the bot and choose whether it starts with the app.
-- Give the bot and webhook separate names and avatars. The bot can rotate its Discord presence between live team totals, token odds and saved group stats.
+- Give the bot a name, local avatar and banner, and configure the webhook sender name and avatar URL separately. Customise its Discord activity text, type and rotation interval for team totals, token odds and saved group stats.
 - Reset selected players in the standings or remove the published board. Local match history is managed separately.
 - Turn off **Share matches with my group** to keep new matches local and restore personal mode and boost controls.
 
@@ -109,6 +109,19 @@ The screenshots show the application with sample data.
 </table>
 
 <p align="center"><a href="docs/previews/overlay.png"><img src="docs/previews/overlay.png" alt="Floating overlay with the current chest type and three statistic scopes" width="600"></a></p>
+
+### Discord previews
+
+These two images are local simulations using sample values. The leaderboard uses the same embed data as the app's Discord output.
+
+<table>
+  <tr>
+    <td width="58%"><a href="docs/previews/discord-leaderboard.png"><img src="docs/previews/discord-leaderboard.png" alt="Simulated Discord leaderboard with Alex and Echo's sample results" width="620"></a></td>
+    <td width="42%"><a href="docs/previews/discord-profile.png"><img src="docs/previews/discord-profile.png" alt="Simulated bot profile with the bundled circular chest avatar and banner" width="450"></a></td>
+  </tr>
+  <tr><td align="center">Simulated leaderboard embed</td><td align="center">Simulated bot profile and presence</td></tr>
+</table>
+
 
 ## Capture setups
 

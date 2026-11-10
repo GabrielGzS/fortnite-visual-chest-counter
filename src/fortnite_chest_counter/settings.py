@@ -41,6 +41,7 @@ DEFAULTS = {
         "screen_show_types": True,
         "screen_show_matches": True,
         "screen_opacity": 100,
+        "use_custom_sections": True,
         "screen_personal_enabled": True,
         "screen_team_enabled": True,
         "screen_cumulative_enabled": True,
@@ -106,6 +107,7 @@ DEFAULTS = {
         "show_activity": False,
         "bot_name": "Chest Counter",
         "bot_avatar_path": "",
+        "bot_banner_path": "",
         "webhook_name": "Chest Counter",
         "webhook_avatar_url": "https://raw.githubusercontent.com/NEVARLeVrai/fortnite-visual-chest-counter/ui/chest-tracker-dashboard/docs/previews/logo.png",
         "discord_presence_enabled": True,
@@ -242,7 +244,7 @@ def _check(section, key, value):
                 f"must be a whole number from {MIN_CUSTOM_LIMIT_KB} to {MAX_CUSTOM_LIMIT_KB}")
     if section == "display" and key.startswith("screen_") and key.endswith(("_text", "_title", "_template")):
         return (isinstance(value, str) and len(value) <= 4096 and "\x00" not in value, "must be text up to 4096 characters")
-    if section == "app" and key == "bot_avatar_path":
+    if section == "app" and key in ("bot_avatar_path", "bot_banner_path"):
         return (isinstance(value, str) and "\x00" not in value, "must be a file path or empty")
     if section == "app" and key.startswith("discord_presence_") and key.endswith("_text"):
         return (isinstance(value, str) and len(value) <= 128 and "\x00" not in value, "must be text up to 128 characters")

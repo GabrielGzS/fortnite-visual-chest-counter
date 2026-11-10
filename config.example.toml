@@ -89,6 +89,7 @@ screen_team_template = "Chests · {total}    Players · {players}\nPirate Token 
 screen_cumulative_template = "Chests · {total}\nMatches · {matches}\nPirate Token · {chance}"
 certain_label = "CERTAIN OPENED CHESTS"
 approximate_label = "APPROX. OPENED CHESTS"
+use_custom_sections = true
 
 [console]
 # The black counter window (not what viewers see).
@@ -203,6 +204,7 @@ discord_presence_team_text = "{players} players · {total} chests"
 discord_presence_token_text = "Team token chance · {chance}"
 discord_presence_group_text = "Group · {total} chests · {matches} matches"
 discord_presence_idle_text = "the group leaderboard"
+bot_banner_path = ""
 
 [update]
 # Look for a new version shortly after the app opens. Nothing is downloaded or installed unless you choose to.

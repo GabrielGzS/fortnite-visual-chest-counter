@@ -22,6 +22,14 @@ These are captures of the application using sample data. Click an image to view 
 
 ![Settings](settings.png)
 
+## Discord simulations
+
+These are local renderings of sample data. The leaderboard uses the app's embed payload.
+
+![Simulated Discord leaderboard](discord-leaderboard.png)
+
+![Simulated bot profile and presence](discord-profile.png)
+
 ## Artwork
 
 The logo and banner reuse the app's chest illustration. See [acknowledgements](../ACKNOWLEDGEMENTS.md).

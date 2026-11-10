@@ -1,6 +1,7 @@
 # Change and validation notes
 
-This page describes the local desktop work. Versioned release notes describe published releases.
+This is the living implementation and review document for the desktop pull request. Update this page when the branch
+changes; the pull request links here. Versioned release notes describe published releases.
 
 ## Changes
 
@@ -19,16 +20,23 @@ This page describes the local desktop work. Versioned release notes describe pub
   match reports and team matching by verified session fingerprint.
 - Share coalesced current-match updates, recover edited live feed messages after reconnect and keep final saved results authoritative. Add matching team participants and totals to local history.
 - Show personal, verified team and cumulative match totals with boost-aware Pirate Token estimates. Add overlay transparency and custom headings and multiline templates for Personal, Team and All matches, including cumulative match count.
+- Use one section editor and renderer for the floating overlay, Dashboard preview and managed OBS text file. Remove
+  the old layout radios. Apply global optional-statistic checkboxes consistently and reconcile worker counts with
+  the latest shared context without duplicating a saved/current match.
 - Publish the same detailed leaderboard from the app's channel dropdown or Discord's `/leaderboard publish:true`. Preserve a separate shared data message for Guest sync.
 - Add a README banner and badges, preview assets and explicit component acknowledgements. Configure bot and webhook branding separately and rotate the bot presence through live team and saved group statistics.
+- Apply bot username, avatar and banner explicitly. Keep the avatar chest centred and the banner text aligned;
+  branding previews are labelled local simulations. Add Windows and Linux test jobs on pushes and pull requests.
 - Add tray options, diagnostic cleanup and a Settings reset. Keep a console debug batch file and a buildable
   Windows development launcher.
 
 ## Defaults
 
 The portable defaults mirror the verified setup in `config.example.toml`. Match automation and Auto mode are enabled,
-the app starts and closes to the tray, and the on-screen overlay is visible in screen sharing. Group sharing remains
+the app opens normally and closes to the tray, and the on-screen overlay is visible in screen sharing. Group sharing remains
 off. Automatic match reports also require a configured bot and enabled sharing.
+The example configuration is checked against the code defaults. Portable builds include no saved configuration,
+credentials, player names, counters, diagnostic recordings or sample match data.
 
 ## Validation
 
@@ -38,6 +46,7 @@ off. Automatic match reports also require a configured bot and enabled sharing.
 - Two local Fortnite logs from the same pair of Duo matches yielded two matching session fingerprints and detected
   Duo on both PCs. Automated tests exercised local history, mode selection, Discord publication and settings sync
   using simulated Discord responses.
+- App previews capture the current interface with sample data. The Discord leaderboard and profile previews are locally rendered simulations, with the leaderboard using the actual embed payload.
 - Before release, repeat tests with an installed Windows build, HDR and SDR capture, Discord screen sharing and
   a live Host/Guest setup. Live performance and Discord delivery need separate verification.
 

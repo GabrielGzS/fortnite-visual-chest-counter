@@ -332,20 +332,31 @@ def test_token_odds_use_total_and_separate_estimated_chests():
     from fortnite_chest_counter.gui import app as A
 
     previous_dir, previous_app_dir = os.getcwd(), paths.APP_DIR
+    personal_template = "Opened {total}\nConfirmed {certain} · Estimated {approx}\nOdds {chance}\nGames {matches}\n{types}"
+    cumulative_template = "Lifetime {total}\nLifetime odds {chance}\nGames {matches}"
     with tempfile.TemporaryDirectory() as tmp:
         os.chdir(tmp)
         paths.APP_DIR = Path(tmp)
         win = None
+
+        def check_shared_output():
+            text = win.dashboard.screen_overlay_text(win.overlay.display)
+            assert win.dashboard.screen_overlay.plain_text == text
+            assert win.dashboard.overlay_preview.plain_text == text
+            assert Path(win.overlay.obs_path.text()).read_text(encoding="utf-8") == text + "\n"
+
         try:
-            C.update_config_file(A.config_file(), "app", {"screen_overlay_shared": False})
+            C.update_config_file(A.config_file(), "app", {"screen_overlay_shared": False, "auto_match_lifecycle": False})
             C.update_config_file(A.config_file(), "display", {
-                "both_layout": "stacked", "screen_show_matches": False, "screen_show_types": False,
-                "screen_team_text": "", "screen_cumulative_text": "",
-                "screen_personal_template": "", "screen_team_enabled": False, "screen_cumulative_enabled": False,
+                "use_custom_sections": True, "screen_show_token": True, "screen_show_matches": False,
+                "screen_show_types": False, "screen_personal_title": "My match",
+                "screen_personal_template": personal_template, "screen_team_enabled": False,
+                "screen_cumulative_enabled": False,
             })
             win = A.MainWindow()
             win.timer.stop()
-            win.set_counts(5, 10)
+            win._set(5, 10, "set-count")
+            win.read_state(force=True)
             assert win.dashboard.certain.value.text() == "5"
             assert win.dashboard.approx.value.text() == "5"
             assert win.dashboard.total.text() == "10"
@@ -363,43 +374,52 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             assert not win.overlay.share_screen_overlay.isChecked()
             win.overlay.share_screen_overlay.setChecked(True)
             assert overlay.plain_text.splitlines() == [
-                "CERTAIN OPENED CHESTS: 5", "APPROX. OPENED CHESTS: 5", "Total: 10",
-                "Pirate Token · 0.007272%",
+                "My match", "Opened 10", "Confirmed 5 · Estimated 5", "Odds 0.007272%",
             ]
+            check_shared_output()
             win.dashboard.token_mode.setCurrentText("Squad")
             assert win.dashboard.token_odds.text() == "0.007272%"
             win.dashboard.token_mode.setCurrentText("Solo")
             assert win.dashboard.token_odds.text() == "0.007272%"
             win._set(0, 0, "reset")
+            win.read_state(force=True)
             win.dashboard.token_mode.setCurrentText("Duo")
             assert win.dashboard.token_odds.text() == "0.000000%"
             assert "0.000000%" in overlay.plain_text
-            win.overlay.mode_buttons["certain"].setChecked(True)
-            win.overlay.token_text.setText("Odds: #")
-            win.overlay.total_text.setText("Opened #")
+
+            win.overlay.section_titles["personal"].setText("My counter")
             win.overlay.show_types.setChecked(True)
-            win.primary_types = {"unclassified": {"certain": 0, "approx": 3}}
-            win.refresh_types()
+            win.overlay.show_matches.setChecked(True)
+            win.overlay.transparency.setValue(35)
+            win._set(2, 3, "set-count")
+            win.read_state(force=True)
             win.overlay.apply()
             assert overlay.plain_text.splitlines() == [
-                "CERTAIN OPENED CHESTS: 0 • Opened 0", "Odds: 0.000000%",
-                "Chest types: not classified 3",
+                "My counter", "Opened 3", "Confirmed 2 · Estimated 1", "Odds 0.002182%",
+                "Games 1", "Chest types · not classified 3",
             ]
             assert win.overlay.preview.plain_text == overlay.plain_text
-            assert win.overlay.mode_examples["certain"].text() == "CERTAIN OPENED CHESTS: 0"
             assert not overlay.caption.wordWrap()
-            assert overlay.caption.width() >= max(overlay.caption.fontMetrics().horizontalAdvance(line)
-                                                  for line in overlay.plain_text.splitlines())
-            win.overlay.total_text.setText("Opened " * 180 + "#")
+            assert abs(overlay.windowOpacity() - 0.65) < 0.01
+            check_shared_output()
+
+            win.overlay.section_templates["personal"].setPlainText("Opened " * 180 + "{total}")
             win.overlay.apply()
             assert overlay.caption.wordWrap()
-            assert overlay.caption.width() <= overlay.caption.maximumWidth()
-            win.overlay.total_text.setText("Opened #")
-            assert win.dashboard.viewers.text() == overlay.plain_text
+            assert overlay.caption.minimumWidth() <= overlay.caption.maximumWidth()
+            check_shared_output()
+            win.overlay.section_templates["personal"].setPlainText(personal_template)
             win.overlay.show_token.setChecked(False)
+            win.overlay.section_enabled["team"].setChecked(True)
+            win.overlay.section_enabled["cumulative"].setChecked(True)
+            win.overlay.section_titles["cumulative"].setText("All games")
+            win.overlay.section_templates["cumulative"].setPlainText(cumulative_template)
             win.overlay.apply()
-            assert "Odds:" not in overlay.plain_text
-            assert "Opened 0" in overlay.plain_text
+            assert "Odds" not in overlay.plain_text and "Lifetime odds" not in overlay.plain_text
+            assert "Opened 3" in overlay.plain_text and "Lifetime 3" in overlay.plain_text
+            assert overlay._parts[1] == ""  # A team section needs a verified shared session.
+            assert overlay._parts[2] == "Lifetime 3\nGames 1"
+            check_shared_output()
             win.overlay.show_screen_overlay.setChecked(False)
             assert overlay.isHidden()
             assert not win.overlay.share_screen_overlay.isEnabled()
@@ -426,10 +446,15 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             assert win.dashboard.token_boost.currentData() == 1.5
             assert win.dashboard.show_preview.isChecked() and not win.dashboard.show_log.isChecked()
             assert win.overlay.show_screen_overlay.isChecked() and win.overlay.share_screen_overlay.isChecked()
-            assert win.overlay.show_types.isChecked() and not win.overlay.show_token.isChecked()
-            assert win.overlay.total_text.text() == "Opened #"
-            assert win.overlay.mode_buttons["certain"].isChecked()
-            assert win.overlay.token_text.text() == "Odds: #"
+            assert win.overlay.show_types.isChecked() and win.overlay.show_matches.isChecked()
+            assert not win.overlay.show_token.isChecked()
+            assert win.overlay.section_titles["personal"].text() == "My counter"
+            assert win.overlay.section_templates["personal"].toPlainText() == personal_template
+            assert win.overlay.section_enabled["cumulative"].isChecked()
+            assert win.overlay.section_titles["cumulative"].text() == "All games"
+            assert win.overlay.section_templates["cumulative"].toPlainText() == cumulative_template
+            assert win.overlay.transparency.value() == 35
+            check_shared_output()
         finally:
             if win is not None:
                 if win._source_scan is not None:
@@ -438,6 +463,7 @@ def test_token_odds_use_total_and_separate_estimated_chests():
                 qt.processEvents()
             paths.APP_DIR = previous_app_dir
             os.chdir(previous_dir)
+
 
 def test_hdr_tone_map_preserves_chromatic_highlights():
     from fortnite_chest_counter.input.video_sources import tone_map_scrgb

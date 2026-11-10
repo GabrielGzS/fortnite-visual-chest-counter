@@ -50,6 +50,7 @@ from fortnite_chest_counter.detection import fusion
 from fortnite_chest_counter import paths
 from fortnite_chest_counter import profiles
 from fortnite_chest_counter import settings
+from fortnite_chest_counter import overlay_layout
 from fortnite_chest_counter.detection import visual as V
 from fortnite_chest_counter.version import APP_NAME, RELEASE_CHANNEL, __version__
 
@@ -209,9 +210,12 @@ MODE_DESCRIPTIONS = {"approx": "estimated total only", "certain": "confirmed che
                      "inline": "both numbers on one line", "stacked": "both numbers on two lines"}
 
 
-def overlay_text(display, state):
+def overlay_text(display, state, context=None):
     """obs_output/chest_counter.txt - THE file OBS reads. Every display mode renders here, so switching modes never
     requires changing the OBS source."""
+    if display.get("use_custom_sections") and context is not None:
+        context = overlay_layout.reconcile_context(context, state)
+        return overlay_layout.format_text(display, overlay_layout.render_sections(display, context))
     mode = display_mode(display)
     if mode == "certain":
         return display_text(display, "certain", state)
@@ -234,13 +238,33 @@ def overlay_summary(display, state, obs_dir):
             f"OBS Text source file: {(Path(obs_dir) / 'chest_counter.txt').resolve()}")
 
 
-def write_obs_files(state, obs_dir, display):
+def read_overlay_context(obs_dir, state, state_path=None):
+    """Read only the current profile's bounded GUI snapshot, then advance it to worker state."""
+    try:
+        with (Path(obs_dir) / "overlay_context.json").open("rb") as stream:
+            raw = stream.read(128 * 1024 + 1)
+        if len(raw) > 128 * 1024:
+            return None
+        context = json.loads(raw)
+        if not overlay_layout.valid_context(context):
+            return None
+        if state_path is not None:
+            profile = context.get("profile_path")
+            if not isinstance(profile, str) or Path(profile).resolve() != Path(state_path).resolve():
+                return None
+        return overlay_layout.reconcile_context(context, state)
+    except (OSError, TypeError, ValueError, RecursionError):
+        return None
+
+
+def write_obs_files(state, obs_dir, display, *, state_path=None):
     """The OBS text files. File names never change (OBS sources point at them); only their text is customisable."""
     obs_dir = Path(obs_dir)
     atomic_write(obs_dir / "certain_chests.txt", display_text(display, "certain", state) + "\n")
     atomic_write(obs_dir / "approximate_chests.txt", display_text(display, "approx", state) + "\n")
     atomic_write(obs_dir / "chest_status.txt", status_line_text(display, state) + "\n")
-    atomic_write(obs_dir / "chest_counter.txt", overlay_text(display, state) + "\n")
+    context = read_overlay_context(obs_dir, state, state_path) if display.get("use_custom_sections") else None
+    atomic_write(obs_dir / "chest_counter.txt", overlay_text(display, state, context) + "\n")
     atomic_write(obs_dir / "last_chest.txt", last_chest_text(state) + "\n")
 
 
@@ -341,7 +365,7 @@ class CounterSession:
 
     def write_obs(self):
         try:
-            write_obs_files(self.state, self.obs_dir, self.display)
+            write_obs_files(self.state, self.obs_dir, self.display, state_path=self.state_path)
         except OSError as error:
             self._warn_once("obs", f"could not update the OBS text files in {self.obs_dir} ({error}); will retry on the next chest")
 

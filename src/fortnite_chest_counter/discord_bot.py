@@ -320,34 +320,38 @@ class GuildBot(discord.Client):
             self.publication_status = ""
             self._channels_changed(guild_id)
 
-    async def apply_branding(self, name="Chest Counter", avatar_path=""):
+    async def apply_branding(self, name="Chest Counter", avatar_path="", banner_path=""):
         if self.user is None:
             raise ValueError("Wait until the bot is online before applying its profile.")
         name = name.strip()
         if not 2 <= len(name) <= 32 or not name.isprintable() or any(char in name for char in "@#:`"):
             raise ValueError("Use a bot name of 2 to 32 characters without @, #, colon or backticks.")
-        path = Path(avatar_path) if avatar_path else Path(__file__).parent / "gui/assets/icon_256.png"
+        assets = Path(__file__).parent / "gui/assets"
 
-        def read_avatar():
+        def read_image(selected, bundled, label):
+            path = Path(selected) if selected else assets / bundled
+            if not selected and not path.is_file():
+                path = assets / "icon_256.png"
             if path.suffix.lower() not in (".png", ".jpg", ".jpeg"):
-                raise ValueError("Choose a PNG or JPEG avatar.")
+                raise ValueError(f"Choose a PNG or JPEG {label}.")
             try:
                 with path.open("rb") as stream:
                     data = stream.read(2 * 1024 * 1024 + 1)
             except OSError:
-                raise ValueError("Could not read the bot avatar. Choose an existing image file.") from None
+                raise ValueError(f"Could not read the bot {label}. Choose an existing image file.") from None
             if len(data) > 2 * 1024 * 1024:
-                raise ValueError("Choose a bot avatar smaller than 2 MB.")
+                raise ValueError(f"Choose a bot {label} smaller than 2 MB.")
             if not (data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"\xff\xd8\xff")):
-                raise ValueError("The avatar must contain a PNG or JPEG image.")
+                raise ValueError(f"The {label} must contain a PNG or JPEG image.")
             return data
 
-        avatar = await asyncio.to_thread(read_avatar)
-        values = {"avatar": avatar}
+        avatar = await asyncio.to_thread(read_image, avatar_path, "bot_avatar.png", "avatar")
+        banner = await asyncio.to_thread(read_image, banner_path, "bot_banner.png", "banner")
+        values = {"avatar": avatar, "banner": banner}
         if self.user.name != name:
             values["username"] = name
         await self.user.edit(**values)
-        return "Bot name and avatar updated."
+        return "Bot name, avatar and banner updated."
 
     async def update_presence(self):
         if self.user is None:
@@ -552,8 +556,8 @@ class BotRunner:
     def delete_board(self):
         return self._submit("delete_board")
 
-    def apply_branding(self, name="Chest Counter", avatar_path=""):
-        return self._submit("apply_branding", name, avatar_path)
+    def apply_branding(self, name="Chest Counter", avatar_path="", banner_path=""):
+        return self._submit("apply_branding", name, avatar_path, banner_path)
 
     def stop(self, *, timeout=None):
         with self._lock:

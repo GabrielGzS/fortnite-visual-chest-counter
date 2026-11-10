@@ -18,6 +18,7 @@ The README layout takes cues from Chest Tracker and N-Zik. The app's tonal surfa
 | Qt, PySide6 and Shiboken6 | LGPL v3. [Qt notice](../packaging/QT-NOTICE.txt), with license texts and source information in portable builds. |
 | FFmpeg | Unmodified LGPL v3 build, run as a separate program. [FFmpeg notice](../packaging/FFMPEG-NOTICE.txt). The matching source archive accompanies the build. |
 | NumPy and SciPy | BSD 3-Clause and the licenses of their bundled libraries. Portable builds retain their distribution notices. |
+| Streamlink | BSD 2-Clause, with each streaming dependency notice retained in the portable runtime. |
 | discord.py and HTTP dependencies | MIT, Apache-2.0 and PSF-2.0 as applicable. Portable builds retain each dependency's notices. |
 
 The [distribution notice](../packaging/LICENSE-NOTICE.txt) lists runtime locations. Each packaged build also contains `runtime/PROVENANCE.txt` with versions, origins and checksums.

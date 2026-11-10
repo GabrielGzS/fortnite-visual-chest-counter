@@ -39,11 +39,14 @@ The history keeps your personal counts. For a verified shared match with another
 
 ## Bot profile, webhook identity and presence
 
-The bot profile and the webhook sender identity are configured separately. With the bot online, choose a bot name and an optional local PNG or JPEG avatar, then use **Apply** to update the bot account. This changes its profile across the servers where that bot is installed. Leaving the image empty uses the app's chest icon.
+The bot profile and the webhook sender identity are configured separately. With the bot online, choose a bot name and optional local PNG or JPEG avatar and banner, then use **Apply bot profile** to update the bot account. This changes its profile across the servers where that bot is installed. Leaving the image fields empty uses the bundled circular chest avatar and profile banner.
 
 The webhook can use its own display name and image URL for outgoing messages. Its avatar is an HTTPS image URL, rather than a local image file. This sender identity is attached to the webhook messages.
 
-While the bot is online, its presence rotates about every 30 seconds. When a current verified team session has recent live submissions, it shows team players and chests, then the team Pirate Token estimate. Saved group totals and match counts can appear in the rotation too. The text reflects received data. In **Bot presence**, choose Watching, Playing or Listening, edit each activity template, enable or disable rotation and set its interval from 30 to 300 seconds. Templates accept {total}, {players}, {matches} and {chance}. Use **Save profile and presence** to apply these preferences.
+In **Bot presence**, choose whether the activity is shown and whether messages rotate. Choose **Watching**, **Playing** or **Listening**, set the interval from 30 to 300 seconds and customise the Current team, Team odds, Group totals and Idle text. Templates accept `{total}`, `{players}`, `{matches}` and `{chance}`. Click **Save profile and presence** to keep those preferences.
+
+The default rotation is 30 seconds. When a verified team session has recent live submissions, the bot can show its players and chests followed by the team Pirate Token estimate. Saved group totals and match counts can appear too. The text reflects received data.
+
 
 Bot and webhook credentials are stored in Windows Credential Manager.
 

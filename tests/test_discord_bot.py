@@ -667,12 +667,12 @@ def test_apply_bot_branding_is_explicit_and_uses_packaged_icon(tmp_path):
         user = SimpleNamespace(id=456, name="Previous bot name", edit=edit)
         bot._connection.user = user
         assert calls == []
-        assert await bot.apply_branding() == "Bot name and avatar updated."
+        assert await bot.apply_branding() == "Bot name, avatar and banner updated."
         assert calls[0]["username"] == "Chest Counter"
         assert calls[0]["avatar"].startswith(b"\x89PNG\r\n\x1a\n")
         user.name = "Chest Counter"
         await bot.apply_branding()
-        assert set(calls[1]) == {"avatar"}
+        assert set(calls[1]) == {"avatar", "banner"}
         await bot.close()
 
     asyncio.run(verify())
@@ -691,7 +691,9 @@ def test_custom_bot_branding_validates_before_discord_request(tmp_path):
         avatar = tmp_path / "custom.png"
         avatar.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
         await bot.apply_branding("My Squad", str(avatar))
-        assert calls[0] == {"username": "My Squad", "avatar": avatar.read_bytes()}
+        assert calls[0]["username"] == "My Squad"
+        assert calls[0]["avatar"] == avatar.read_bytes()
+        assert calls[0]["banner"].startswith(b"\x89PNG\r\n\x1a\n")
         for name in ("A", "x" * 33, "Bad\nName", "bad@name"):
             with pytest.raises(ValueError, match="bot name"):
                 await bot.apply_branding(name, str(avatar))
@@ -755,6 +757,31 @@ def test_custom_presence_templates_activity_rotation_and_disable(tmp_path, monke
         assert calls[-1]["activity"] is None
         await bot.update_presence()
         assert len(calls) == 4
+        await bot.close()
+
+    asyncio.run(verify())
+
+
+def test_custom_bot_banner_validates_before_discord_request(tmp_path):
+    async def verify():
+        bot = discord_bot.GuildBot(CONFIG, discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db"),
+                                   lambda *_: None, WEBHOOK)
+        calls = []
+
+        async def edit(**kwargs):
+            calls.append(kwargs)
+
+        bot._connection.user = SimpleNamespace(id=456, name="Chest Counter", edit=edit)
+        banner = tmp_path / "banner.jpg"
+        banner.write_bytes(b"\xff\xd8\xfffixture")
+        await bot.apply_branding(banner_path=str(banner))
+        assert calls[0]["banner"] == banner.read_bytes()
+        assert calls[0]["avatar"].startswith(b"\x89PNG\r\n\x1a\n")
+        assert "username" not in calls[0]
+        banner.write_text("invalid image")
+        with pytest.raises(ValueError, match="banner must contain"):
+            await bot.apply_branding(banner_path=str(banner))
+        assert len(calls) == 1
         await bot.close()
 
     asyncio.run(verify())

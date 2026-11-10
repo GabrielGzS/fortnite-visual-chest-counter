@@ -21,6 +21,7 @@ runtime\PROVENANCE.txt):
   FFmpeg (ffmpeg.exe)        LGPL v3 (unmodified LGPL build, no GPL parts)    runtime\ffmpeg\LICENSE.txt, FFMPEG-NOTICE.txt
   Qt for Python (PySide6,    LGPL v3 (unmodified official wheels, only the    runtime\licenses\Qt-NOTICE.txt,
   Shiboken6) and Qt          QtCore/QtGui/QtWidgets parts)                    LGPL-3.0.txt, GPL-3.0.txt
+  Streamlink                BSD 2-Clause (+ dependency notices)              runtime\licenses\streamlink-LICENSE
   Discord client            discord.py (MIT) and its HTTP dependencies       runtime\licenses\discord.py-LICENSE
                             (MIT, Apache-2.0 and PSF-2.0)                    and each dependency's bundled notices
 

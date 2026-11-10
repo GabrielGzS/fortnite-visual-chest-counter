@@ -7,7 +7,7 @@ in OBS as you like. Same steps for every setup - on a dual-PC setup, do this in 
 
 Enable the on-screen overlay in **Overlay** and apply your changes. Enable **Visible when sharing your screen** to include it in Discord screen sharing. The **Transparency** slider controls its opacity, and the preview shows the current wording and statistics.
 
-The overlay can show three scopes in order.
+Use the global checkboxes to choose the optional statistics, then enable or disable each custom section. The floating overlay and app-managed OBS text use the same sections in this order.
 
 | Scope | Counts and estimate |
 |---|---|
@@ -35,7 +35,7 @@ For example, an All matches heading can use the content below.
 Pirate Token · {chance}
 ```
 
-The Personal section shows your live counter. The Team section appears when a teammate has contributed to the same verified session. The All matches section combines the known history and current counter. Use the preview to check the text before applying it. Legacy count wording for OBS continues to use `#`, `#C` and `#A` where offered.
+The Personal section shows your live counter. The Team section appears when a teammate has contributed to the same verified session. The All matches section combines the known history and current counter. Use the preview to check the text before applying it. Applying the templates refreshes both the floating overlay and `chest_counter.txt`.
 
 The cumulative estimate preserves the boost used in each match. For `nᵢ` chests at per-chest probability `pᵢ`, it uses `1 − ∏(1 − pᵢ)ⁿᵢ`. Solo matches use your personal counts. Verified shared sessions use received team counts once, including your own contribution. A delayed result updates that session's total.
 
@@ -57,19 +57,11 @@ about once a second, so the text on stream changes within about one to two secon
 
 ## Choose what viewers see
 
-The app's **Overlay** page:
+The app's **Overlay** page uses the same enabled section headings and content for its preview, floating window and OBS text. Configure each section with its multiline template, use the global statistic checkboxes for optional values and click **Apply**. There is one main text output path, so changing the section layout keeps the same OBS source.
 
-- **What OBS shows:** both numbers on two lines, both on one line, the estimated total only, or confirmed chests only - each
-  with an example using your current numbers.
-- **Wording:** `#` is where the number goes (`Chests opened: #`, `Chest Hunt: #/500`). For one line, `#C` = confirmed and
-  `#A` = estimated total. **Restore wording defaults** restores the defaults. Any text, symbols and emoji work (with an OBS font that
-  has them).
-- The **on-screen preview** shows the floating overlay. **Apply** saves the settings and refreshes the OBS text.
-- The OBS text uses the legacy APPROX total, which includes confirmed openings. The on-screen overlay uses
-  the Dashboard split between confirmed and estimated-only openings.
+The text file carries the section headings and lines. Set its font, size and colour in OBS. The floating overlay adds the animated chest, opacity and Windows capture visibility options.
 
-The app cannot hide a Text source you already added in OBS: if a number on stream looks wrong, that source probably reads
-another file.
+Legacy CLI formats and separate `certain_chests.txt` and `approximate_chests.txt` files are retained for existing terminal workflows and separately styled sources. They use the original convention where the approximate figure includes confirmed openings.
 
 ## Instant updates: OBS WebSocket (optional)
 
@@ -96,13 +88,13 @@ automatically; a deleted one is reported.
 - **Do not let two tools update the same Text source** (for example an older counter script and this app): the last one
   wins and the text flickers. Give each tool its own source.
 
-## Advanced: `config.toml` and the other files
+## Advanced configuration and output files
 
 The OBS WebSocket settings are in `[obs_websocket]` (`enabled`, `host`, `port`, `source`, `source_uuid`).
 
-In `config.toml`, section `[display]`: `show = "both" | "certain" | "approx"`, `both_layout = "stacked" | "inline"`,
-`certain_text`, `approx_text`, `combined_status_format` (`{count}` = the number; `{certain}` / `{approx}` anywhere; `\n` = new
-line; `{{` / `}}` = literal braces), `use_thousands_separator`.
+The app saves shared templates in `[display]`. `use_custom_sections` enables the current section output. Each scope has an enabled flag, title and multiline template, for example `screen_personal_enabled`, `screen_personal_title` and `screen_personal_template`. Team and cumulative scopes use the same key pattern. `screen_opacity` stores the floating-window opacity.
+
+Legacy CLI wording remains available through `show`, `both_layout`, `certain_text`, `approx_text` and `combined_status_format`. Those values support `{count}`, `{certain}`, `{approx}` or `{approximate}`, plus escaped braces. They apply to the legacy output path when custom sections are disabled.
 
 For separately styled sources the counter also writes:
 

@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QScrollArea, QSizePolicy, QSlider, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QSystemTrayIcon, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
-from fortnite_chest_counter import diagnostics_cleanup, discord_bot, discord_group, discord_scoreboard, discord_summary, match_history, match_lifecycle, match_stats, paths, profiles, settings
+from fortnite_chest_counter import diagnostics_cleanup, discord_bot, discord_group, discord_scoreboard, discord_summary, match_history, match_lifecycle, match_stats, overlay_layout, paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -1593,78 +1593,63 @@ class Dashboard(QWidget):
                                            total=total, boost=boost, fingerprint=fingerprint, player=player, sharing=sharing, active=self.win._match_active)
         return current, cumulative
 
-    def screen_overlay_sections(self, display):
+    def overlay_context(self):
+        cfg = load_cfg()[0]
+        path = Path(cfg["state"]["path"])
+        try:
+            latest = json.loads(path.read_text(encoding="utf8"))
+        except (OSError, ValueError):
+            latest = {}
         certain, total = self.win.counts
-        approx = max(0, total - certain)
-        total_text = display["screen_total_text"]
-        if "#" not in total_text:
-            total_text += " #"
-        total_text = total_text.replace("#", settings.format_count(total, display["use_thousands_separator"]))
-        chest_text = C.overlay_text(display, {"certain": certain, "approximate": approx})
-        separator = "\n" if C.display_mode(display) == "stacked" else " • "
-        lines = [f"{chest_text}{separator}{total_text}"]
-        if display["screen_show_token"]:
-            wording = display["screen_token_text"]
-            if "#" not in wording:
-                wording += " #"
-            lines.append(wording.replace("#", self.token_chance))
-        if display.get("screen_show_matches"):
-            lines.append(f"Matches saved · {fmt(self.saved_match_count)}")
-        if display["screen_show_types"] and self.types.text():
-            lines.append(f"Chest types: {self.types.text()}")
-        extras = []
+        boost = self.token_boost.currentData()
+        personal = match_stats.personal(certain, total, boost)
         team, cumulative = self.match_summaries()
-        for key, result in (("screen_team_text", team), ("screen_cumulative_text", cumulative)):
-            wording = display.get(key, "")
-            text = ""
-            if wording.strip() and result is not None:
-                text = wording.replace("#", settings.format_count(result.total, display["use_thousands_separator"]))
-                text = text.replace("{chance}", result.chance).replace("{players}", str(len(result.players)))
-            extras.append(text)
-        legacy = ("\n".join(lines), *extras)
-        values = {
-            "total": settings.format_count(total, display["use_thousands_separator"]),
-            "certain": settings.format_count(certain, display["use_thousands_separator"]),
-            "approx": settings.format_count(approx, display["use_thousands_separator"]),
-            "chance": self.token_chance,
-            "types": f"Chest types · {self.types.text()}" if display["screen_show_types"] and self.types.text() else "",
-            "matches": str(1 if total or self.win._match_active else 0),
-        }
-        result = []
-        for index, (scope, summary) in enumerate((("personal", None), ("team", team), ("cumulative", cumulative))):
-            if not display.get(f"screen_{scope}_enabled", True) or scope == "team" and summary is None:
-                result.append("")
-                continue
-            template = display.get(f"screen_{scope}_template", "")
-            if not template:
-                result.append(legacy[index])
-                continue
-            fields = dict(values)
-            if summary is not None:
-                fields.update(total=settings.format_count(summary.total, display["use_thousands_separator"]),
-                              certain=settings.format_count(summary.certain, display["use_thousands_separator"]),
-                              approx=settings.format_count(summary.total - summary.certain, display["use_thousands_separator"]),
-                              chance=summary.chance, matches=str(summary.matches),
-                              players=str(len(summary.players)), names=" · ".join(summary.players))
-            else:
-                fields.update(players="1", names=load_cfg()[0]["app"]["group_player"])
-            hidden = {"chance"} if not display["screen_show_token"] else set()
-            if not display.get("screen_show_matches"):
-                hidden.add("matches")
-            section = []
-            for line in template.replace("\\n", "\n").splitlines():
-                if any("{" + key + "}" in line for key in hidden) or "{types}" in line and not fields["types"]:
-                    continue
-                for key, value in fields.items():
-                    line = line.replace("{" + key + "}", value)
-                if line.strip():
-                    section.append(line)
-            result.append("\n".join(section))
-        return tuple(result)
+        def summary(value):
+            if value is None:
+                return None
+            return {"certain": value.certain, "total": value.total, "log_no_drop": value.log_no_drop,
+                    "boost": boost, "matches": value.matches, "players": len(value.players),
+                    "names": " · ".join(value.players), "types": ""}
+        own = summary(personal)
+        own.update(players=1, names=cfg["app"]["group_player"], types=f"Chest types · {self.types.text()}")
+        try:
+            profile = profiles.apply(cfg)
+            identity = f"{profile['id']}@{profile['created_at'] or ''}"
+            snapshot, _, _ = match_history.read_snapshot(identity, (path,))
+        except (OSError, ValueError, C.UserError):
+            snapshot = ""
+        return {"version": 1, "profile_path": str(path.resolve()),
+                "state": {"certain": certain, "approximate": total,
+                          "session_started_at": latest.get("session_started_at")},
+                "personal": own, "team": summary(team), "cumulative": summary(cumulative),
+                "current_saved": any(match.snapshot == snapshot for match in getattr(self, "saved_matches", ())),
+                "active": self.win._match_active}
+
+    def screen_overlay_sections(self, display):
+        return overlay_layout.render_sections(display, self.overlay_context())
 
     def screen_overlay_text(self, display):
-        return "\n".join(part for part in self.screen_overlay_sections(display) if part)
+        return overlay_layout.format_text(display, self.screen_overlay_sections(display))
 
+    def write_overlay_context(self, display, context):
+        cfg = load_cfg()[0]
+        folder = paths.APP_DIR / cfg["state"]["obs_dir"]
+        payload = json.dumps(context, ensure_ascii=False, sort_keys=True)
+        key = (str(folder.resolve()), payload)
+        if key == getattr(self, "_last_overlay_context", None):
+            return
+        try:
+            C.atomic_write(folder / "overlay_context.json", payload + "\n")
+            path = Path(cfg["state"]["path"])
+            try:
+                state = json.loads(path.read_text(encoding="utf8"))
+            except (OSError, ValueError):
+                state = context["state"]
+            if display.get("use_custom_sections"):
+                C.write_obs_files(state, folder, display, state_path=path)
+        except (OSError, ValueError, C.UserError):
+            return
+        self._last_overlay_context = key
 
     def refresh_screen_overlay(self):
         page = getattr(self.win, "overlay", None)
@@ -1672,8 +1657,10 @@ class Dashboard(QWidget):
             page.refresh_preview()
         if self.screen_overlay_display is None:
             return
-        sections = self.screen_overlay_sections(self.screen_overlay_display)
-        text = "\n".join(part for part in sections if part)
+        context = self.overlay_context()
+        sections = overlay_layout.render_sections(self.screen_overlay_display, context)
+        text = overlay_layout.format_text(self.screen_overlay_display, sections)
+        self.write_overlay_context(self.screen_overlay_display, context)
         titles = tuple(self.screen_overlay_display[f"screen_{scope}_title"] for scope in ("personal", "team", "cumulative"))
         self.overlay_preview.set_text(text, sections=sections, titles=titles)
         if self.screen_overlay is None or not page.show_screen_overlay.isChecked():
@@ -1755,9 +1742,16 @@ class OverlayPage(QWidget):
         opacity_row.addWidget(self.transparency_value)
         box_layout.addLayout(opacity_row)
         self.transparency.valueChanged.connect(self._changed)
+        self.show_token = QCheckBox("Show Pirate Token odds")
+        self.show_types = QCheckBox("Show chest types")
+        self.show_matches = QCheckBox("Show match count")
+        self.thousands = QCheckBox("Thousands separator")
+        for toggle in (self.show_token, self.show_types, self.show_matches, self.thousands):
+            box_layout.addWidget(toggle)
+            toggle.toggled.connect(self._changed)
         layout.addWidget(box)
 
-        box, box_layout = card("On-screen sections", "Edit each section independently. Use {total}, {certain}, {approx}, "
+        box, box_layout = card("Custom sections for screen and OBS", "Edit each section independently. Use {total}, {certain}, {approx}, "
                                "{chance}, {matches}, {players}, {names} and {types}. Team appears only for a verified shared match.")
         self.section_enabled = {}
         self.section_titles = {}
@@ -1783,75 +1777,11 @@ class OverlayPage(QWidget):
             template.textChanged.connect(self._changed)
         layout.addWidget(box)
 
-        box, box_layout = card("OBS text layout")
-        self.modes = QButtonGroup(self)
-        self.mode_buttons = {}
-        self.mode_examples = {}
-        choices = (("stacked", "Three lines with total"), ("inline", "Counts on one line"),
-                   ("approx", "Estimated openings only"), ("certain", "Confirmed openings only"))
-        examples_layout = QGridLayout()
-        examples_layout.setHorizontalSpacing(16)
-        examples_layout.setVerticalSpacing(8)
-        examples_layout.setColumnStretch(1, 1)
-        for i, (mode, caption) in enumerate(choices):
-            radio = QRadioButton(caption)
-            self.modes.addButton(radio, i)
-            self.mode_buttons[mode] = radio
-            example = label("", "hint", wrap=True)
-            example.setTextFormat(Qt.PlainText)
-            self.mode_examples[mode] = example
-            examples_layout.addWidget(radio, i, 0, Qt.AlignTop)
-            examples_layout.addWidget(example, i, 1)
-            radio.toggled.connect(self._changed)
-        box_layout.addLayout(examples_layout)
-        box_layout.addWidget(label("These layouts control the OBS text output. Configure the floating overlay using On-screen sections.", "hint", wrap=True))
-        self.show_token = QCheckBox("Show Pirate Token odds on screen")
-        self.show_types = QCheckBox("Show chest types on screen")
-        self.show_matches = QCheckBox("Show saved match count on screen")
-        for toggle in (self.show_token, self.show_types, self.show_matches):
-            box_layout.addWidget(toggle)
-            toggle.toggled.connect(self._changed)
-        layout.addWidget(box)
-
-        box, box_layout = card("OBS wording", "Use # for a number, or #C and #A for the combined line.")
-        form = QGridLayout()
-        form.setHorizontalSpacing(14)
-        form.setVerticalSpacing(8)
-        self.certain_label = label("Confirmed chests (CERTAIN)")
-        self.certain_text = QLineEdit()
-        self.approx_label = label("Estimated openings (APPROX)")
-        self.approx_text = QLineEdit()
-        self.total_text = QLineEdit()
-        self.total_text.setToolTip("Use # for the total shown next to the on-screen chest counts.")
-        self.token_text = QLineEdit()
-        self.token_text.setToolTip("Use # for the Pirate Token probability, including the percent sign.")
-        self.line_label = label("Confirmed and estimated")
-        self.line_text = QLineEdit()
-        self.line_text.setToolTip("#C = confirmed number, #A = estimated openings, e.g.  #C confirmed - #A estimated")
-        for row, (lab, edit) in enumerate(((self.certain_label, self.certain_text), (self.approx_label, self.approx_text),
-                                           (self.line_label, self.line_text))):
-            form.addWidget(lab, row, 0)
-            form.addWidget(edit, row, 1)
-            edit.textChanged.connect(self._changed)
-        form.setColumnStretch(1, 1)
-        self.line_hint = label("#C = confirmed openings · #A = estimated openings", "hint", wrap=True)
-        form.addWidget(self.line_hint, 3, 1)
-        form.addWidget(label("Legacy labels (used when the Personal template is empty)", "cardTitle"), 4, 0, 1, 2)
-        for row, (name, edit) in enumerate((("Total", self.total_text), ("Pirate Token", self.token_text)), 5):
-            form.addWidget(label(name), row, 0)
-            form.addWidget(edit, row, 1)
-            edit.textChanged.connect(self._changed)
-        box_layout.addLayout(form)
-        self.thousands = QCheckBox("Thousands separator (1,234 instead of 1234)")
-        self.thousands.toggled.connect(self._changed)
-        box_layout.addWidget(self.thousands)
-        row = QHBoxLayout()
-        row.addWidget(button("Restore wording defaults", on_click=self._defaults))
-        row.addStretch(1)
-        box_layout.addLayout(row)
-        layout.addWidget(box)
-
-        box, box_layout = card("On-screen preview", "Preview of the overlay using the current counts.")
+        reset_row = QHBoxLayout()
+        reset_row.addWidget(button("Restore section defaults", on_click=self._defaults))
+        reset_row.addStretch(1)
+        box_layout.addLayout(reset_row)
+        box, box_layout = card("Preview", "The on-screen overlay and OBS use these same sections and values.")
         self.preview = ScreenOverlayCard()
         self.preview_opacity = QGraphicsOpacityEffect(self.preview)
         self.preview.setGraphicsEffect(self.preview_opacity)
@@ -1938,14 +1868,8 @@ class OverlayPage(QWidget):
         self.share_screen_overlay.setChecked(cfg["app"]["screen_overlay_shared"])
         self.show_screen_overlay.setChecked(cfg["app"]["screen_overlay_enabled"])
         self.obs_path.setText(str((paths.APP_DIR / cfg["state"]["obs_dir"] / "chest_counter.txt").resolve()))
-        self.mode_buttons[C.display_mode(self.display)].setChecked(True)
-        self.certain_text.setText(C.hash_from_text(self.display["certain_text"]))
-        self.approx_text.setText(C.hash_from_text(self.display["approx_text"]))
-        self.line_text.setText(C.markers_from_line(self.display["combined_status_format"]))
         self.thousands.setChecked(self.display["use_thousands_separator"])
-        self.token_text.setText(self.display["screen_token_text"])
         self.show_token.setChecked(self.display["screen_show_token"])
-        self.total_text.setText(self.display["screen_total_text"])
         self.show_types.setChecked(self.display["screen_show_types"])
         self.show_matches.setChecked(self.display["screen_show_matches"])
         self.transparency.setValue(100 - self.display["screen_opacity"])
@@ -2060,48 +1984,25 @@ class OverlayPage(QWidget):
                     self.ws_source.setCurrentIndex(self.ws_source.count() - 1)
         self.ws_source.blockSignals(False)
 
-    def _mode(self):
-        return next(m for m, b in self.mode_buttons.items() if b.isChecked())
-
     def changes(self):
-        mode = self._mode()
-        texts = {"use_thousands_separator": self.thousands.isChecked(),
-                 "screen_show_token": self.show_token.isChecked(),
-                 "screen_show_types": self.show_types.isChecked(),
-                 "screen_show_matches": self.show_matches.isChecked(),
-                 "screen_opacity": 100 - self.transparency.value()}
+        values = {"use_custom_sections": True, "use_thousands_separator": self.thousands.isChecked(),
+                  "screen_show_token": self.show_token.isChecked(),
+                  "screen_show_types": self.show_types.isChecked(),
+                  "screen_show_matches": self.show_matches.isChecked(),
+                  "screen_opacity": 100 - self.transparency.value()}
         for scope in self.section_enabled:
-            texts[f"screen_{scope}_enabled"] = self.section_enabled[scope].isChecked()
-            texts[f"screen_{scope}_title"] = self.section_titles[scope].text().strip()
-            texts[f"screen_{scope}_template"] = self.section_templates[scope].toPlainText().strip()
-        if self.token_text.text().strip():
-            texts["screen_token_text"] = self.token_text.text().strip()
-        if self.total_text.text().strip():
-            texts["screen_total_text"] = self.total_text.text().strip()
-        if mode == "inline":
-            if self.line_text.text().strip():
-                texts["combined_status_format"] = C.line_from_markers(self.line_text.text())
-        else:
-            if mode in ("certain", "stacked") and self.certain_text.text().strip():
-                texts["certain_text"] = C.text_from_hash(self.certain_text.text())
-            if mode in ("approx", "stacked") and self.approx_text.text().strip():
-                texts["approx_text"] = C.text_from_hash(self.approx_text.text())
-        return {**C.MODE_SETTINGS[mode], **texts}
+            values[f"screen_{scope}_enabled"] = self.section_enabled[scope].isChecked()
+            values[f"screen_{scope}_title"] = self.section_titles[scope].text().strip()
+            values[f"screen_{scope}_template"] = self.section_templates[scope].toPlainText().strip()
+        return values
 
     def _changed(self):
         if self._loading:
             return
-        mode = self._mode()
         self.transparency_value.setText(f"{self.transparency.value()}%")
         floating = self.win.dashboard.screen_overlay
         if floating is not None:
             floating.setWindowOpacity((100 - self.transparency.value()) / 100)
-        self.certain_label.setVisible(mode in ("certain", "stacked"))
-        self.certain_text.setVisible(mode in ("certain", "stacked"))
-        self.approx_label.setVisible(mode in ("approx", "stacked"))
-        self.approx_text.setVisible(mode in ("approx", "stacked"))
-        for widget in (self.line_label, self.line_text, self.line_hint):
-            widget.setVisible(mode == "inline")
         self.refresh_preview()
         pending = any(self.display.get(k) != v for k, v in self.changes().items())
         self.saved.setText("Not applied yet." if pending else "")
@@ -2113,27 +2014,8 @@ class OverlayPage(QWidget):
         self.preview_opacity.setOpacity(display["screen_opacity"] / 100)
         self.preview.set_text(preview_text, sections=self.win.dashboard.screen_overlay_sections(display),
                               titles=tuple(display[f"screen_{scope}_title"] for scope in ("personal", "team", "cumulative")))
-        examples = dict(display)
-        for key, field, convert in (("certain_text", self.certain_text, C.text_from_hash),
-                                    ("approx_text", self.approx_text, C.text_from_hash),
-                                    ("combined_status_format", self.line_text, C.line_from_markers)):
-            if field.text().strip():
-                examples[key] = convert(field.text().strip())
-        examples.update(screen_show_token=False, screen_show_types=False, screen_show_matches=False,
-                        screen_team_text="", screen_cumulative_text="", screen_personal_template="",
-                        screen_team_enabled=False, screen_cumulative_enabled=False)
-        selected_mode = C.display_mode(display)
-        for mode, example in self.mode_examples.items():
-            example.setText(C.overlay_text({**examples, **C.MODE_SETTINGS[mode]},
-                                          {"certain": self.win.counts[0], "approximate": self.win.counts[1]}))
-
     def _defaults(self):
         d = settings.DEFAULTS["display"]
-        self.certain_text.setText(C.hash_from_text(d["certain_text"]))
-        self.approx_text.setText(C.hash_from_text(d["approx_text"]))
-        self.line_text.setText(C.markers_from_line(d["combined_status_format"]))
-        self.token_text.setText(d["screen_token_text"])
-        self.total_text.setText(d["screen_total_text"])
         for scope in self.section_enabled:
             self.section_titles[scope].setText(d[f"screen_{scope}_title"])
             self.section_templates[scope].setPlainText(d[f"screen_{scope}_template"])
@@ -2149,8 +2031,8 @@ class OverlayPage(QWidget):
         except (C.UserError, OSError) as error:
             show_error(self, str(error))
             return
-        if not self.win.worker.running():
-            self.win.write_obs_files()
+        self.win.dashboard.reload_screen_overlay()
+        self.win.write_obs_files()
         self.load()
         self.saved.setText("Applied. " + ("The counter updates the OBS text within a second."
                                           if self.win.worker.running() else "The OBS text file was updated."))
@@ -3065,8 +2947,8 @@ class DiscordPage(QWidget):
             button("Discord Developer Portal", on_click=lambda: QDesktopServices.openUrl(
                 QUrl("https://discord.com/developers/applications"))),
             button("Invite bot", on_click=self.invite_bot),
-            button("Chest Tracker setup guide", on_click=lambda: QDesktopServices.openUrl(
-                QUrl("https://github.com/Xxoris190/chest-tracker#set-up-the-discord-bot"))),
+            button("Discord setup guide", on_click=lambda: QDesktopServices.openUrl(
+                QUrl("https://github.com/NEVARLeVrai/fortnite-visual-chest-counter/blob/ui/chest-tracker-dashboard/README.md#group-and-discord"))),
         )
         links.addStretch(1)
         setup_layout.addLayout(links)
@@ -3115,6 +2997,11 @@ class DiscordPage(QWidget):
         form.addWidget(label("Avatar PNG or JPEG"), 1, 0)
         form.addWidget(self.bot_avatar, 1, 1)
         form.addWidget(button("Browse...", on_click=self.pick_bot_avatar), 1, 2)
+        self.bot_banner = QLineEdit()
+        self.bot_banner.setPlaceholderText("Empty uses the bundled profile banner")
+        form.addWidget(label("Banner PNG or JPEG"), 2, 0)
+        form.addWidget(self.bot_banner, 2, 1)
+        form.addWidget(button("Browse...", on_click=lambda: self.pick_bot_avatar(banner=True)), 2, 2)
         appearance_layout.addLayout(form)
         self.apply_branding = button("Apply bot profile", on_click=lambda: self.save_bot_preferences(apply_profile=True))
         appearance_layout.addWidget(self.apply_branding, 0, Qt.AlignRight)
@@ -3133,6 +3020,7 @@ class DiscordPage(QWidget):
         row.addWidget(label("Rotate every"))
         self.presence_interval = QSpinBox()
         self.presence_interval.setRange(30, 300)
+        self.presence_interval.setAlignment(Qt.AlignCenter)
         self.presence_interval.setSuffix(" s")
         row.addWidget(self.presence_interval)
         presence_layout.addLayout(row)
@@ -3174,6 +3062,7 @@ class DiscordPage(QWidget):
         cfg = load_cfg()[0]["app"]
         self.bot_name.setText(cfg["bot_name"])
         self.bot_avatar.setText(cfg["bot_avatar_path"])
+        self.bot_banner.setText(cfg["bot_banner_path"])
         self.presence_enabled.setChecked(cfg["discord_presence_enabled"])
         self.presence_rotate.setChecked(cfg["discord_presence_rotate"])
         self.presence_interval.setValue(cfg["discord_presence_interval"])
@@ -3197,13 +3086,14 @@ class DiscordPage(QWidget):
             self.status.setText(str(error))
         self._show_summary()
 
-    def pick_bot_avatar(self):
+    def pick_bot_avatar(self, *, banner=False):
         path, _ = QFileDialog.getOpenFileName(self, "Choose bot avatar", "", "Images (*.png *.jpg *.jpeg)")
         if path:
-            self.bot_avatar.setText(path)
+            (self.bot_banner if banner else self.bot_avatar).setText(path)
 
     def save_bot_preferences(self, *, apply_profile=False):
         values = {"bot_name": self.bot_name.text().strip(), "bot_avatar_path": self.bot_avatar.text().strip(),
+                  "bot_banner_path": self.bot_banner.text().strip(),
                   "discord_presence_enabled": self.presence_enabled.isChecked(),
                   "discord_presence_rotate": self.presence_rotate.isChecked(),
                   "discord_presence_interval": self.presence_interval.value(),
@@ -3222,7 +3112,7 @@ class DiscordPage(QWidget):
             return
         runner = self.runner
         try:
-            future = runner.apply_branding(values["bot_name"], values["bot_avatar_path"])
+            future = runner.apply_branding(values["bot_name"], values["bot_avatar_path"], values["bot_banner_path"])
         except ValueError as error:
             self.appearance_status.setText(str(error))
             return
@@ -5039,7 +4929,9 @@ class MainWindow(QMainWindow):
             show_error(self, str(error))
             return
         self._match_fingerprint = ""
+        self.primary_types = read_types(session.state_path) or C.type_breakdown(C.fresh_state())
         self.set_counts(session.state["certain"], session.state["approximate"], flash=True)
+        self.refresh_types()
         if action == "reset":
             self.dashboard.clear_recent(source=1)
         what = "reset to 0" if action == "reset" else f"set to CERTAIN {fmt(certain)} / APPROX {fmt(approx)}"
