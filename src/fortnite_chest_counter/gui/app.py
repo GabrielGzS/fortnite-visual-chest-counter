@@ -544,16 +544,10 @@ class MaterialComboBox(QComboBox):
         self._popup_motion.setEndValue(1.0)
         self._popup_motion.setEasingCurve(QEasingCurve.OutCubic)
         self._popup_motion.valueChanged.connect(self._show_progress)
-        self._popup_motion.finished.connect(self._round_popup)
 
     def _show_progress(self, amount):
         if self._popup_window is not None:
             self._popup_window.move(self._popup_origin + QPoint(0, round(-6 * (1 - amount))))
-
-    def _round_popup(self):
-        popup = self._popup_window
-        if popup is not None and popup.isVisible():
-            popup.setMask(rounded_region(popup.rect(), 16))
 
     def showPopup(self):
         if not self.count():
@@ -571,6 +565,10 @@ class MaterialComboBox(QComboBox):
                 popup.layout().setContentsMargins(5, 5, 5, 5)
         animate = theme.animations_enabled()
         super().showPopup()
+        if sys.platform == "win32" and QGuiApplication.platformName() == "windows":
+            policy = ctypes.c_int(1)  # DWMNCRP_DISABLED: remove the native popup shadow.
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(int(popup.winId())), 2,
+                                                       ctypes.byref(policy), ctypes.sizeof(policy))
         screen = popup.screen()
         if screen is not None and popup.layout() is not None:
             margins = popup.layout().contentsMargins()
@@ -588,7 +586,6 @@ class MaterialComboBox(QComboBox):
             self._popup_motion.start()
         else:
             popup.move(self._popup_origin)
-        self._round_popup()
 
     def hidePopup(self):
         self._popup_motion.stop()
