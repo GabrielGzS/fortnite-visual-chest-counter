@@ -1,0 +1,95 @@
+{
+  "schema": "match-truth-v1",
+  "about": "Provisional match-level annotations from visual inspection of the original footage, cross-referenced with M1's earlier visible-text windows. These are NOT human-approved truth and NOT a transcription of M2 predictions. Times are clip video seconds. Windows include sampling/confirmation delay; opened/closed windows describe the visible ownership boundaries, so delayed recognition of an editorial cut is an error. Clip1 and clip2 replay the same real match; do not sum them as unique matches.",
+  "sources": {
+    "clip1": {
+      "review": {
+        "status": "provisional",
+        "reviewer": "Codex visual inspection, 2026-11-10; human review pending",
+        "basis": "20261108_233437 clip_001: combat already underway, YOU PLACED #3, spectating, CONNECTING, then lobby. M1's visible-text labels provide approximate edges; contact sheet independently confirms the sequence."
+      },
+      "notes": "The start of the real match is absent. Opening at the recording boundary means first observation, not a known match start.",
+      "matches": [
+        {"id": "replays-placement-first-view", "anchor": [0, 18], "opened_t": [0, 1], "played_from_t": [0, 1], "ended_t": [8, 10], "closed_t": [18, 21], "completion": "partial", "english_confirmed": true, "observed_from_start": false, "ended_by": "placed"}
+      ],
+      "transitions": [
+        {"state": "IN_MATCH", "time": [0, 5]},
+        {"state": "ELIMINATED", "time": [8, 11]},
+        {"state": "LOADING", "time": [18, 21]},
+        {"state": "LOBBY", "time": [29, 33]}
+      ]
+    },
+    "clip2": {
+      "review": {
+        "status": "provisional",
+        "reviewer": "Codex visual inspection, 2026-11-10; human review pending",
+        "basis": "20261108_233437 clip_002: lobby, Twitch rewind/loading spinner, the same combat and #3 placement as clip1, CONNECTING, then lobby/menu tabs."
+      },
+      "notes": "This is a repeated occurrence of the clip1 match, not a second unique match. The black player picture hides a rewind. No whole-match start was observed.",
+      "matches": [
+        {"id": "replays-placement-rewound-view", "anchor": [15, 48], "opened_t": [14, 16], "played_from_t": [14, 16], "ended_t": [39, 41], "closed_t": [48, 51], "completion": "partial", "english_confirmed": true, "observed_from_start": false, "ended_by": "placed"}
+      ],
+      "transitions": [
+        {"state": "LOBBY", "time": [0, 3]},
+        {"state": "IN_MATCH", "time": [14, 20]},
+        {"state": "ELIMINATED", "time": [39, 42]},
+        {"state": "LOADING", "time": [48, 51]},
+        {"state": "LOBBY", "time": [60, 63]}
+      ],
+      "unscored_transitions": [
+        {"time": [9, 13], "reason": "Twitch black picture/spinner during a rewind; actual game state cannot be established."}
+      ]
+    },
+    "clip3": {
+      "review": {
+        "status": "provisional",
+        "reviewer": "Codex visual inspection, 2026-11-10; human review pending",
+        "basis": "20261108_233437 clip_003: lobby, CONNECTING, waiting island and launching countdown, map screen around departure, then flying bus. Recording ends mid-match."
+      },
+      "notes": "Departure is bracketed because the player opens the map. No ending is present.",
+      "matches": [
+        {"id": "replays-next-start", "anchor": [25, 60], "opened_t": [22, 26], "played_from_t": [44, 49], "ended_t": null, "closed_t": [59, 61], "completion": "partial", "english_confirmed": true, "observed_from_start": true, "ended_by": null}
+      ],
+      "transitions": [
+        {"state": "LOBBY", "time": [0, 3]},
+        {"state": "LOADING", "time": [17, 21]},
+        {"state": "PRE_GAME", "time": [22, 26]},
+        {"state": "IN_MATCH", "time": [44, 50]}
+      ]
+    },
+    "new": {
+      "review": {
+        "status": "provisional",
+        "reviewer": "Codex visual inspection, 2026-11-10; human review pending",
+        "basis": "Fortnites-NEW-HD-No-Audio.mp4: begins on an already-departed bus then an edit to combat; victory near 258 s; NEXT GAMEPLAY INCOMING overlay; hard cut between roughly 261.5 and 262.5 s to a different skin/location/game; second win near 499 s (M1's earlier visual label)."
+      },
+      "notes": "The two victories remain in truth even if a conservative tracker misses the second match. Do not move the cut to M2's timer-derived 302/303 s. English UI is visible in the second game, but no assertion is made about M1's restricted English-confirmation coverage. Neither real start is seen.",
+      "association_seconds": 60,
+      "matches": [
+        {"id": "english-first-win", "anchor": [0, 261], "opened_t": [0, 2], "played_from_t": [0, 2], "ended_t": [257, 260], "closed_t": [261, 263], "completion": "partial", "english_confirmed": true, "observed_from_start": false, "ended_by": "victory"},
+        {"id": "english-second-win", "anchor": [263, 509], "opened_t": [261, 264], "played_from_t": [261, 264], "ended_t": [498, 501], "closed_t": [508, 510], "observed_from_start": false, "ended_by": "victory"}
+      ],
+      "transitions": [
+        {"state": "IN_MATCH", "time": [0, 6]},
+        {"state": "ELIMINATED", "time": [257, 261]},
+        {"state": "IN_MATCH", "time": [261.5, 267], "notes": "Visible editorial cut and joined-late gameplay; the real bus/start is absent."},
+        {"state": "ELIMINATED", "time": [498, 502]}
+      ]
+    },
+    "ps5": {
+      "review": {
+        "status": "provisional",
+        "reviewer": "Codex visual inspection, 2026-11-10; human review pending",
+        "basis": "Fortnite-PS5-Pro-HD-No-Audio.mp4: begins during descent, Portuguese HUD, one VITORIA ROYALE near 1020 s. Visual inspection of the beginning and ending plus M1's earlier win label; full interior continuity still requires human review."
+      },
+      "notes": "Unconfirmed refers to English-first eligibility, not denial that this is a real Portuguese match. Four counted baseline events have unknown language and must remain visible in raw chest evidence.",
+      "matches": [
+        {"id": "portuguese-win", "anchor": [0, 1029], "opened_t": [0, 1], "played_from_t": [0, 1], "ended_t": [1019, 1022], "closed_t": [1028, 1030], "completion": "unconfirmed", "english_confirmed": false, "observed_from_start": false, "ended_by": "victory"}
+      ],
+      "transitions": [
+        {"state": "IN_MATCH", "time": [0, 5]},
+        {"state": "ELIMINATED", "time": [1019, 1023]}
+      ]
+    }
+  }
+}

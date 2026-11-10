@@ -1,0 +1,11 @@
+{
+  "about": "Frozen behavior reference for d691310, not independent ground truth. Archived before the approved M2 corrections. Transition times are confirmation times; ended_t is the first positive sample. Do not update this file to hide intentional changes.",
+  "commit": "d6913106240625c2876fb0a790d89cf39840744c",
+  "sources": {
+    "clip1": {"transitions": [[4, "IN_MATCH"], [9, "ELIMINATED"], [19, "LOADING"], [30, "LOBBY"]], "completions": ["partial"], "endings": ["placed"], "ended_t": [8]},
+    "clip2": {"transitions": [[1, "LOBBY"], [19, "IN_MATCH"], [40, "ELIMINATED"], [49, "LOADING"], [61, "LOBBY"]], "completions": ["partial"], "endings": ["placed"], "ended_t": [39]},
+    "clip3": {"transitions": [[1, "LOBBY"], [18, "LOADING"], [24, "PRE_GAME"], [48, "IN_MATCH"]], "completions": ["partial"], "endings": ["stopped"], "ended_t": [null]},
+    "new": {"transitions": [[5, "IN_MATCH"], [258, "ELIMINATED"], [302, "UNKNOWN"], [303, "IN_MATCH"], [499, "ELIMINATED"]], "completions": ["partial", "unconfirmed"], "endings": ["victory", "victory"], "ended_t": [257, 498]},
+    "ps5": {"transitions": [[4, "IN_MATCH"], [1020, "ELIMINATED"]], "completions": ["unconfirmed"], "endings": ["victory"], "ended_t": [1019]}
+  }
+}
