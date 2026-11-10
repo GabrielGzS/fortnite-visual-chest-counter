@@ -1,5 +1,19 @@
 """Tonal surfaces and expressive shapes for the Windows counter."""
 
+import ctypes
+import sys
+from pathlib import Path
+
+ASSET_DIR = Path(__file__).with_name("assets").as_posix()
+
+
+def animations_enabled():
+    enabled = ctypes.c_int(1)
+    if sys.platform == "win32":
+        ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(enabled), 0)
+    return bool(enabled.value)
+
+
 BG = "#1c1814"
 SIDEBAR = "#211c17"
 SURFACE = "#2b241e"
@@ -17,8 +31,6 @@ REJECT = "#f87171"
 DANGER = "#ef4444"
 WARN = "#c084fc"
 INFO = "#67c7e8"
-CHEST_EMBER = "#e8663c"
-CHEST_METAL = "#f4b42a"
 STAGE = "#34251c"
 STAGE_MOTIF = "#5b3a29"
 
@@ -53,7 +65,7 @@ QToolTip {{ background: {SURFACE_3}; color: {TEXT}; border: 1px solid {BORDER}; 
 #recentOpenings {{ background: transparent; border: none; min-height: 120px; }}
 #recentOpenings::item {{ padding: 6px 2px; }}
 
-#countCard {{ background: transparent; border: 1px solid transparent; border-radius: 7px; }}
+#countCard {{ background: {SURFACE_2}; border: 1px solid transparent; border-radius: 16px; }}
 #countLabel {{ color: {MUTED}; font-size: 9pt; font-weight: 600; letter-spacing: 1px; }}
 #countValue {{ font-size: 33pt; font-weight: 700; }}
 #countSub {{ color: {MUTED}; font-size: 9pt; }}
@@ -84,6 +96,11 @@ QComboBox, QLineEdit, QSpinBox {{ background: {SURFACE_2}; border: 1px solid {BO
                                   selection-background-color: {SURFACE_3}; }}
 QComboBox:hover, QLineEdit:hover, QSpinBox:hover {{ border-color: {DIM}; }}
 QComboBox:focus, QLineEdit:focus, QSpinBox:focus {{ border-color: {ACCENT}; }}
+QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right;
+                        width: 25px; border: none; border-radius: 12px; }}
+QComboBox::down-arrow {{ image: url("{ASSET_DIR}/dropdown_arrow.png"); width: 12px; height: 8px; }}
+QComboBox:disabled {{ color: {DIM}; }}
+QComboBox::down-arrow:disabled {{ image: url("{ASSET_DIR}/dropdown_arrow_disabled.png"); }}
 QComboBox QAbstractItemView, QMenu {{ background: {SURFACE}; border: 1px solid {BORDER};
                                       outline: none; border-radius: 12px; padding: 4px; selection-background-color: {SURFACE_3};
                                       selection-color: {TEXT}; }}
