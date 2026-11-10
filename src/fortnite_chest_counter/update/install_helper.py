@@ -154,8 +154,11 @@ def running_programs():
 def processes_under(folders):
     """[(pid, program path)] of every process whose program file is inside one of `folders`. The folder cannot be renamed safely
     while these run, and a failed rename would not reveal them: Windows allows renaming a folder a running program came from."""
-    prefixes = tuple(os.path.normcase(os.path.abspath(f)) + os.sep for f in folders)
-    return [(pid, path) for pid, path in running_programs() if os.path.normcase(path).startswith(prefixes) and pid != os.getpid()]
+    # The executable can be reported through an 8.3 name or a directory junction,
+    # while the transaction root has already been resolved to its long path.
+    prefixes = tuple(os.path.normcase(os.path.realpath(folder)) + os.sep for folder in folders)
+    return [(pid, path) for pid, path in running_programs()
+            if pid != os.getpid() and os.path.normcase(os.path.realpath(path)).startswith(prefixes)]
 
 
 def wait_for_process_exit(pid, seconds):

@@ -108,7 +108,9 @@ class FakeObs:
         if conn is not None:
             try:
                 _write_frame(conn, 0x8, struct.pack(">H", code))
-                conn.close()
+                # Let the close frame reach the client before the serving reader closes the socket.
+                # Closing with unread request bytes can reset the connection and hide the close code.
+                conn.shutdown(socket.SHUT_WR)
             except OSError:
                 pass
 
@@ -148,6 +150,8 @@ class FakeObs:
                     self.send(7, self._answer(d))
         except (OSError, ConnectionError, ValueError):
             pass
+        finally:
+            conn.close()
 
     def _find(self, data):
         for name, item in self.inputs.items():

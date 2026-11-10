@@ -46,12 +46,14 @@ def frames(path, fps):
             yield i / fps, np.frombuffer(raw, np.uint8).reshape(V.NORMALIZED_HEIGHT, V.NORMALIZED_WIDTH, 3)
             i += 1
     finally:
-        if process.poll() is None:
-            process.kill()
+        # Closing the output makes FFmpeg stop on a broken pipe. Let any executable
+        # wrapper (such as a Windows package-manager shim) wait for its decoder child.
+        process.stdout.close()
         try:
-            process.wait(timeout=5)                 # Windows releases the input file after the process has exited.
-        finally:
-            process.stdout.close()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
 
 class Stopped(Exception):

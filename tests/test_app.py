@@ -1014,6 +1014,45 @@ def test_live_source_waits_after_forced_kill_and_closes_decoder_pipes():
     assert process.calls == ["terminate", ("wait", 3), "kill", ("wait", 3)]
     assert process.stdout.closed and process.stderr.closed
 
+def test_stopped_review_releases_decoder_children_behind_a_command_wrapper():
+    from unittest.mock import patch
+    from fortnite_chest_counter import review
+
+    ffmpeg = paths.ffmpeg_executable()
+    if not ffmpeg:
+        print("      (skipped: ffmpeg not available)")
+        return
+    real_popen = subprocess.Popen
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        video = folder / "wrapped-review.mp4"
+        completed = folder / "decoder-finished.txt"
+        subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=15",
+                        "-t", "12", "-c:v", "mpeg4", str(video)], check=True)
+        wrapper = ("import pathlib, subprocess, sys; "
+                   "child = subprocess.Popen(sys.argv[2:]); "
+                   "result = child.wait(); "
+                   "pathlib.Path(sys.argv[1]).write_text(str(result)); "
+                   "sys.exit(result)")
+        processes = []
+
+        def wrapped_popen(command, **kwargs):
+            process = real_popen([sys.executable, "-c", wrapper, str(completed), ffmpeg, *command[1:]], **kwargs)
+            processes.append(process)
+            return process
+
+        with patch.object(review.subprocess, "Popen", side_effect=wrapped_popen):
+            reader = review.frames(video, 15)
+            try:
+                _, frame = next(reader)
+                assert frame.shape == (720, 1280, 3)
+            finally:
+                reader.close()
+        assert completed.exists(), "the command wrapper exited before waiting for its decoder"
+        assert processes[0].poll() is not None
+        video.unlink()  # Windows must release the file before review cancellation returns.
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

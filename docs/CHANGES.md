@@ -9,8 +9,10 @@ changes; the pull request links here. Versioned release notes describe published
   overlapping readings and retain an unknown type for ambiguous openings.
 - Keep one capture per app. Improve HDR-to-SDR handling and preview delivery, keep the original SDR colour path,
   and cap live preview at 5 FPS independently of the detector's 5/10/15 FPS settings.
-- Reap stopped FFmpeg encoders and decoders before closing their pipes, so recording and review cleanup does not
-  race Windows file locks. Keep the console stop path nonblocking and bound forced-stop waits.
+- Close video pipes and reap stopped FFmpeg encoders and decoders, including command-wrapper shutdown, so recording
+  and review cleanup does not race Windows file locks. Keep the console stop path nonblocking and bound stop waits.
+- Canonicalize process paths during update safety checks, so Windows short-name and junction aliases cannot hide
+  a running program inside the runtime or staged package.
 - Separate confirmed openings, estimated-only openings and Total in the Dashboard. Use Total and the manual
   multiplier for the Pirate Token estimate.
 - Use a Material 3-inspired Qt interface with Google Sans, a left navigation rail, connected actions, themed

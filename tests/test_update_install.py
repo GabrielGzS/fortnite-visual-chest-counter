@@ -476,6 +476,23 @@ def test_it_refuses_while_anything_runs_from_the_staged_package():
         assert_is_exactly(e, OLD)
 
 
+
+def test_runtime_process_checks_resolve_windows_short_paths():
+    get_short = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+    get_short.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    get_short.restype = wintypes.DWORD
+    for staged in (False, True):
+        with env() as e:
+            folder = (e.update_dir / H.STAGED_FOLDER if staged else e.root) / "runtime"
+            buffer = ctypes.create_unicode_buffer(32768)
+            assert get_short(str(folder), buffer, len(buffer))
+            with program_running_from(Path(buffer.value)) as process:
+                matching = H.processes_under([folder.resolve()])
+                assert any(pid == process.pid for pid, _ in matching), matching
+                e.run(constants={"PROCESS_WAIT": 0.3})
+                assert e.result()["reason"] == "runtime_in_use", e.result()
+                assert (e.root / "runtime" / "VERSION").read_text() == OLD
+
 def test_it_waits_for_a_straggler_to_finish():
     with env() as e, program_running_from(e.root / "runtime") as process:
         stopper = subprocess.Popen([sys.executable, "-c", f"import time, os; time.sleep(0.4); os.kill({process.pid}, 9)"])
