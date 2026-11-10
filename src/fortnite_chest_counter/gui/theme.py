@@ -139,6 +139,7 @@ QComboBox QAbstractItemView {{ background: transparent; border: none; outline: n
 QMenu {{ background: {SURFACE}; border: 1px solid {BORDER};
                                       outline: none; border-radius: 12px; padding: 4px; selection-background-color: {SURFACE_3};
                                       selection-color: {TEXT}; }}
+QMenu#trayMenu {{ border-radius: 0; }}
 QComboBox QAbstractItemView::item, QMenu::item {{ padding: 6px 10px; }}
 QMenu::item:selected {{ background: {SURFACE_3}; color: {ACCENT}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 7px; }}

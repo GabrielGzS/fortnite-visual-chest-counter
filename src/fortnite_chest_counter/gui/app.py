@@ -4727,6 +4727,8 @@ class MainWindow(QMainWindow):
             self._tray = QSystemTrayIcon(self.windowIcon(), self)
             self._tray.setToolTip(APP_NAME)
             menu = QMenu(self)
+            menu.setObjectName("trayMenu")
+            menu.setWindowFlag(Qt.NoDropShadowWindowHint)
             menu.addAction("Open", self.open_from_tray)
             menu.addAction("Quit", self.quit_from_tray)
             self._tray.setContextMenu(menu)
