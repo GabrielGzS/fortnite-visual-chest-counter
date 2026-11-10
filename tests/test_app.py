@@ -290,6 +290,7 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
     qt = _qt()
     if qt is None:
         return
+    from PySide6.QtCore import Qt
     from fortnite_chest_counter.gui import app as A
 
     previous_dir, previous_app_dir = os.getcwd(), paths.APP_DIR
@@ -302,14 +303,26 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
             win.timer.stop()
             win.set_counts(5, 10)
             assert "0,007272 % · 10 coffres" in win.dashboard.token_odds.text()
+            win.dashboard.show_screen_overlay.setChecked(True)
+            overlay = win.dashboard.screen_overlay
+            assert overlay.windowFlags() & Qt.WindowTransparentForInput
+            assert overlay.windowFlags() & Qt.WindowStaysOnTopHint
+            assert overlay.text().splitlines() == [
+                "CERTAIN OPENED CHESTS: 5", "APPROX. OPENED CHESTS: 10",
+                win.dashboard.token_odds.text(),
+            ]
             win.dashboard.token_mode.setCurrentText("Squad")
             win.dashboard.token_teammates.setValue(20)
             assert "0,021816 % · 30 coffres" in win.dashboard.token_odds.text()
+            assert "0,021816 %" in overlay.text()
             win.dashboard.token_mode.setCurrentText("Solo")
             assert "0,007272 % · 10 coffres" in win.dashboard.token_odds.text()
             win._set(0, 0, "reset")
             win.dashboard.token_mode.setCurrentText("Duo")
             assert "0,000000 % · 0 coffres" in win.dashboard.token_odds.text()
+            assert "0,000000 %" in overlay.text()
+            win.dashboard.show_screen_overlay.setChecked(False)
+            assert overlay.isHidden()
             win.dashboard.token_teammates.setValue(10)
             win.profile_changed()
             assert win.dashboard.token_teammates.value() == 0

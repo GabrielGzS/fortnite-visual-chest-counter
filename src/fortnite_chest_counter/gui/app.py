@@ -773,6 +773,8 @@ class Dashboard(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win = win
+        self.screen_overlay = None
+        self.screen_overlay_display = None
         layout = page_layout(self, "Dashboard", "Counts the chests in Fortnite video - a livestream, a screen or OBS - "
                                                 "and keeps the numbers (also in a text file OBS can show on stream).")
         header = layout.itemAt(0).widget()
@@ -857,6 +859,9 @@ class Dashboard(QWidget):
             token_row.addWidget(widget)
         token_row.setStretch(3, 1)
         layout.addLayout(token_row)
+        self.show_screen_overlay = QCheckBox("Overlay à l’écran")
+        self.show_screen_overlay.toggled.connect(self.toggle_screen_overlay)
+        token_row.addWidget(self.show_screen_overlay)
         self.token_mode.currentIndexChanged.connect(lambda _: self.update_token_odds())
         self.token_teammates.valueChanged.connect(lambda _: self.update_token_odds())
         self.update_token_odds()
@@ -940,6 +945,7 @@ class Dashboard(QWidget):
         self.source.currentIndexChanged.connect(lambda _: self.url_row.setVisible(
             (self.source.currentData() or {}).get("source") == "stream"))
         self.source.currentIndexChanged.connect(lambda _: win.update_source_hint())
+        self.source.currentIndexChanged.connect(lambda _: self.position_screen_overlay())
         self.source_hint = label("", "hint", wrap=True)
         box_layout.addWidget(self.source_hint)
         box_layout.addWidget(hline())
@@ -1013,6 +1019,56 @@ class Dashboard(QWidget):
         probability = -math.expm1(min(total, 10_000_000) * math.log1p(-1 / PIRATE_TOKEN_RATE)) if total else 0
         chance = f"{probability:.6%}".replace(".", ",").replace("%", " %")
         self.token_odds.setText(f"Jeton pirate · {chance} · {total} coffres")
+        self.refresh_screen_overlay()
+
+    def toggle_screen_overlay(self, enabled):
+        if not enabled:
+            if self.screen_overlay is not None:
+                self.screen_overlay.hide()
+            return
+        if self.screen_overlay is None:
+            flags = (Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+                     | Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus)
+            self.screen_overlay = QLabel(None, flags)
+            self.screen_overlay.setAttribute(Qt.WA_ShowWithoutActivating)
+            self.screen_overlay.setTextFormat(Qt.PlainText)
+            self.screen_overlay.setStyleSheet("background: #141924; color: #ffffff; padding: 8px 12px; font-weight: 600;")
+        self.reload_screen_overlay()
+        self.screen_overlay.show()
+        if sys.platform == "win32":
+            hwnd = ctypes.c_void_p(int(self.screen_overlay.winId()))
+            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11)  # WDA_EXCLUDEFROMCAPTURE
+
+    def reload_screen_overlay(self):
+        if self.show_screen_overlay.isChecked():
+            self.screen_overlay_display = {**load_cfg()[0]["display"], "show": "both"}
+            self.refresh_screen_overlay()
+
+    def refresh_screen_overlay(self):
+        if self.screen_overlay is None or not self.show_screen_overlay.isChecked():
+            return
+        certain, approx = self.win.counts
+        text = C.overlay_text(self.screen_overlay_display, {"certain": certain, "approximate": approx})
+        text = f"{text}\n{self.token_odds.text()}"
+        if text != self.screen_overlay.text():
+            self.screen_overlay.setText(text)
+            self.screen_overlay.adjustSize()
+            self.position_screen_overlay()
+
+    def position_screen_overlay(self):
+        if self.screen_overlay is None:
+            return
+        screen = QGuiApplication.primaryScreen()
+        monitor = (self.source.currentData() or {}).get("monitor")
+        positions = getattr(self.win, "_monitor_positions", ())
+        if monitor and monitor <= len(positions):
+            x, y = positions[monitor - 1][:2]
+            # Qt preserves Windows screen origins but can scale their dimensions.
+            screen = next((item for item in QGuiApplication.screens() if item.geometry().topLeft() == QPoint(x, y)),
+                          screen)
+        if screen is not None:
+            area = screen.availableGeometry()
+            self.screen_overlay.move(area.center().x() - self.screen_overlay.width() // 2, area.top() + 16)
 
     def _panels(self):
         self.log.setVisible(self.show_log.isChecked())
@@ -1335,6 +1391,7 @@ class OverlayPage(QWidget):
         self.saved.setText("Applied. " + ("The counter updates the OBS text within a second."
                                           if self.win.worker.running() else "The OBS text file was updated."))
         self.win.refresh_viewers()
+        self.win.dashboard.reload_screen_overlay()
 
 
 class SettingsPage(QWidget):
@@ -1891,6 +1948,7 @@ class MainWindow(QMainWindow):
         self._source_scan.start()
 
     def _fill_sources(self, devices, monitors, windows=()):
+        self._monitor_positions = monitors
         live = self.profile_live()
         # Most used first (v0.2.2): a livestream link and a screen need no setup; OBS for streamers' own scene; then the
         # less tested inputs. (The order is only presentation: every entry stays fully supported.)
@@ -1948,6 +2006,7 @@ class MainWindow(QMainWindow):
                 break
         self.dashboard.source.setCurrentIndex(index)
         self.dashboard.source.blockSignals(False)
+        self.dashboard.position_screen_overlay()
         self.dashboard.url_row.setVisible((self.dashboard.source.currentData() or {}).get("source") == "stream")
         self._obs_camera_found = "OBS Virtual Camera" in devices
         self._projectors_found = bool(windows)
@@ -2884,12 +2943,14 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
                 self.quit_when_stopped = True
+                self.dashboard.show_screen_overlay.setChecked(False)
                 self.save_layout()               # before hiding: a hidden window has no position to save
                 self.stop_counting()
                 self.hide()
             event.ignore()                       # closes for real when the worker has finished (see handle 'exit')
             return
         self.save_layout()
+        self.dashboard.show_screen_overlay.setChecked(False)
         if self.update_dialog is not None:
             self.update_dialog.hide()
         if self.preview_reader is not None:
