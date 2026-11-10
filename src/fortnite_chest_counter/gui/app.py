@@ -1692,8 +1692,8 @@ class OverlayPage(QWidget):
         row = QHBoxLayout()
         self.saved = label("", "hint")
         row.addWidget(self.saved, 1)
-        row.addWidget(button("Undo changes", on_click=self.load))
-        row.addWidget(button("Apply", "primary", on_click=self.apply))
+        undo = button("Undo changes", "overlayUndo", on_click=self.load)
+        row.addLayout(connected_buttons(undo, button("Apply", "primary", on_click=self.apply)))
         layout.addLayout(row)
 
         box, box_layout = card("OBS WebSocket (optional)",

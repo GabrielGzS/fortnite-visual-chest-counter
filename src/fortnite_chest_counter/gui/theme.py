@@ -81,6 +81,7 @@ QPushButton#navDestination:focus {{ border-color: {ACCENT}; }}
 #screenOverlayCaption {{ color: {TEXT}; font-size: 12pt; font-weight: 500; }}
 
 QPushButton {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 12px; padding: 7px 14px; }}
+QPushButton#overlayUndo {{ padding: 9px 14px; }}
 QPushButton[compactAction="true"] {{ padding: 7px 8px; }}
 QPushButton:hover {{ background: {SURFACE_3}; }}
 QPushButton:pressed {{ background: {BORDER}; }}
@@ -94,7 +95,7 @@ QPushButton#danger:hover {{ background: #ffc8c1; }}
 QPushButton#toggle {{ background: transparent; border: 1px solid {BORDER}; border-radius: 14px; padding: 5px 14px; color: {MUTED}; }}
 QPushButton#toggle:checked {{ background: {SURFACE_2}; color: {TEXT}; border-color: {ACCENT}; }}
 QPushButton[groupPosition="middle"], QPushButton#toggle[groupPosition="middle"] {{ border-radius: 4px; }}
-QPushButton[groupPosition="first"], QPushButton#primary[groupPosition="first"],
+QPushButton[groupPosition="first"], QPushButton#overlayUndo[groupPosition="first"], QPushButton#primary[groupPosition="first"],
 QPushButton#danger[groupPosition="first"] {{
     border-top-left-radius: 16px; border-bottom-left-radius: 16px;
     border-top-right-radius: 4px; border-bottom-right-radius: 4px;
