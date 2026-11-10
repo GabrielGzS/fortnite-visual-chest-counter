@@ -94,14 +94,17 @@ class Capture:
                      "segment_seconds": SEGMENT_SECONDS, "before": before, "after": after, "mark_before": mark_before,
                      "mark_after": mark_after, "started_at": datetime.now().astimezone().isoformat(timespec="seconds")}
         self._write_info()
-        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
-               "-s", f"{width}x{height}", "-framerate", str(fps), "-i", "-", *(codec_args or CODEC_ARGS),
+        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-filter_threads", "1", "-f", "rawvideo",
+               "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-framerate", str(fps), "-i", "-",
+               "-threads", "2", *(codec_args or CODEC_ARGS),
                "-f", "segment", "-segment_time", str(SEGMENT_SECONDS), "-reset_timestamps", "1",
                "-segment_format", "matroska", "-segment_list", str(self.video_dir / "segments.csv"),
                "-segment_list_type", "csv", str(self.video_dir / "seg_%05d.mkv")]
         self._encoder_log = open(self.folder / "encoder.log", "wb")
+        # Diagnostic recording yields to counting and the game when the CPU is busy.
+        flags = paths.child_process_flags() | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
         self._encoder = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=self._encoder_log,
-                                         creationflags=paths.child_process_flags())
+                                         creationflags=flags)
         self._thread = threading.Thread(target=self._write, daemon=True, name="capture-writer")
         self._thread.start()
 

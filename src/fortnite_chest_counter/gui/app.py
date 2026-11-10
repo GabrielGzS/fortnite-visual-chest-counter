@@ -833,13 +833,14 @@ class Dashboard(QWidget):
             prow.addWidget(widget)
         layout.addLayout(prow)
 
-        # the two numbers
+        # Breakdown and total
         counts = QHBoxLayout()
         counts.setSpacing(14)
         self.certain = CountCard("CERTAIN", "Chests confirmed by strong evidence", theme.CERTAIN)
-        self.approx = CountCard("APPROX", "Estimated total - already includes CERTAIN", theme.APPROX)
-        counts.addWidget(self.certain, 1)
-        counts.addWidget(self.approx, 1)
+        self.approx = CountCard("APPROX", "Estimated openings only", theme.APPROX)
+        self.total = CountCard("TOTAL", "Certain + Approx", theme.INFO)
+        for count_card in (self.certain, self.approx, self.total):
+            counts.addWidget(count_card, 1)
         actions = QVBoxLayout()
         actions.setSpacing(8)
         actions.addWidget(button("Edit counts...", tip="Start from the chests you already opened, or correct the counter",
@@ -851,38 +852,32 @@ class Dashboard(QWidget):
         token_row = QHBoxLayout()
         self.token_mode = QComboBox()
         self.token_mode.addItems(["Solo", "Duo", "Trio", "Squad"])
-        self.token_mode.setToolTip("Game mode used for the token estimate.")
+        self.token_mode.setToolTip("Current game mode. Odds use the same total in every mode.")
         self.token_boost = QComboBox()
         for caption, multiplier in (("Normal ×1", 1.0), ("Boost ×1.5", 1.5), ("Boost ×2", 2.0)):
             self.token_boost.addItem(caption, multiplier)
         self.token_boost.setToolTip("Apply this multiplier to every chest in the estimate.")
-        self.token_teammates = QSpinBox()
-        self.token_teammates.setRange(0, 999_999)
-        self.token_teammates.setToolTip("Enter any extra chests opened by teammates.")
-        self.token_teammate_label = label("Teammate chests")
         self.token_odds = label("", "hint", wrap=True)
         self.token_odds.setToolTip("Estimated chance that at least one chest in the shown total would drop a Pirate Token. "
                                    "The model assumes independent rolls at 1 in 137,500 per chest before the selected boost. "
-                                   "The total uses APPROX and includes any manually entered teammate chests.")
-        for widget in (self.token_mode, self.token_boost, self.token_teammate_label, self.token_teammates, self.token_odds):
+                                   "The calculation uses the TOTAL card.")
+        for widget in (self.token_mode, self.token_boost, self.token_odds):
             token_row.addWidget(widget)
-        token_row.setStretch(4, 1)
+        token_row.setStretch(2, 1)
         layout.addLayout(token_row)
-        self.token_mode.currentIndexChanged.connect(lambda _: self.update_token_odds())
         self.token_boost.currentIndexChanged.connect(lambda _: self.update_token_odds())
-        self.token_teammates.valueChanged.connect(lambda _: self.update_token_odds())
         self.update_token_odds()
         types = QHBoxLayout()                                 # v0.2.2: read-only chest-type split of the APPROX total
         types.addWidget(label("Chest types:", "hint"), 0, Qt.AlignTop)
         self.types = label("", "hint", wrap=True)
-        self.types.setToolTip("How the counted chests split by type (APPROX, the total). Read from each chest's pop-up "
+        self.types.setToolTip("How the total counted chests split by type. Read from each chest's pop-up "
                               "line: CHEST, RARE CHEST or SPRITE CHEST - 'unknown type' when the line could not be read. "
                               "'Not classified' = chests counted before v0.2.2, or set with Edit counts. "
                               "OBS still shows only the two totals.")
         types.addWidget(self.types, 1)
         layout.addLayout(types)
         viewers = QHBoxLayout()
-        viewers.addWidget(label("Viewers see:", "hint"), 0, Qt.AlignTop)
+        viewers.addWidget(label("On-screen overlay:", "hint"), 0, Qt.AlignTop)
         self.viewers = label("", "hint", wrap=True)
         self.viewers.setStyleSheet(f"color: {theme.TEXT};")
         viewers.addWidget(self.viewers, 1)
@@ -1025,15 +1020,11 @@ class Dashboard(QWidget):
         self.detail.currentIndexChanged.connect(lambda _: win.render_log())
 
     def update_token_odds(self):
-        group = self.token_mode.currentIndex() > 0 and not self.win.secondary_selected
-        self.token_teammate_label.setVisible(group)
-        self.token_teammates.setVisible(group)
-        total = max(0, self.win.counts[1]) + (self.token_teammates.value() if group else 0)
+        total = max(0, self.win.counts[1])
         boost = self.token_boost.currentData()
-        probability = -math.expm1(min(total, 10_000_000) * math.log1p(-boost / PIRATE_TOKEN_RATE)) if total else 0
+        probability = -math.expm1(total * math.log1p(-boost / PIRATE_TOKEN_RATE)) if total else 0
         chance = f"{probability:.6%}"
         self.token_chance = chance
-        self.token_total = total
         scenario = f" · {self.token_boost.currentText()}" if boost > 1 else ""
         self.token_odds.setText(f"Pirate Token · {chance} · {total:,} chests{scenario}")
         self.refresh_screen_overlay()
@@ -1063,21 +1054,23 @@ class Dashboard(QWidget):
             ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, affinity)
 
     def reload_screen_overlay(self):
-        if self.win.overlay.show_screen_overlay.isChecked():
-            self.screen_overlay_display = load_cfg()[0]["display"]
-            self.refresh_screen_overlay()
+        self.screen_overlay_display = load_cfg()[0]["display"]
+        self.refresh_screen_overlay()
 
     def screen_overlay_text(self, display):
-        certain, approx = self.win.counts
-        lines = [C.overlay_text(display, {"certain": certain, "approximate": approx})]
+        certain, total = self.win.counts
+        approx = max(0, total - certain)
+        total_text = display["screen_total_text"]
+        if "#" not in total_text:
+            total_text += " #"
+        total_text = total_text.replace("#", settings.format_count(total, display["use_thousands_separator"]))
+        chest_text = C.overlay_text(display, {"certain": certain, "approximate": approx})
+        lines = [f"{chest_text} · {total_text}"]
         if display["screen_show_token"]:
             wording = display["screen_token_text"]
             if "#" not in wording:
                 wording += " #"
             lines.append(wording.replace("#", self.token_chance))
-        if display["screen_show_total"]:
-            total = settings.format_count(self.token_total, display["use_thousands_separator"])
-            lines.append(f"Total chests: {total}")
         if display["screen_show_types"] and self.types.text():
             lines.append(f"Chest types: {self.types.text()}")
         return "\n".join(lines)
@@ -1086,9 +1079,14 @@ class Dashboard(QWidget):
         page = getattr(self.win, "overlay", None)
         if page is not None and page.isVisible():
             page.refresh_preview()
-        if self.screen_overlay is None or not page.show_screen_overlay.isChecked():
+        if self.screen_overlay_display is None:
             return
         text = self.screen_overlay_text(self.screen_overlay_display)
+        summary = text.replace("\n", "   /   ")
+        if self.viewers.text() != summary:
+            self.viewers.setText(summary)
+        if self.screen_overlay is None or not page.show_screen_overlay.isChecked():
+            return
         if text != self.screen_overlay.text():
             self.screen_overlay.setText(text)
             self.screen_overlay.adjustSize()
@@ -1162,10 +1160,8 @@ class OverlayPage(QWidget):
             box_layout.addWidget(radio)
             radio.toggled.connect(self._changed)
         self.show_token = QCheckBox("Show Pirate Token odds on screen")
-        self.show_total = QCheckBox("Show total chests on screen")
-        self.show_total.setToolTip("Show the estimated total used for Pirate Token odds, including any manually entered teammate chests.")
         self.show_types = QCheckBox("Show chest types on screen")
-        for toggle in (self.show_token, self.show_total, self.show_types):
+        for toggle in (self.show_token, self.show_types):
             box_layout.addWidget(toggle)
             toggle.toggled.connect(self._changed)
         layout.addWidget(box)
@@ -1178,13 +1174,16 @@ class OverlayPage(QWidget):
         self.certain_text = QLineEdit()
         self.approx_label = label("Estimated total (APPROX)")
         self.approx_text = QLineEdit()
+        self.total_text = QLineEdit()
+        self.total_text.setToolTip("Use # for the total shown next to the on-screen chest counts.")
         self.token_text = QLineEdit()
         self.token_text.setToolTip("Use # for the Pirate Token probability, including the percent sign.")
         self.line_label = label("One line")
         self.line_text = QLineEdit()
         self.line_text.setToolTip("#C = confirmed number, #A = estimated total, e.g.  #C confirmed - #A total")
         for row, (lab, edit) in enumerate(((self.certain_label, self.certain_text), (self.approx_label, self.approx_text),
-                                           (self.line_label, self.line_text), (label("Pirate Token"), self.token_text))):
+                                           (self.line_label, self.line_text), (label("On-screen total"), self.total_text),
+                                           (label("Pirate Token"), self.token_text))):
             form.addWidget(lab, row, 0)
             form.addWidget(edit, row, 1)
             edit.textChanged.connect(self._changed)
@@ -1291,7 +1290,7 @@ class OverlayPage(QWidget):
         self.thousands.setChecked(self.display["use_thousands_separator"])
         self.token_text.setText(self.display["screen_token_text"])
         self.show_token.setChecked(self.display["screen_show_token"])
-        self.show_total.setChecked(self.display["screen_show_total"])
+        self.total_text.setText(self.display["screen_total_text"])
         self.show_types.setChecked(self.display["screen_show_types"])
         ws = cfg["obs_websocket"]
         self.ws_enabled.blockSignals(True)
@@ -1407,10 +1406,11 @@ class OverlayPage(QWidget):
         mode = self._mode()
         texts = {"use_thousands_separator": self.thousands.isChecked(),
                  "screen_show_token": self.show_token.isChecked(),
-                 "screen_show_total": self.show_total.isChecked(),
                  "screen_show_types": self.show_types.isChecked()}
         if self.token_text.text().strip():
             texts["screen_token_text"] = self.token_text.text().strip()
+        if self.total_text.text().strip():
+            texts["screen_total_text"] = self.total_text.text().strip()
         if mode == "inline":
             if self.line_text.text().strip():
                 texts["combined_status_format"] = C.line_from_markers(self.line_text.text())
@@ -1453,6 +1453,7 @@ class OverlayPage(QWidget):
         self.approx_text.setText(C.hash_from_text(d["approx_text"]))
         self.line_text.setText(C.markers_from_line(d["combined_status_format"]))
         self.token_text.setText(d["screen_token_text"])
+        self.total_text.setText(d["screen_total_text"])
 
     def _copy_path(self):
         QApplication.clipboard().setText(self.obs_path.text())
@@ -1470,7 +1471,6 @@ class OverlayPage(QWidget):
         self.load()
         self.saved.setText("Applied. " + ("The counter updates the OBS text within a second."
                                           if self.win.worker.running() else "The OBS text file was updated."))
-        self.win.refresh_viewers()
         self.win.dashboard.reload_screen_overlay()
 
 
@@ -1949,7 +1949,7 @@ class MainWindow(QMainWindow):
         rec.setCurrentIndex(max(rec.findData(load_cfg()[0]["capture"]["mode"]), 0))
         rec.currentIndexChanged.connect(lambda _: self.recording_changed())
         self.update_recording_ui()
-        self.refresh_viewers()
+        self.dashboard.reload_screen_overlay()
         self.refresh_sources()
         cfg, warnings = load_cfg()
         for warning in warnings:
@@ -2229,7 +2229,6 @@ class MainWindow(QMainWindow):
     def profile_changed(self):
         """After a switch / new profile: its counts, its OBS text, its video source."""
         reg = self.fill_profiles()
-        self.dashboard.token_teammates.setValue(0)
         self.read_state(force=True)
         self.read_secondary_state()
         self.write_obs_files(quiet=True)              # OBS shows the selected profile
@@ -2749,11 +2748,8 @@ class MainWindow(QMainWindow):
             preview.view.setStyleSheet("")
 
     def set_counts(self, certain, approx, flash=False):
-        primary_changed = (certain, approx) != self.primary_counts
         self.primary_counts = (certain, approx)
         self.refresh_counts(flash)
-        if primary_changed:
-            self.refresh_viewers()
 
     def refresh_counts(self, flash=False):
         certain, approx = self.primary_counts
@@ -2763,7 +2759,8 @@ class MainWindow(QMainWindow):
         changed = (certain, approx) != self.counts
         self.counts = (certain, approx)
         self.dashboard.certain.set_value(certain, flash=flash and changed)
-        self.dashboard.approx.set_value(approx, flash=flash and changed)
+        self.dashboard.approx.set_value(max(0, approx - certain), flash=flash and changed)
+        self.dashboard.total.set_value(approx, flash=flash and changed)
         self.dashboard.update_token_odds()
 
     def refresh_types(self):
@@ -2775,11 +2772,6 @@ class MainWindow(QMainWindow):
                          for kind in dict.fromkeys((*self.primary_types, *self.secondary_types))}
         self.dashboard.types.setText(types_text(breakdown))
         self.dashboard.refresh_screen_overlay()
-
-    def refresh_viewers(self):
-        cfg, _ = load_cfg()
-        text = C.overlay_text(cfg["display"], {"certain": self.primary_counts[0], "approximate": self.primary_counts[1]})
-        self.dashboard.viewers.setText(text.replace("\n", "   /   "))
 
     def read_state(self, force=False):
         cfg, _ = load_cfg()
@@ -2929,7 +2921,6 @@ class MainWindow(QMainWindow):
             if not self.secondary_selected:
                 self._set(0, 0, "reset")
                 return
-            self.dashboard.token_teammates.setValue(0)
             for role, worker in (("primary", self.worker), ("secondary", self.secondary_worker)):
                 if role in self._workers_pending:
                     if role not in self._pending_resets:
@@ -2955,8 +2946,6 @@ class MainWindow(QMainWindow):
         except (C.UserError, OSError) as error:
             show_error(self, str(error))
             return
-        if action == "reset":
-            self.dashboard.token_teammates.setValue(0)
         self.set_counts(session.state["certain"], session.state["approximate"], flash=True)
         what = "reset to 0" if action == "reset" else f"set to CERTAIN {fmt(certain)} / APPROX {fmt(approx)}"
         self.add_log({"type": "info", "text": f"Counter {what}."

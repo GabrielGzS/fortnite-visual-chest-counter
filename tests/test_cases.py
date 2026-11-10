@@ -170,6 +170,78 @@ def test_french_chest_popups_count_once_including_the_storm():
     assert counted[0]["time"] < 6 and counted[1]["time"] >= 12
 
 
+def test_french_chest_types_are_confirmed_by_multiple_line_readings():
+    from fortnite_chest_counter.detection import chest_types
+
+    defaults = settings.DEFAULTS["detector"]
+    E.configure(dict(defaults, languages=["fr"]))
+    try:
+        suffixes = chest_types.load_french_suffixes()
+        for expected in (chest_types.NORMAL, chest_types.RARE, chest_types.SPRITE):
+            estimator = E.ChestEstimator()
+            th, tw = estimator.french_template.shape
+            mask = np.zeros((V.ROI_H, V.ROI_W), dtype=np.float32)
+            y, x = 80, 120
+            mask[y:y + th, x:x + tw] = estimator.french_template
+            if expected in suffixes:
+                suffix = suffixes[expected]
+                start = x + tw + (8 if expected == chest_types.SPRITE else 3)
+                top = y - 2 if expected == chest_types.SPRITE else y
+                mask[top:top + suffix.shape[0], start:start + suffix.shape[1]] = suffix
+            frame = np.zeros((V.NORMALIZED_HEIGHT, V.NORMALIZED_WIDTH, 3), dtype=np.uint8)
+            roi = frame[V.ROI_Y:V.ROI_Y + V.ROI_H, V.ROI_X:V.ROI_X + V.ROI_W]
+            roi[mask > 0] = (232, 196, 250)
+
+            estimator.process_frame(0, frame)
+            assert estimator._label(("normal", estimator.tracked_run, "first"))[0] == chest_types.UNKNOWN
+            events = []
+            for i in range(1, 20):
+                events.extend(estimator.process_frame(i / 15, frame))
+            events.extend(estimator.flush())
+            counted = [event for event in events if event["approx_counted"]]
+            assert len(counted) == 1
+            assert counted[0]["chest_type"] == expected
+            assert counted[0]["type_evidence"]["votes"][expected] >= chest_types.VOTES_MIN
+    finally:
+        E.configure(defaults)
+
+
+def test_french_rare_x2_counts_each_stable_opening_once():
+    from collections import Counter
+
+    from fortnite_chest_counter import paths
+    from fortnite_chest_counter.detection import chest_types
+
+    defaults = settings.DEFAULTS["detector"]
+    E.configure(dict(defaults, languages=["fr"]))
+    try:
+        estimator = E.ChestEstimator()
+        folder = paths.TEMPLATES_DIR / "chest/fr"
+        templates = {name: np.load(folder / f"stack_{name}.npy") for name in ("exp", "rare", "x2", "sprite")}
+        layouts = [
+            [("rare", 71, 152)],
+            [("x2", 70, 146)],
+            [("x2", 65, 144), ("sprite", 78, 144)],
+            [("x2", 58, 144), ("sprite", 71, 144), ("rare", 85, 144)],
+            [("x2", 58, 144), ("sprite", 71, 144), ("x2", 85, 144)],
+        ]
+        events = []
+        for block, lines in enumerate(layouts):
+            frame = np.zeros((V.NORMALIZED_HEIGHT, V.NORMALIZED_WIDTH, 3), dtype=np.uint8)
+            for name, y, x in [("exp", lines[0][1] - 13, 170), *lines]:
+                mask = templates[name]
+                h, w = mask.shape
+                frame[V.ROI_Y + y:V.ROI_Y + y + h, V.ROI_X + x:V.ROI_X + x + w][mask > 0] = (225, 190, 245)
+            for i in range(8):
+                events.extend(estimator.process_frame((block * 8 + i) / 15, frame))
+        events.extend(estimator.flush())
+        counted = [event for event in events if event["approx_counted"]]
+        assert Counter(event["chest_type"] for event in counted) == {chest_types.RARE: 4, chest_types.SPRITE: 1}
+        assert all(event["certain_counted"] for event in counted)
+    finally:
+        E.configure(defaults)
+
+
 def test_sharp_french_chest_can_be_confirmed_after_hud_rescaling():
     defaults = settings.DEFAULTS["detector"]
     E.configure(dict(defaults, languages=["fr"]))

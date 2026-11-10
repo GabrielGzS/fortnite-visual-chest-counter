@@ -20,10 +20,12 @@ Templates: chest/en/rare*.npy and sprite*.npy, cut from the English reference cl
 stream (SPRITE, normal size) and Thiefs' stream (both, small size).
 """
 
+from collections import Counter
+
 import numpy as np
 
 from fortnite_chest_counter import paths
-from fortnite_chest_counter.detection import visual as V
+from fortnite_chest_counter.detection import popup_lines, visual as V
 
 NORMAL, RARE, SPRITE, UNKNOWN = "chest", "rare", "sprite", "unknown"
 KNOWN = (NORMAL, RARE, SPRITE)                      # display order; UNKNOWN is always kept separately
@@ -42,6 +44,46 @@ SIGMA = 0.6
 def load_prefixes(size):
     """{type: binary word template} for "normal" or "small" HUD size."""
     return {kind: np.load(paths.TEMPLATES_DIR / files[size]).astype(np.float32) for kind, (_, files) in TYPES.items()}
+
+
+def load_french_suffixes():
+    # RARE has the same letters in both languages. The sprite suffix is from the XP line COFFRE À ESPRIT.
+    return {RARE: load_prefixes("normal")[RARE],
+            SPRITE: np.load(paths.TEMPLATES_DIR / "chest/fr/esprit.npy").astype(np.float32)}
+
+
+def classify_french_line(mask, y, x, th, tw, suffixes):
+    """Read the qualifier to the right of COFFRE on the same XP line."""
+    end = x + tw
+    if x < 4 or y < 2 or y + th + 2 > mask.shape[0] or end + tw > mask.shape[1]:
+        return UNKNOWN
+    left = prefix_length(mask, y, x, th, tw)
+    if left >= EMPTY_MAX:
+        return UNKNOWN
+    # Leave room for the gap, and for the short word À in COFFRE À ESPRITS.
+    region = mask[y - 2:y + th + 2, end + 1:end + int(1.8 * tw)]
+    scores = {}
+    for kind, template in suffixes.items():
+        if region.shape[0] < template.shape[0] or region.shape[1] < template.shape[1]:
+            continue
+        score, _, offset = V.best_template_correlation(region, template)
+        if offset <= (tw * 0.65 if kind == SPRITE else tw * 0.35):
+            scores[kind] = score
+    for kind, score in scores.items():
+        other = max((v for k, v in scores.items() if k != kind), default=0.0)
+        if score >= WORD_MIN and score - other >= WORD_MARGIN:
+            return kind
+    # A qualifier we cannot read must not silently become a normal chest.
+    return NORMAL if not region[:, 2:tw].any() else UNKNOWN
+
+
+def french_sprite_score(mask, y, x, th, tw, template):
+    end = x + tw
+    region = mask[max(0, y - 3):y + th + 5, max(0, end - 1):end + int(1.8 * tw)]
+    if region.shape[0] < template.shape[0] or region.shape[1] < template.shape[1]:
+        return 0.0
+    score, _, offset = V.best_template_correlation(region, template)
+    return score if offset <= tw * 0.4 else 0.0
 
 
 def prefix_length(mask, y, x, th, tw):
@@ -93,3 +135,71 @@ def decide(votes):
     kind, n = max(votes.items(), key=lambda kv: kv[1])
     share = n / total
     return (kind, round(share, 2)) if kind != UNKNOWN and share >= MAJORITY else (UNKNOWN, round(share, 2))
+
+
+class FrenchQualifiedPopups:
+    """Stable quantities of rare and sprite chests in one visible French XP group."""
+
+    def __init__(self):
+        folder = paths.TEMPLATES_DIR / "chest/fr"
+        self.templates = [(kind, quantity, V.blur_template(np.load(folder / f"stack_{name}.npy"), SIGMA))
+                          for kind, quantity, name in ((RARE, 1, "rare"), (RARE, 2, "x2"),
+                                                      (SPRITE, 1, "sprite"))]
+        self.exp = np.load(folder / "stack_exp.npy")
+        self.last_seen = None
+        self.rows = []
+        self.totals = Counter()
+        self.candidate = None
+        self.frames = 0
+
+    def observe(self, t, roi):
+        if self.last_seen is not None and t - self.last_seen > 0.55:
+            self.rows = []
+            self.totals.clear()
+            self.candidate = None
+            self.frames = 0
+        # The qualifiers and multiplier appear on the right side of the XP notification.
+        bright = roi[33:124, 125:225].min(axis=2)
+        peaks = []
+        for level in (155, 178):
+            mask = (bright > level).astype(np.float32)
+            if mask.sum() < 50:
+                continue
+            for kind, quantity, template in self.templates:
+                for score, y, x in popup_lines.correlation_peaks(mask, template, 0.76):
+                    if 5 <= x <= 45:
+                        peaks.append((score, y + 36, x + 139, kind, quantity))
+        rows = []
+        for row in sorted(peaks, reverse=True):
+            if all(abs(row[1] - other[1]) >= 6 for other in rows):
+                rows.append(row)
+        if not rows:
+            return []
+        if not self.totals:
+            top = min(row[1] for row in rows) - 3
+            # Require the XP heading above a new group before owning the individual lines.
+            exp = roi[max(0, top - 23):top - 1, 157:207]
+            if exp.shape[0] < self.exp.shape[0] or max(
+                    V.best_template_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp)[0]
+                    for level in (135, 155)) < 0.60:
+                return []
+        self.last_seen = t
+        counts = Counter()
+        for _, _, _, kind, quantity in rows:
+            counts[kind] += quantity
+        self.frames = self.frames + 1 if counts == self.candidate else 1
+        self.candidate = counts
+        if self.frames < VOTES_MIN:
+            return []
+        self.rows = rows
+        added = []
+        for kind, quantity in counts.items():
+            delta = quantity - self.totals[kind]
+            if delta > 0:
+                row = next(row for row in rows if row[3] == kind)
+                added.extend([row] * delta)
+                self.totals[kind] = quantity
+        return added
+
+    def owns(self, y, x):
+        return any(abs(row_y - y) <= 8 and abs(row_x - x) <= 23 for _, row_y, row_x, _, _ in self.rows)

@@ -47,6 +47,15 @@ SRGB_LUT = np.rint(255 * np.where(_linear <= 0.0031308, 12.92 * _linear,
 
 def tone_map_scrgb(frame, exposure=1.0):
     """Map linear scRGB to sRGB, compressing highlights without clipping individual channels."""
+    output = np.empty((*frame.shape[:2], 3), dtype=np.uint8)
+    # Keep the temporary float arrays small enough to fit in cache, even with two capture workers.
+    for row in range(0, frame.shape[0], 64):
+        rows = slice(row, row + 64)
+        _tone_map_scrgb_rows(frame[rows], exposure, output[rows])
+    return output
+
+
+def _tone_map_scrgb_rows(frame, exposure, output):
     channels = [frame[..., i].astype(np.float32) for i in range(3)]
     for channel in channels:
         np.fmax(channel, 0, out=channel)
@@ -60,10 +69,8 @@ def tone_map_scrgb(frame, exposure=1.0):
     scale = SRGB_LUT_MAX * (0.75 + shoulder / (1 + 4 * shoulder)) / np.maximum(peak, 0.75 / exposure)
     colored_scale = scale * (1 - mix)
     neutral *= scale
-    output = np.empty((*frame.shape[:2], 3), dtype=np.uint8)
     for index, channel in enumerate(channels):
         output[..., index] = SRGB_LUT[np.rint(channel * colored_scale + neutral).astype(np.int32)]
-    return output
 
 
 def list_video_devices():
@@ -100,10 +107,9 @@ def list_monitors(include_handles=False):
 
 
 class LiveSource:
-    def __init__(self, label, input_args, fps, hdr=False, soften_sdr=False):
+    def __init__(self, label, input_args, fps, hdr=False):
         self.label, self.input_args, self.fps = label, list(input_args), fps
         self.hdr = hdr
-        self.soften_sdr = soften_sdr
         self.info = {"input_resolution": None, "input_fps": None}
         self._process, self._thread, self._err_thread = None, None, None
         self._cond = threading.Condition()
@@ -119,11 +125,13 @@ class LiveSource:
 
     # ---- lifecycle ----
     def open(self, timeout=20.0):
-        video_filter = f"fps={self.fps}" if self.hdr else f"scale={WIDTH}:{HEIGHT},fps={self.fps}"
-        if self.soften_sdr:
-            video_filter += ",format=rgb24,huesaturation=saturation=-0.10:lightness=1"
-        cmd = (["ffmpeg", "-hide_banner", "-loglevel", "info"] + self.input_args +
-               ["-vf", video_filter, "-pix_fmt", "rgbaf16le" if self.hdr else "rgb24", "-f", "rawvideo", "-"])
+        if self.hdr:
+            # gfxcapture already caps the rate. Do not fill gaps by duplicating its last frame.
+            video_args = ["-fps_mode", "passthrough", "-pix_fmt", "rgbaf16le"]
+        else:
+            video_filter = f"scale={WIDTH}:{HEIGHT},fps={self.fps}"
+            video_args = ["-vf", video_filter, "-pix_fmt", "rgb24"]
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info", *self.input_args, *video_args, "-f", "rawvideo", "-"]
         self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10 ** 8,
                                          stdin=paths.child_stdin(), creationflags=paths.child_process_flags())
         self._t0 = time.monotonic()
@@ -686,7 +694,7 @@ def make_source(kind, fps, device=None, monitor=1, video=None, start=0.0, durati
         x, y, w, h = monitors[monitor - 1]
         return LiveSource(f"desktop: monitor {monitor} ({w}x{h} at {x},{y})",
                           ["-f", "gdigrab", "-draw_mouse", "0", "-framerate", str(fps), "-offset_x", str(x), "-offset_y", str(y),
-                           "-video_size", f"{w}x{h}", "-i", "desktop"], fps, soften_sdr=True)
+                           "-video_size", f"{w}x{h}", "-i", "desktop"], fps)
     if kind == "desktop-hdr":
         monitors = list_monitors(include_handles=True)
         if not 1 <= monitor <= len(monitors):
