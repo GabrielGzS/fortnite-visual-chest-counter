@@ -886,8 +886,6 @@ class Dashboard(QWidget):
         top.addWidget(header)
         top.addStretch(1)
         self.pill = label("", "pill")
-        top.addWidget(self.pill, 0, Qt.AlignVCenter)
-        top.addWidget(button("Reset...", tip="Set both counts to 0", on_click=win.reset_counts))
         self.start = button("Start counting", "primary", on_click=win.toggle_counting)
         top.addWidget(self.start)
         layout.insertLayout(0, top)
@@ -918,6 +916,8 @@ class Dashboard(QWidget):
         sources_layout = QVBoxLayout()
         sources_layout.setSpacing(4)
         source_row = QHBoxLayout()
+        source_row.setSpacing(12)
+        source_row.addWidget(self.pill, 0, Qt.AlignVCenter)
         self.source_summary = label("", "hint", wrap=True)
         self.source_summary.setTextFormat(Qt.PlainText)
         source_row.addWidget(self.source_summary, 1)
@@ -988,7 +988,12 @@ class Dashboard(QWidget):
         self.recent.setWordWrap(True)
         rail_layout.addWidget(self.recent, 1)
         self.clear_recent()
-        rail_layout.addWidget(button("Edit counts...", "link", on_click=win.edit_counts), 0, Qt.AlignLeft)
+        count_actions = connected_buttons(
+            button("Edit counts...", on_click=win.edit_counts),
+            button("Reset...", tip="Set all counts to 0", on_click=win.reset_counts),
+        )
+        count_actions.addStretch(1)
+        rail_layout.addLayout(count_actions)
         board.addWidget(rail, 4)
         layout.addLayout(board)
         self.update_token_odds()
@@ -1105,10 +1110,8 @@ class Dashboard(QWidget):
                                  "Can be changed while counting; the counts are not affected.")
         row.addWidget(self.rec_mode, 1)
         box_layout.addLayout(row)
-        actions = QHBoxLayout()
-        actions.addWidget(self.analyse)
         self.mark = button("Mark moment   Ctrl+Alt+M", on_click=win.mark_moment)
-        actions.addWidget(self.mark)
+        actions = connected_buttons(self.analyse, self.mark)
         actions.addStretch(1)
         box_layout.addLayout(actions)
         self.rec_status = label("", "hint", wrap=True)
@@ -1436,8 +1439,10 @@ class OverlayPage(QWidget):
         self.obs_path = QLineEdit()
         self.obs_path.setReadOnly(True)
         row.addWidget(self.obs_path, 1)
-        row.addWidget(button("Copy path", on_click=self._copy_path))
-        row.addWidget(button("Open folder", on_click=lambda: open_path(Path(self.obs_path.text()).parent)))
+        row.addLayout(connected_buttons(
+            button("Copy path", on_click=self._copy_path),
+            button("Open folder", on_click=lambda: open_path(Path(self.obs_path.text()).parent)),
+        ))
         box_layout.addLayout(row)
         layout.addWidget(box)
 
@@ -1743,10 +1748,11 @@ class SettingsPage(QWidget):
         self.lossless = QCheckBox("Lossless: the replay sees exactly what the counter saw (about twice the disk space)")
         box_layout.addWidget(self.lossless)
         row = QHBoxLayout()
-        row.addWidget(button("Open captures folder", on_click=self._open_captures))
-        row.addWidget(button("Review captures...", tip="Replay every capture through the current detector and compare it "
-                                                       "with what was counted live and with your labels",
-                             on_click=lambda: ReviewDialog(self).exec()))
+        row.addLayout(connected_buttons(
+            button("Open captures folder", on_click=self._open_captures),
+            button("Review captures...", tip="Replay captures and compare with live counts and your labels",
+                   on_click=lambda: ReviewDialog(self).exec()),
+        ))
         row.addStretch(1)
         box_layout.addLayout(row)
         layout.addWidget(box)
@@ -1787,8 +1793,10 @@ class SettingsPage(QWidget):
         box, box_layout = card("Advanced", "Everything else (for example which evidence counts) is in config.toml. "
                                            "Edit it only if you know why; a typo shows a warning and uses the default.")
         row = QHBoxLayout()
-        row.addWidget(button("Open config.toml", on_click=self._open_config))
-        row.addWidget(button("Open program folder", on_click=lambda: open_path(paths.APP_DIR)))
+        row.addLayout(connected_buttons(
+            button("Open config.toml", on_click=self._open_config),
+            button("Open program folder", on_click=lambda: open_path(paths.APP_DIR)),
+        ))
         row.addStretch(1)
         box_layout.addLayout(row)
         layout.addWidget(box)
@@ -1918,8 +1926,10 @@ class HelpPage(QWidget):
         self.copy = button("Copy report", on_click=self._copy)
         self.copy.setEnabled(False)
         row.addWidget(self.copy)
-        row.addWidget(button("Open logs folder", on_click=win.open_logs))
-        row.addWidget(button("Clean logs and captures...", on_click=win.clean_diagnostics))
+        row.addLayout(connected_buttons(
+            button("Open logs folder", on_click=win.open_logs),
+            button("Clean logs and captures...", on_click=win.clean_diagnostics),
+        ))
         row.addStretch(1)
         box_layout.addLayout(row)
         self.report = QPlainTextEdit()

@@ -21,6 +21,8 @@
   destinations keyboard-accessible and show the full update status in the content area.
 - Bundle Google Sans and official Material Icons with their licenses. Use connected action groups, themed dropdown
   chevrons, checkboxes, radio controls and numeric steppers.
+- Keep Start counting as the sole primary action in the header. Place capture status next to the sources, and group
+  Edit counts with Reset and Analyse a recording with Mark moment.
 - Apply themed confirmations and profile prompts. Destructive confirmations default to Cancel. The Windows file
   picker remains a system dialog.
 - Draw and animate normal, Sprite, blue rare, and unknown chests on the Dashboard and on-screen overlay. Honour the
