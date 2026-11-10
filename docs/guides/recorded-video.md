@@ -2,7 +2,7 @@
 
 Count the chests in a video file with the same detector as live counting. It runs faster than real time and **never changes
 your live counter or OBS overlay**. Counting a recording after the match is also the most conservative way to use the
-counter ([fair play](../../README.md#fair-play-and-compatibility)).
+counter ([fair play](../../README.md#compatibility-and-data)).
 
 ## Steps
 

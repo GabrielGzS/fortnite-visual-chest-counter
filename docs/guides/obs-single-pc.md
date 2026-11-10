@@ -5,12 +5,12 @@ Fortnite -> OBS Game Capture -> scene "ChestDetectorFeed" -> OBS Virtual Camera
          -> Fortnite Visual Chest Counter -> obs_output\chest_counter.txt -> OBS Text source on your stream scene
 ```
 
-You need Windows 10 / 11, **OBS Studio 28 or newer** and the app extracted from its ZIP ([download](../../README.md#download)).
+You need Windows 10 / 11, **OBS Studio 28 or newer** and the app extracted from its ZIP ([download](../../README.md#get-started)).
 
 > **Fair play:** this runs the counter on the same PC as Fortnite. That works, but its compatibility with Fortnite's
 > anti-cheat has not been officially verified. With a second PC, the [dual-PC SRT setup](obs-dual-pc-srt.md) keeps the
 > counter off the gaming PC; counting a [recorded video](recorded-video.md) is the other conservative option.
-> Details: [Fair play and compatibility](../../README.md#fair-play-and-compatibility).
+> Details: [Fair play and compatibility](../../README.md#compatibility-and-data).
 
 ## 1. Create the detector scene
 
