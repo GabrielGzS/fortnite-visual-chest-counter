@@ -15,6 +15,12 @@
 
 ## Local UI follow-up
 
+- Run one capture per player. Add a shared Discord feed, one published leaderboard, and an opt-in
+  local-only switch. The host runs the bot and other players use the shared webhook and leaderboard message ID.
+- Add online bot status, guild-wide slash commands, rich match reports, and shared counts by player,
+  confidence, chest type, and saved matches. The webhook determines the Discord channel.
+- Preview the top players above Recent matches. Edit Certain and Approx separately and calculate Total in the dialog.
+
 - Add a dedicated recent-match card and a Group tab for editing and deleting saved matches and viewing local ranks.
   Save a match from both capture sources, manually or with opt-in local Battle Royale detection.
 - Add a Discord tab for bot setup, manual reports and optional automatic reports after a new match saves.

@@ -1,6 +1,6 @@
 """Local, manually recorded match results."""
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from hashlib import sha256
 import json
 
@@ -18,6 +18,9 @@ class Match:
     estimated: int
     token_chance: str
     boost: float = 1.0
+    player: str = ""
+    chest_types: dict[str, int] = field(default_factory=dict)
+    group_webhook_id: str = ""
 
     @property
     def total(self):
@@ -25,7 +28,7 @@ class Match:
 
     def summary(self):
         return (
-            f"Fortnite | {self.mode} | {self.profile} | {self.finished_at}\n"
+            f"Fortnite | {self.mode} | {self.player or self.profile} | {self.finished_at}\n"
             f"Total: {self.total:,} chests ({self.certain:,} certain, {self.estimated:,} estimated)\n"
             f"Estimated Pirate Token chance: {self.token_chance}"
         )
@@ -66,7 +69,12 @@ def read_history(path):
         if any(type(row.certain) is not int or type(row.estimated) is not int or row.certain < 0 or row.estimated < 0
                or type(row.boost) not in (int, float) or not 0 < row.boost <= 2
                or not all(isinstance(value, str) for value in
-                          (row.snapshot, row.finished_at, row.profile_id, row.profile, row.mode, row.token_chance))
+                          (row.snapshot, row.finished_at, row.profile_id, row.profile, row.mode, row.token_chance,
+                           row.player, row.group_webhook_id))
+               or not isinstance(row.chest_types, dict)
+               or any(not isinstance(kind, str) or type(count) is not int or count < 0
+                      for kind, count in row.chest_types.items())
+               or sum(row.chest_types.values()) > row.total
                for row in rows):
             raise ValueError
         return rows
@@ -86,7 +94,8 @@ def edit_match(path, snapshot, certain, total, token_chance):
     rows = read_history(path)
     for index, row in enumerate(rows):
         if row.snapshot == snapshot:
-            rows[index] = replace(row, certain=certain, estimated=total - certain, token_chance=token_chance)
+            rows[index] = replace(row, certain=certain, estimated=total - certain, token_chance=token_chance,
+                                  chest_types=row.chest_types if total == row.total else {})
             _write_history(path, rows)
             return True
     return False

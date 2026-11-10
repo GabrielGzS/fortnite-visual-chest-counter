@@ -90,6 +90,8 @@ def app(tmp_path, monkeypatch):
 
     log = tmp_path / "FortniteGame.log"
     monkeypatch.setattr(gui.paths, "APP_DIR", tmp_path)
+    monkeypatch.setattr(gui.discord_group, "load_webhook", lambda: None)
+    monkeypatch.setattr(gui.discord_summary, "load", lambda: None)
     monkeypatch.setattr(match_lifecycle, "local_log_path", lambda: log)
     monkeypatch.setattr(gui.MainWindow, "refresh_sources", lambda self: None)
     monkeypatch.setattr(gui, "ask", lambda *args, **kwargs: True)
@@ -97,42 +99,39 @@ def app(tmp_path, monkeypatch):
     win = gui.MainWindow()
     win.timer.stop()
     win.slow.stop()
-    win.worker, win.secondary_worker = Worker(), Worker()
+    win.worker = Worker()
     win._fill_sources([], [(0, 0, 1280, 720), (1280, 0, 1920, 1080)])
     win.dashboard.source.setCurrentIndex(win.dashboard.source.findData({"source": "desktop", "monitor": 1}))
-    win.dashboard.secondary_source.setCurrentIndex(
-        win.dashboard.secondary_source.findData({"source": "desktop", "monitor": 2}))
     try:
         yield gui, win, log
     finally:
         win.set_match_automation(False)
         win._workers_pending.clear()
-        win.worker.alive = win.secondary_worker.alive = False
+        win.worker.alive = False
         win.close()
         application.processEvents()
 
 
-def seed(gui, win, primary, secondary):
-    cfg = win._cfg_for_actions()
-    gui.C.set_counts(cfg, *primary)
-    gui.C.set_counts(win._secondary_cfg(cfg), *secondary)
+def seed(gui, win, counts):
+    gui.C.set_counts(win._cfg_for_actions(), *counts)
     win.read_state(force=True)
-    win.read_secondary_state()
 
 
-def exit_worker(win, role, code=0, acknowledged=True):
-    handle = win.handle if role == "primary" else win.handle_secondary
+def exit_worker(win, code=0, acknowledged=True):
     if acknowledged:
-        handle({"type": "stopped", "stop_reason": "stopped in the app"})
-    if role == "primary":
-        win.worker.alive = False
-    else:
-        win.secondary_worker.alive = False
-    handle({"type": "exit", "code": code})
+        win.handle({"type": "stopped", "stop_reason": "stopped in the app"})
+    win.worker.alive = False
+    win.handle({"type": "exit", "code": code})
+
+
+def online_bot(win, config):
+    from types import SimpleNamespace
+
+    win.discord.runner = SimpleNamespace(status=("online", ""), config=config, report_config=config, stop=lambda **_: None)
 
 
 @pytest.mark.parametrize("send_enabled", [False, True])
-def test_qt_drains_both_before_saving_and_before_next_start(app, monkeypatch, send_enabled):
+def test_qt_drains_before_saving_and_before_next_start(app, monkeypatch, send_enabled):
     gui, win, log = app
     delivered = Event()
     summaries = []
@@ -141,9 +140,9 @@ def test_qt_drains_both_before_saving_and_before_next_start(app, monkeypatch, se
         summaries.append(content)
         delivered.set()
 
-    monkeypatch.setattr(gui.discord_summary, "load", lambda: object())
+    online_bot(win, object())
     monkeypatch.setattr(gui.discord_summary, "send", send)
-    seed(gui, win, (4, 7), (1, 3))
+    seed(gui, win, (5, 10))
     log.write_bytes(START)
     win.poll_match_log()
     assert win.counts == (5, 10)
@@ -160,29 +159,29 @@ def test_qt_drains_both_before_saving_and_before_next_start(app, monkeypatch, se
     win.match_timer.setInterval(10)
     QTest.qWait(100)
     assert win.counts == (0, 0)
-    assert win.worker.starts == win.secondary_worker.starts == 1
+    assert win.worker.starts == 1
 
-    seed(gui, win, (6, 9), (2, 4))
+    seed(gui, win, (8, 13))
     append(log, FRONTEND + FRONTEND + START)
     win.poll_match_log()
-    assert win.worker.stops == win.secondary_worker.stops == 1
-    exit_worker(win, "primary")
-    win.poll_match_log()
+    assert win.worker.stops == 1
     assert gui.match_history.read_history(win.match_history_path()) == []
-    seed(gui, win, (6, 9), (3, 5))
-    exit_worker(win, "secondary")
+    seed(gui, win, (9, 14))
+    exit_worker(win)
     saved, = gui.match_history.read_history(win.match_history_path())
     assert (saved.certain, saved.total) == win.counts == (9, 14)
-    assert win.worker.starts == win.secondary_worker.starts == 1
+    assert win.worker.starts == 1
+    display = {**gui.load_cfg()[0]["display"], "screen_show_matches": True}
+    assert "Matches saved · 1" in win.dashboard.screen_overlay_text(display)
 
     # Saving the same snapshot manually is still a no-op.
     win.finish_match()
     assert gui.match_history.read_history(win.match_history_path()) == [saved]
     assert delivered.wait(2 if send_enabled else 0.05) is send_enabled
-    assert summaries == ([saved.summary()] if send_enabled else [])
+    assert summaries == ([saved] if send_enabled else [])
 
     win.poll_match_log()
-    assert win.worker.starts == win.secondary_worker.starts == 2
+    assert win.worker.starts == 2
     assert win.counts == (0, 0)
 
 
@@ -191,7 +190,7 @@ def test_qt_save_failure_disarms_and_preserves_counts(app, monkeypatch):
     win.set_match_automation(True)
     append(log, START)
     win.poll_match_log()
-    seed(gui, win, (5, 6), (2, 3))
+    seed(gui, win, (7, 9))
     with monkeypatch.context() as failing:
         def fail(*args):
             raise OSError("test history write failure")
@@ -199,10 +198,9 @@ def test_qt_save_failure_disarms_and_preserves_counts(app, monkeypatch):
         failing.setattr(gui.match_history, "save_match", fail)
         append(log, FRONTEND + START)
         win.poll_match_log()
-        exit_worker(win, "secondary")
-        exit_worker(win, "primary")
+        exit_worker(win)
     win.poll_match_log()
-    assert win.worker.starts == win.secondary_worker.starts == 1
+    assert win.worker.starts == 1
     assert win.counts == (7, 9)
     assert win._match_tail is None and not win.settings_page.auto_match.isChecked()
     assert not gui.load_cfg()[0]["app"]["auto_match_lifecycle"]
@@ -215,7 +213,7 @@ def test_qt_active_rotation_preserves_counts_without_inventing_a_finish(app):
     win.set_match_automation(True)
     append(log, START)
     win.poll_match_log()
-    seed(gui, win, (2, 3), (1, 2))
+    seed(gui, win, (3, 5))
     log.rename(log.with_suffix(".backup"))
     log.write_bytes(FRONTEND + START)
     win.poll_match_log()
@@ -225,17 +223,16 @@ def test_qt_active_rotation_preserves_counts_without_inventing_a_finish(app):
 
 
 @pytest.mark.parametrize("draining,code,acknowledged", [(False, 0, False), (True, 0, False), (True, 1, True)])
-def test_qt_incomplete_secondary_exit_disarms_without_saving(app, draining, code, acknowledged):
+def test_qt_incomplete_exit_disarms_without_saving(app, draining, code, acknowledged):
     gui, win, log = app
     win.set_match_automation(True)
     append(log, START)
     win.poll_match_log()
-    seed(gui, win, (2, 4), (3, 5))
+    seed(gui, win, (5, 9))
     if draining:
         append(log, FRONTEND)
         win.poll_match_log()
-    exit_worker(win, "secondary", code=code, acknowledged=acknowledged)
-    exit_worker(win, "primary")
+    exit_worker(win, code=code, acknowledged=acknowledged)
     append(log, FRONTEND + START)
     win.poll_match_log()
     assert win._match_tail is None
@@ -243,37 +240,34 @@ def test_qt_incomplete_secondary_exit_disarms_without_saving(app, draining, code
     assert gui.match_history.read_history(win.match_history_path()) == []
 
 
-def test_qt_restores_both_state_files_if_one_reset_cannot_save(app, monkeypatch):
+def test_qt_restores_state_file_if_reset_cannot_save(app, monkeypatch):
     gui, win, log = app
-    seed(gui, win, (2, 4), (3, 5))
+    seed(gui, win, (5, 9))
     cfg = win._cfg_for_actions()
     primary = Path(cfg["state"]["path"])
-    secondary = Path(win._secondary_cfg(cfg)["state"]["path"])
-    previous = [path.read_bytes() for path in (primary, secondary)]
-    save_state = gui.C.save_state
+    previous = primary.read_bytes()
 
-    def fail_secondary(path, state):
-        if Path(path) == secondary:
-            raise OSError("test state write failure")
-        save_state(path, state)
+    def fail_write(path, state):
+        raise OSError("test state write failure")
 
-    monkeypatch.setattr(gui.C, "save_state", fail_secondary)
+    monkeypatch.setattr(gui.C, "save_state", fail_write)
     win.set_match_automation(True)
     append(log, START)
     win.poll_match_log()
-    assert [path.read_bytes() for path in (primary, secondary)] == previous
+    assert primary.read_bytes() == previous
     assert win.counts == (5, 9)
-    assert win.worker.starts == win.secondary_worker.starts == 0
+    assert win.worker.starts == 0
     assert win._match_tail is None
 
 
-def test_qt_skips_stale_backlog_and_leaves_unselected_source_untouched(app, monkeypatch):
+def test_qt_skips_stale_backlog_and_leaves_legacy_capture_untouched(app, monkeypatch):
     gui, win, log = app
-    seed(gui, win, (2, 4), (3, 5))
+    seed(gui, win, (2, 4))
     cfg = win._cfg_for_actions()
-    secondary = Path(win._secondary_cfg(cfg)["state"]["path"])
-    before = secondary.read_bytes()
-    win.dashboard.secondary_source.setCurrentIndex(0)
+    secondary = gui.profiles.secondary_state_path(cfg["state"]["path"])
+    secondary.parent.mkdir(parents=True, exist_ok=True)
+    before = b"Legacy secondary capture data"
+    secondary.write_bytes(before)
     win.set_match_automation(True)
     monkeypatch.setattr(match_lifecycle.LogTail, "READ_SIZE", len(START))
     append(log, START + FRONTEND)
@@ -284,7 +278,7 @@ def test_qt_skips_stale_backlog_and_leaves_unselected_source_untouched(app, monk
     assert win.counts == (2, 4)
     append(log, START)
     win.poll_match_log()
-    assert win.worker.starts == 1 and win.secondary_worker.starts == 0
+    assert win.worker.starts == 1
     assert secondary.read_bytes() == before
 
 
@@ -296,9 +290,8 @@ def test_qt_deferred_start_waits_for_modal_and_source_scan(app, monkeypatch):
     win.set_match_automation(True)
     append(log, START)
     win.poll_match_log()
-    assert win.worker.stops == win.secondary_worker.stops == 1
-    exit_worker(win, "primary")
-    exit_worker(win, "secondary")
+    assert win.worker.stops == 1
+    exit_worker(win)
     with monkeypatch.context() as blocked:
         blocked.setattr(QApplication, "activeModalWidget", lambda: object())
         win.poll_match_log()
@@ -308,30 +301,70 @@ def test_qt_deferred_start_waits_for_modal_and_source_scan(app, monkeypatch):
     assert win.worker.starts == 1
     win._source_scan = None
     win.poll_match_log()
-    assert win.worker.starts == win.secondary_worker.starts == 2
+    assert win.worker.starts == 2
 
 
 def test_qt_fresh_manual_finish_schedules_one_report_with_current_bot(app, monkeypatch):
     gui, win, _ = app
-    seed(gui, win, (2, 4), (3, 5))
+    seed(gui, win, (5, 9))
     win.discord.auto_report.setChecked(True)
     delivered = Event()
     calls = []
     setup = object()
-    owner_thread = gui.threading.current_thread()
-
-    def load():
-        assert gui.threading.current_thread() is owner_thread
-        return setup
+    online_bot(win, setup)
 
     def send(config, summary):
         calls.append((config, summary, gui.threading.current_thread().daemon))
         delivered.set()
 
-    monkeypatch.setattr(gui.discord_summary, "load", load)
     monkeypatch.setattr(gui.discord_summary, "send", send)
     win.finish_match()
     win.finish_match()
     saved, = gui.match_history.read_history(win.match_history_path())
     assert delivered.wait(2)
-    assert calls == [(setup, saved.summary(), False)]
+    assert calls == [(setup, saved, False)]
+
+
+def test_qt_saved_match_recovers_group_outbox_after_enqueue_failure(app, monkeypatch):
+    gui, win, _ = app
+    group = gui.discord_group
+    webhook = group.Webhook("123456789012345678", "fixture-webhook-token")
+    monkeypatch.setattr(group, "load_webhook", lambda: webhook)
+    gui.C.update_config_file(gui.config_file(), "app", {"group_player": "Rin"})
+    seed(gui, win, (5, 9))
+    delivered = Event()
+    sent = []
+    queue_match = group.queue_match
+    attempts = 0
+
+    def queue(*args):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("simulated local outbox failure")
+        return queue_match(*args)
+
+    def publish(values, event, name, count, certain, chest_types):
+        sent.append((values.id, event, name, count, certain, chest_types))
+        delivered.set()
+
+    monkeypatch.setattr(group, "queue_match", queue)
+    monkeypatch.setattr(group, "_publish", publish)
+    win.finish_match()
+    win.finish_match()
+    saved, = gui.match_history.read_history(win.match_history_path())
+    assert saved.group_webhook_id == webhook.id and saved.player == "Rin"
+    assert delivered.wait(3)
+    assert len(sent) == 1 and sent[0][2:] == ("Rin", 9, 5, {"unclassified": 9})
+
+
+def test_qt_solo_match_stays_local_with_group_configured(app, monkeypatch):
+    gui, win, _ = app
+    gui.C.update_config_file(gui.config_file(), "app", {"group_player": "Rin", "auto_discord_summary": True})
+    win.group.share_matches.setChecked(False)
+    monkeypatch.setattr(gui.discord_group, "queue_match", lambda *_: pytest.fail("Unexpected group contribution"))
+    monkeypatch.setattr(win, "deliver_saved_match", lambda *_: pytest.fail("Unexpected automatic report"))
+    seed(gui, win, (2, 4))
+    win.finish_match()
+    saved, = gui.match_history.read_history(win.match_history_path())
+    assert (saved.player, saved.total, saved.group_webhook_id) == ("Rin", 4, "")

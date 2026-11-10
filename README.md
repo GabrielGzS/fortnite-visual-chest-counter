@@ -128,6 +128,21 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
   `config.toml` (Settings → Open config.toml; every option is explained inside).
 - **Help & diagnostics:** setup steps, the offline guide and a one-click diagnostics report.
 
+### Shared Group and Discord
+
+Each player runs one capture on their own PC. In **Group**, enter a player name and the team's shared Discord webhook.
+Newly saved matches contribute to the shared count. If Discord is temporarily unavailable, pending contributions stay on
+disk for retry. Share the webhook only with teammates who are allowed to submit Group results.
+
+On the bot host, save the bot token and Application ID in **Discord**, then click **Start bot**. The shared webhook
+determines the Discord server and collection channel. Use the zero-permission invite, then grant **View Channel** and
+**Read Message History** in that channel. Enable **Message Content Intent** under **Bot** in the Discord Developer Portal.
+Add **Send Messages** for match reports and **Embed Links** for rich reports.
+
+The bot supports `/chests`, `/leaderboard`, `/add` and `/reset` across the configured server. **Manage Server** is required
+for corrections. The host can publish one leaderboard message from Group, then share its message ID with players to show
+the same standings in their apps.
+
 ## Fair play and compatibility
 
 The counter is built for statistics and stream presentation: it counts chest openings that are **already visible on

@@ -39,6 +39,7 @@ DEFAULTS = {
         "screen_show_total": True,              # legacy setting retained for older config files
         "screen_total_text": "Total: #",
         "screen_show_types": False,
+        "screen_show_matches": False,
         # v0.1.0 names, still understood: a config that sets only these gets "<label>: {count}" as its text.
         "certain_label": "CERTAIN OPENED CHESTS",
         "approximate_label": "APPROX. OPENED CHESTS",
@@ -91,7 +92,9 @@ DEFAULTS = {
         "token_boost": "Normal ×1",
         "live_preview": False,
         "show_activity": True,
-        "secondary_source": "null",
+        "group_player": "",
+        "group_scoreboard_id": "",
+        "group_share_matches": True,
         "remember_window": True,                # the desktop app reopens with the size, position and maximised state it closed with
         "close_to_tray": False,
         "start_in_tray": False,
@@ -188,7 +191,8 @@ def _check(section, key, value):
         return (isinstance(value, bool), "must be true or false")
     if key == "process_fps":
         return (isinstance(value, int) and not isinstance(value, bool) and 5 <= value <= 30, "must be a whole number from 5 to 30")
-    if section == "live" and key in ("window", "url"):
+    if (section == "live" and key in ("window", "url")
+            or section == "app" and key in ("group_player", "group_scoreboard_id")):
         return (isinstance(value, str), "must be text in quotes")
     if section == "live" and key == "stream_quality":
         return (value in STREAM_QUALITIES, f"must be one of {list(STREAM_QUALITIES)}")

@@ -13,6 +13,7 @@ import ctypes
 import json
 import math
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -32,7 +33,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QSystemTrayIcon, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
-from fortnite_chest_counter import diagnostics_cleanup, discord_summary, match_history, match_lifecycle, paths, profiles, settings
+from fortnite_chest_counter import diagnostics_cleanup, discord_bot, discord_group, discord_scoreboard, discord_summary, match_history, match_lifecycle, paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -675,32 +676,32 @@ class PreviewPanel(QFrame):
 class CountsDialog(ThemedDialog):
     """Set the counter (also: start from the chests already opened)."""
 
-    def __init__(self, parent, certain, approx):
+    def __init__(self, parent, certain, total):
         super().__init__(parent)
         self.setWindowTitle("Edit counts")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(12)
         layout.addWidget(label("Edit chest counts", "cardTitle"))
-        layout.addWidget(label("Enter the total opened and how many were confirmed.", "hint", wrap=True))
+        layout.addWidget(label("Edit the confirmed and estimated counts. Total is their sum.", "hint", wrap=True))
         grid = QGridLayout()
         grid.setHorizontalSpacing(14)
         grid.setVerticalSpacing(8)
         self.approx = QSpinBox()
         self.certain = QSpinBox()
-        for spin, value in ((self.approx, approx), (self.certain, certain)):
+        for spin, value in ((self.certain, certain), (self.approx, max(0, total - certain))):
             spin.setAlignment(Qt.AlignCenter)
             spin.setRange(0, C.MAX_STARTING_COUNT)
             spin.setGroupSeparatorShown(True)
             spin.setValue(value)
             spin.setMinimumWidth(140)
-        grid.addWidget(label("Total chests"), 0, 0)
-        grid.addWidget(self.approx, 0, 1)
-        grid.addWidget(label("Confirmed chests"), 1, 0)
-        grid.addWidget(self.certain, 1, 1)
+        grid.addWidget(label("Certain"), 0, 0)
+        grid.addWidget(self.certain, 0, 1)
+        grid.addWidget(label("Approx"), 1, 0)
+        grid.addWidget(self.approx, 1, 1)
         layout.addLayout(grid)
-        self.estimated = label("", "hint")
-        layout.addWidget(self.estimated)
+        self.total_label = label("", "cardTitle")
+        layout.addWidget(self.total_label)
         self.problem = label("", "hint")
         self.problem.setStyleSheet(f"color: {theme.REJECT};")
         layout.addWidget(self.problem)
@@ -713,10 +714,14 @@ class CountsDialog(ThemedDialog):
         self.certain.valueChanged.connect(self._check)
         self._check()
 
+    @property
+    def total(self):
+        return self.certain.value() + self.approx.value()
+
     def _check(self):
-        bad = self.certain.value() > self.approx.value()
-        self.estimated.setText(f"Estimated openings: {fmt(max(0, self.approx.value() - self.certain.value()))}")
-        self.problem.setText("Confirmed chests cannot exceed the total." if bad else "")
+        bad = self.total > C.MAX_STARTING_COUNT
+        self.total_label.setText(f"Total · {fmt(self.total)}")
+        self.problem.setText(f"Total cannot exceed {fmt(C.MAX_STARTING_COUNT)}." if bad else "")
         return not bad
 
     def _accept(self):
@@ -1054,6 +1059,7 @@ class Dashboard(QWidget):
         self.win = win
         self.screen_overlay = None
         self.screen_overlay_display = None
+        self.saved_match_count = 0
         layout = page_layout(self, "Dashboard", None)
         layout.setContentsMargins(24, 24, 24, 24)
         self.findChild(QScrollArea).setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -1101,7 +1107,7 @@ class Dashboard(QWidget):
         self.source_chips = []
         chips = QHBoxLayout()
         chips.setSpacing(2)
-        for width, position in ((140, "first"), (240, "middle"), (220, "last")):
+        for width, position in ((140, "first"), (240, "last")):
             chip = label("", "sourceChip")
             chip.setProperty("groupPosition", position)
             chip.setMinimumHeight(28)
@@ -1116,16 +1122,31 @@ class Dashboard(QWidget):
         self.metrics = label("", "metrics", wrap=True)
         self.metrics.hide()
         sources_layout.addWidget(self.metrics)
-        self.secondary_status = label("", "hint", wrap=True)
-        self.secondary_status.hide()
-        sources_layout.addWidget(self.secondary_status)
         layout.addLayout(sources_layout)
 
         board = QHBoxLayout()
         board.setSpacing(14)
         stage, stage_layout = card()
         stage.setObjectName("chestStage")
-        recent_card, recent_layout = card("Recent matches")
+        recent_card, recent_layout = card("Leaderboard")
+        self.leaders = label("Share a match to appear here.", "hint", wrap=True)
+        self.leaders.setTextFormat(Qt.PlainText)
+        recent_layout.addWidget(self.leaders)
+        self.leader_rows = []
+        for _ in range(3):
+            caption = label("", "hint")
+            caption.setTextFormat(Qt.PlainText)
+            bar = QProgressBar()
+            bar.setObjectName("leaderBar")
+            bar.setRange(0, 1000)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(5)
+            caption.hide()
+            bar.hide()
+            recent_layout.addWidget(caption)
+            recent_layout.addWidget(bar)
+            self.leader_rows.append((caption, bar))
+        recent_layout.addWidget(label("Recent matches", "cardTitle"))
         self.recent_matches = label("No matches saved yet.", "hint", wrap=True)
         self.recent_matches.setTextFormat(Qt.PlainText)
         recent_layout.addWidget(self.recent_matches)
@@ -1242,7 +1263,7 @@ class Dashboard(QWidget):
         profile_row.addLayout(connected_buttons(self.profile_new, self.profile_rename, self.profile_delete))
         inputs.addLayout(profile_row, 0, 1, 1, 2)
 
-        inputs.addWidget(label("Source 1"), 1, 0)
+        inputs.addWidget(label("Source"), 1, 0)
         self.source = MaterialComboBox()
         self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.source.setMinimumContentsLength(12)
@@ -1250,19 +1271,9 @@ class Dashboard(QWidget):
         inputs.addWidget(self.source, 1, 1)
         self.refresh = button("Refresh", tip="Look for video devices and screens again", on_click=win.refresh_sources)
         inputs.addWidget(self.refresh, 1, 2)
-        inputs.addWidget(label("Source 2"), 2, 0)
-        self.secondary_source = MaterialComboBox()
-        self.secondary_source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.secondary_source.setMinimumContentsLength(12)
-        self.secondary_source.addItem("None (optional)")
-        self.secondary_source.setToolTip("Count a teammate's video too. For Discord, play the stream fullscreen on a separate "
-                                         "screen or send it to an OBS Virtual Camera or Windowed Projector.")
-        self.secondary_source.currentIndexChanged.connect(lambda _: win.secondary_source_changed())
-        inputs.addWidget(self.secondary_source, 2, 1)
         box_layout.addLayout(inputs)
         self.source.currentTextChanged.connect(self.update_source_summary)
         self.source.currentIndexChanged.connect(lambda _: self.clear_recent(source=1))
-        self.secondary_source.currentTextChanged.connect(self.update_source_summary)
         self.url_row = QWidget()                            # only for "Livestream URL"
         url_layout = QVBoxLayout(self.url_row)
         url_layout.setContentsMargins(0, 0, 0, 0)
@@ -1370,14 +1381,9 @@ class Dashboard(QWidget):
         self.log.setPlaceholderText("Chests appear here as they are counted: green = certain, yellow = estimated only, "
                                     "red = looked like a chest but was not counted.")
         self.log.setMinimumHeight(220)
-        self.preview = PreviewPanel("Source 1 preview")
-        self.secondary_preview = PreviewPanel("Source 2 preview")
-        self.preview_group = QSplitter(Qt.Vertical)
-        self.preview_group.setChildrenCollapsible(False)
-        self.preview_group.addWidget(self.preview)
-        self.preview_group.addWidget(self.secondary_preview)
+        self.preview = PreviewPanel("Live preview")
         self.split.addWidget(self.log)
-        self.split.addWidget(self.preview_group)
+        self.split.addWidget(self.preview)
         self.split.setCollapsible(1, False)
         self.split.setStretchFactor(0, 3)
         self.split.setStretchFactor(1, 2)
@@ -1388,13 +1394,30 @@ class Dashboard(QWidget):
         self.detail.currentIndexChanged.connect(lambda _: win.render_log())
 
     def set_recent_matches(self, matches):
+        self.saved_match_count = len(matches)
+        self.refresh_screen_overlay()
         lines = [f"{match.finished_at} · {match.mode}\n{match.total:,} chests"
                  for match in reversed(matches[-3:])]
         self.recent_matches.setText("\n\n".join(lines) or "No matches saved yet.")
 
+    def set_leaders(self, ranking):
+        self.leaders.setVisible(not ranking)
+        if not ranking:
+            self.leaders.setText("No shared rankings yet.")
+        maximum = max(ranking[0].total, 1) if ranking else 1
+        for index, (caption, bar) in enumerate(self.leader_rows):
+            visible = index < len(ranking)
+            caption.setVisible(visible)
+            bar.setVisible(visible)
+            if visible:
+                player = ranking[index]
+                text = f"{index + 1}. {player.name} · {fmt(player.total)}"
+                caption.setText(caption.fontMetrics().elidedText(text, Qt.ElideMiddle, 192))
+                caption.setToolTip(text)
+                bar.setValue(round(1000 * player.total / maximum))
+
     def update_source_summary(self):
         primary = self.source.currentText() or "Scanning..."
-        secondary = self.secondary_source.currentText() or "None (optional)"
         profile = self.profile.currentText()
         if (self.source.currentData() or {}).get("source") == "stream":
             url = QUrl(self.url.text())
@@ -1405,7 +1428,7 @@ class Dashboard(QWidget):
                     if video:
                         primary += f"?v={video}"
         for chip, text in zip(self.source_chips, (f"Profile · {profile or 'Default'}",
-                                                  f"Source 1 · {primary}", f"Source 2 · {secondary}")):
+                                                  f"Source · {primary}")):
             chip.setText(chip.fontMetrics().elidedText(text, Qt.ElideRight, chip.maximumWidth() - 22))
             chip.setToolTip(text)
 
@@ -1529,6 +1552,8 @@ class Dashboard(QWidget):
             if "#" not in wording:
                 wording += " #"
             lines.append(wording.replace("#", self.token_chance))
+        if display.get("screen_show_matches"):
+            lines.append(f"Matches saved · {fmt(self.saved_match_count)}")
         if display["screen_show_types"] and self.types.text():
             lines.append(f"Chest types: {self.types.text()}")
         return "\n".join(lines)
@@ -1565,8 +1590,7 @@ class Dashboard(QWidget):
 
     def _panels(self):
         self.log.setVisible(self.show_log.isChecked())
-        self.preview_group.setVisible(self.show_preview.isChecked())
-        self.secondary_preview.setVisible(self.win.secondary_selected)
+        self.preview.setVisible(self.show_preview.isChecked())
         for widget in (self.detail, self.clear, self.open_logs):
             widget.setVisible(self.show_log.isChecked())
         self.split.setVisible(self.show_log.isChecked() or self.show_preview.isChecked())
@@ -1627,10 +1651,11 @@ class OverlayPage(QWidget):
             examples_layout.addWidget(example, i, 1)
             radio.toggled.connect(self._changed)
         box_layout.addLayout(examples_layout)
-        box_layout.addWidget(label("The selected example matches the on-screen preview. OBS uses the primary source and shows only the selected counts.", "hint", wrap=True))
+        box_layout.addWidget(label("The selected example matches the on-screen preview. OBS shows only the selected counts.", "hint", wrap=True))
         self.show_token = QCheckBox("Show Pirate Token odds on screen")
         self.show_types = QCheckBox("Show chest types on screen")
-        for toggle in (self.show_token, self.show_types):
+        self.show_matches = QCheckBox("Show saved match count on screen")
+        for toggle in (self.show_token, self.show_types, self.show_matches):
             box_layout.addWidget(toggle)
             toggle.toggled.connect(self._changed)
         layout.addWidget(box)
@@ -1767,6 +1792,7 @@ class OverlayPage(QWidget):
         self.show_token.setChecked(self.display["screen_show_token"])
         self.total_text.setText(self.display["screen_total_text"])
         self.show_types.setChecked(self.display["screen_show_types"])
+        self.show_matches.setChecked(self.display["screen_show_matches"])
         ws = cfg["obs_websocket"]
         self.ws_enabled.blockSignals(True)
         self.ws_enabled.setChecked(ws["enabled"])
@@ -1881,7 +1907,8 @@ class OverlayPage(QWidget):
         mode = self._mode()
         texts = {"use_thousands_separator": self.thousands.isChecked(),
                  "screen_show_token": self.show_token.isChecked(),
-                 "screen_show_types": self.show_types.isChecked()}
+                 "screen_show_types": self.show_types.isChecked(),
+                 "screen_show_matches": self.show_matches.isChecked()}
         if self.token_text.text().strip():
             texts["screen_token_text"] = self.token_text.text().strip()
         if self.total_text.text().strip():
@@ -1921,7 +1948,7 @@ class OverlayPage(QWidget):
                                     ("combined_status_format", self.line_text, C.line_from_markers)):
             if field.text().strip():
                 examples[key] = convert(field.text().strip())
-        examples.update(screen_show_token=False, screen_show_types=False)
+        examples.update(screen_show_token=False, screen_show_types=False, screen_show_matches=False)
         selected_mode = C.display_mode(display)
         for mode, example in self.mode_examples.items():
             example.setText(preview_text if mode == selected_mode else render({**examples, **C.MODE_SETTINGS[mode]}))
@@ -2016,8 +2043,8 @@ class SettingsPage(QWidget):
         box_layout.addWidget(self.start_in_tray)
         layout.addWidget(box)
 
-        box, box_layout = card("Match automation", "Use the local Fortnite log to start both sources in Battle Royale "
-                               "warmup and save their combined totals when you return to the lobby.")
+        box, box_layout = card("Match automation", "Use the local Fortnite log to start counting at Battle Royale "
+                               "warmup and save the match when you return to the lobby.")
         self.auto_match = QCheckBox("Automatically reset, start and save local Battle Royale matches")
         box_layout.addWidget(self.auto_match)
         layout.addWidget(box)
@@ -2165,14 +2192,50 @@ class SettingsPage(QWidget):
 
 
 class GroupPage(QWidget):
-    """Local match history, profile ranking and shareable summaries."""
+    scoreboard_result = Signal(object)
+
+    """Local match history and the shared Discord leaderboard."""
 
     def __init__(self, win):
         super().__init__()
         self.win = win
         self.matches = []
-        layout = page_layout(self, "Group", "Save finished matches and compare totals across local profiles.")
-        history, history_layout = card("Match history", "Stop counting, then finish the match to save the combined totals. "
+        self._webhook = None
+        self._ranks_key = None
+        self._scoreboard_id = ""
+        self._scoreboard_pending = False
+        self._published = None
+        self._next_scoreboard_refresh = 0.0
+        self.scoreboard_result.connect(self._scoreboard_result)
+        layout = page_layout(self, "Group", "Save your matches and contribute to one shared Discord leaderboard.")
+        setup, setup_layout = card("Player setup", "Use your own player name and the webhook shared by your group.")
+        form = QGridLayout()
+        self.player = QLineEdit()
+        self.player.setMaxLength(80)
+        self.webhook = QLineEdit()
+        self.webhook.setEchoMode(QLineEdit.Password)
+        self.webhook.setPlaceholderText("Discord webhook URL")
+        form.addWidget(label("Player name"), 0, 0)
+        form.addWidget(self.player, 0, 1)
+        form.addWidget(label("Group webhook"), 1, 0)
+        form.addWidget(self.webhook, 1, 1)
+        self.scoreboard = QLineEdit()
+        self.scoreboard.setPlaceholderText("Shared message link or ID")
+        form.addWidget(label("Leaderboard message"), 2, 0)
+        form.addWidget(self.scoreboard, 2, 1)
+        setup_layout.addLayout(form)
+        self.share_matches = QCheckBox("Share matches with my group")
+        self.share_matches.setToolTip("Turn this off to keep new matches in your local history only.")
+        self.share_matches.toggled.connect(self.save_share_matches)
+        setup_layout.addWidget(self.share_matches)
+        actions = connected_buttons(button("Save player setup", on_click=self.save_player_setup),
+                                    button("Forget webhook", on_click=self.forget_webhook))
+        actions.addStretch(1)
+        setup_layout.addLayout(actions)
+        self.player_status = label("", "hint", wrap=True)
+        setup_layout.addWidget(self.player_status)
+        layout.addWidget(setup)
+        history, history_layout = card("Match history", "Stop counting, then finish the match to save your totals. "
                                       "Use Reset on the Dashboard before starting the next match.")
         row = QHBoxLayout()
         row.addWidget(button("Finish match...", "primary", on_click=win.finish_match))
@@ -2185,15 +2248,21 @@ class GroupPage(QWidget):
         history_layout.addLayout(row)
         self.stats = label("", "hint", wrap=True)
         history_layout.addWidget(self.stats)
-        self.history = self._table(("Finished", "Profile", "Mode", "Certain", "Approx", "Total", "Token chance"))
+        self.history = self._table(("Finished", "Player", "Mode", "Certain", "Approx", "Total", "Token chance"))
         self.history.currentItemChanged.connect(self._selection_changed)
         history_layout.addWidget(self.history)
         self.feedback = label("", "hint", wrap=True)
         history_layout.addWidget(self.feedback)
         layout.addWidget(history)
 
-        ranks, ranks_layout = card("Local leaderboard", "Profiles ranked by total chests across saved matches.")
-        self.ranks = self._table(("Rank", "Profile", "Matches", "Total", "Certain"))
+        ranks, ranks_layout = card("Shared leaderboard", "The host publishes one message. Share its link with players to show the same board here.")
+        controls = QHBoxLayout()
+        self.publish_board = button("Publish leaderboard", on_click=lambda: self.sync_scoreboard(publish=True))
+        self.copy_board = button("Copy message ID", on_click=self.copy_scoreboard_id)
+        controls.addLayout(connected_buttons(self.publish_board, self.copy_board))
+        controls.addStretch(1)
+        ranks_layout.addLayout(controls)
+        self.ranks = self._table(("Rank", "Player", "Total", "Matches", "Certain", "Approx", "Chest types"))
         ranks_layout.addWidget(self.ranks)
         layout.addWidget(ranks)
         layout.addStretch(1)
@@ -2211,7 +2280,8 @@ class GroupPage(QWidget):
     def load(self):
         self.feedback.clear()
         self.history.clear()
-        self.ranks.clear()
+        self.load_player_setup()
+        self.sync_scoreboard()
         try:
             self.matches = match_history.read_history(self.win.match_history_path())
         except (OSError, ValueError) as error:
@@ -2228,13 +2298,160 @@ class GroupPage(QWidget):
                            f"Best {max(totals):,} · Average {sum(totals) / len(totals):.1f}")
         for index in reversed(range(len(self.matches))):
             match = self.matches[index]
-            row = QTreeWidgetItem((match.finished_at, match.profile, match.mode, fmt(match.certain),
+            row = QTreeWidgetItem((match.finished_at, match.player or "—", match.mode, fmt(match.certain),
                                    fmt(match.estimated), fmt(match.total), match.token_chance))
             row.setData(0, Qt.UserRole, index)
             self.history.addTopLevelItem(row)
         self.history.setCurrentItem(self.history.topLevelItem(0))
-        for position, (profile, matches, total, certain) in enumerate(match_history.leaderboard(self.matches), 1):
-            self.ranks.addTopLevelItem(QTreeWidgetItem((str(position), profile, fmt(matches), fmt(total), fmt(certain))))
+    def load_player_setup(self):
+        cfg = load_cfg()[0]["app"]
+        self.player.setText(cfg["group_player"])
+        self.share_matches.blockSignals(True)
+        self.share_matches.setChecked(cfg["group_share_matches"])
+        self.share_matches.blockSignals(False)
+        self._scoreboard_id = cfg["group_scoreboard_id"]
+        self.scoreboard.setText(self._scoreboard_id)
+        self.webhook.clear()
+        try:
+            self._webhook = discord_group.load_webhook()
+        except (OSError, ValueError) as error:
+            self._webhook = None
+            self.player_status.setText(str(error))
+        self.webhook.setPlaceholderText("••••••••  (saved)" if self._webhook else "Discord webhook URL")
+
+    def save_share_matches(self, enabled):
+        try:
+            C.update_config_file(config_file(), "app", {"group_share_matches": enabled})
+        except (C.UserError, OSError) as error:
+            self.share_matches.blockSignals(True)
+            self.share_matches.setChecked(not enabled)
+            self.share_matches.blockSignals(False)
+            self.player_status.setText(f"Could not save the sharing setting. {error}")
+            return
+        self.player_status.setText("New matches will count for the group." if enabled else
+                                   "New matches stay in your local history.")
+
+    def save_player_setup(self):
+        previous = self._webhook, self._scoreboard_id
+        try:
+            player = discord_group.validate_player(self.player.text())
+            ident = discord_scoreboard.message_id(self.scoreboard.text())
+            if self.webhook.text().strip():
+                old = self._webhook
+                self._webhook = discord_group.save_webhook(self.webhook.text())
+                if old != self._webhook:
+                    if old is not None and old.id != self._webhook.id and ident == self._scoreboard_id:
+                        ident = ""
+                    self.win.discord.stop_bot()
+            C.update_config_file(config_file(), "app", {"group_player": player, "group_scoreboard_id": ident})
+        except (C.UserError, OSError, ValueError) as error:
+            self.player_status.setText(str(error))
+            return
+        self.load_player_setup()
+        if previous != (self._webhook, self._scoreboard_id):
+            self.render_ranks(())
+        self.player_status.setText("Player setup saved." if self._webhook else "Player saved. Add the shared webhook to contribute.")
+        self._next_scoreboard_refresh = 0
+        self.sync_scoreboard()
+        if self._webhook:
+            self.win.discord.retry_group_outbox()
+
+    def forget_webhook(self):
+        if not ask(self, "Forget the group webhook?", "Remove the saved webhook from this PC?", "Forget"):
+            return
+        try:
+            discord_group.forget_webhook()
+            self.win.discord.stop_bot()
+            C.update_config_file(config_file(), "app", {"group_scoreboard_id": ""})
+        except (C.UserError, OSError) as error:
+            self.player_status.setText(str(error))
+            return
+        self.load_player_setup()
+        self.render_ranks(())
+        self.player_status.setText("Webhook removed.")
+
+    def copy_scoreboard_id(self):
+        if self._scoreboard_id:
+            QApplication.clipboard().setText(self._scoreboard_id)
+            self.player_status.setText("Leaderboard message ID copied.")
+
+    def _is_board_host(self):
+        runner = self.win.discord.runner
+        return (self._webhook is not None and runner is not None and runner.status[0] == "online"
+                and getattr(runner, "webhook", None) == self._webhook)
+
+    def sync_scoreboard(self, publish=False):
+        webhook = self._webhook
+        ident = self._scoreboard_id
+        host = self._is_board_host()
+        self.publish_board.setEnabled(host and not self._scoreboard_pending)
+        self.copy_board.setEnabled(bool(ident))
+        if webhook is None:
+            self.render_ranks(())
+            return
+        if publish and not host:
+            return
+        if self._scoreboard_pending or (not publish and time.monotonic() < self._next_scoreboard_refresh):
+            return
+        if not host and (not ident or self.win.pages.currentWidget() not in (self, self.win.dashboard)):
+            return
+        self._next_scoreboard_refresh = time.monotonic() + 10
+        self._scoreboard_pending = True
+        previous = self._published
+
+        def sync():
+            try:
+                created = None
+                if host:
+                    ranking = discord_scoreboard.rows(discord_group.GroupStore(webhook.id).leaderboard())
+                    if publish or (ident and previous != (webhook.id, ident, ranking)):
+                        created, _ = discord_scoreboard.publish(webhook, ident, ranking)
+                else:
+                    ranking = discord_scoreboard.fetch(webhook, ident)
+                result = (webhook, ident, ranking, created, "")
+            except (OSError, ValueError, sqlite3.Error) as error:
+                result = (webhook, ident, (), None, str(error))
+            self.scoreboard_result.emit(result)
+
+        threading.Thread(target=sync, daemon=True, name="group-scoreboard").start()
+
+    def _scoreboard_result(self, result):
+        webhook, ident, ranking, published, error = result
+        self._scoreboard_pending = False
+        if webhook != self._webhook or ident != self._scoreboard_id:
+            self._next_scoreboard_refresh = 0
+            return
+        if error:
+            self.player_status.setText(error)
+            self.publish_board.setEnabled(self._is_board_host())
+            return
+        if published:
+            self._published = (webhook.id, published, ranking)
+            if not ident:
+                self._scoreboard_id = published
+                self.scoreboard.setText(published)
+                try:
+                    C.update_config_file(config_file(), "app", {"group_scoreboard_id": published})
+                except (C.UserError, OSError) as error:
+                    self.player_status.setText(f"Leaderboard published. Copy and save its message ID. {error}")
+                else:
+                    self.player_status.setText("Leaderboard published. Share its message ID with your group.")
+            self.copy_board.setEnabled(True)
+        self.render_ranks(ranking)
+
+    def render_ranks(self, ranking):
+        if ranking == self._ranks_key:
+            return
+        self._ranks_key = ranking
+        self.ranks.clear()
+        for position, player in enumerate(ranking, 1):
+            types = " · ".join(f"{discord_group.GROUP_TYPE_LABELS.get(kind, kind)} {fmt(count)}"
+                               for kind, count in player.chest_types.items()) or "—"
+            self.ranks.addTopLevelItem(QTreeWidgetItem((str(position), player.name, fmt(player.total),
+                                                       "—" if player.matches is None else fmt(player.matches),
+                                                       "—" if player.certain is None else fmt(player.certain),
+                                                       "—" if player.estimated is None else fmt(player.estimated), types)))
+        self.win.dashboard.set_leaders(ranking)
 
     def _selection_changed(self, item, previous):
         for action in (self.edit, self.delete):
@@ -2249,7 +2466,7 @@ class GroupPage(QWidget):
         dialog.setWindowTitle("Edit saved match")
         if dialog.exec() != QDialog.Accepted:
             return
-        certain, total = dialog.certain.value(), dialog.approx.value()
+        certain, total = dialog.certain.value(), dialog.total
         try:
             saved = match_history.edit_match(self.win.match_history_path(), match.snapshot, certain, total,
                                              token_odds_text(total, match.boost))
@@ -2279,16 +2496,20 @@ class GroupPage(QWidget):
 
 class DiscordPage(QWidget):
     send_result = Signal(str)
+    bot_changed = Signal()
 
     def __init__(self, win):
         super().__init__()
         self.win = win
         self._sending = False
-        self.sender_started = load_cfg()[0]["app"]["auto_start_discord_sender"]
+        self._outbox_active = threading.Lock()
+        self._next_outbox_retry = 0.0
+        self.runner = None
         self._configured = False
         self.send_result.connect(self._sent)
+        self.bot_changed.connect(self.refresh_sender_status, Qt.QueuedConnection)
         layout = page_layout(self, "Discord", "Send a saved match summary to a channel using your bot.")
-        setup, setup_layout = card("Bot setup", "Use a Discord bot to post plain-text summaries in one text channel.")
+        setup, setup_layout = card("Bot setup", "Run the Discord bot for Group commands and match reports.")
         links = connected_buttons(
             button("Discord Developer Portal", on_click=lambda: QDesktopServices.openUrl(
                 QUrl("https://discord.com/developers/applications"))),
@@ -2300,20 +2521,17 @@ class DiscordPage(QWidget):
         setup_layout.addLayout(links)
         setup_layout.addWidget(label("1. Copy the Application ID from General Information and the token from the Bot page.\n"
                                      "2. Enable Guild Install under Installation and leave Requires OAuth2 Code Grant "
-                                     "off under Bot. Click Invite bot and authorize it on a server you can manage. "
-                                     "Grant View Channel and Send Messages only in the destination text channel.\n"
-                                     "3. In Discord, enable Developer Mode, right-click the text channel and "
-                                     "choose Copy Channel ID.", "hint", wrap=True))
+                                     "off under Bot. Click Invite bot and authorize it on a server you can manage.\n"
+                                     "3. Save the webhook in Group. It determines the server and feed channel. "
+                                     "Enable Message Content Intent on the Bot page. Grant View Channel and "
+                                     "Read Message History in the feed. Add Send Messages for reports and Embed Links "
+                                     "for styled reports.", "hint", wrap=True))
         form = QGridLayout()
-        self.channel = QLineEdit()
-        self.channel.setPlaceholderText("Discord channel ID")
         self.application_id = QLineEdit()
         self.application_id.setPlaceholderText("Discord application ID")
         self.token = QLineEdit()
         self.token.setEchoMode(QLineEdit.Password)
         self.token.setPlaceholderText("Bot token")
-        form.addWidget(label("Channel ID"), 0, 0)
-        form.addWidget(self.channel, 0, 1)
         form.addWidget(label("Bot token"), 1, 0)
         form.addWidget(self.token, 1, 1)
         form.addWidget(label("Application ID"), 2, 0)
@@ -2332,8 +2550,8 @@ class DiscordPage(QWidget):
         sender_row.addStretch(1)
         self.sender_status = label("", "pill")
         self.sender_toggle = button("", on_click=self.toggle_sender)
-        self.auto_start = QCheckBox("Start bot sender with the app")
-        self.auto_start.setChecked(self.sender_started)
+        self.auto_start = QCheckBox("Start bot with the app")
+        self.auto_start.setChecked(load_cfg()[0]["app"]["auto_start_discord_sender"])
         self.auto_start.toggled.connect(self.save_sender_start)
         sender_row.addWidget(self.sender_status)
         sender_row.addWidget(self.sender_toggle)
@@ -2384,7 +2602,8 @@ class DiscordPage(QWidget):
     def _show_summary(self, *_):
         match = self.match.currentData()
         self.match.setEnabled(self.match.count() > 0)
-        self.send.setEnabled(match is not None and self.sender_started and self._configured and not self._sending)
+        ready = self.runner is not None and self.runner.status[0] == "online"
+        self.send.setEnabled(match is not None and ready and not self._sending)
 
     def save_report_mode(self, enabled):
         try:
@@ -2411,24 +2630,81 @@ class DiscordPage(QWidget):
 
     def show_saved_setup(self, config):
         self._configured = config is not None
-        self.channel.setText(config.channel if config else "")
         self.application_id.setText(config.application_id if config else "")
         self.token.setPlaceholderText("••••••••  (saved)" if config else "Bot token")
         self.setup_status.setText("Bot setup saved." if config else "No bot configured.")
         self.refresh_sender_status()
 
     def refresh_sender_status(self):
-        running = self._configured and self.sender_started
-        text = "Sender ready" if running else "Sender stopped" if self._configured else "Setup required"
+        state, detail = self.runner.status if self.runner else ("stopped", "")
+        active = state in ("online", "connecting", "stopping")
+        text = {"online": "Bot online", "connecting": "Connecting", "stopping": "Stopping",
+                "error": "Bot error", "stopped": "Bot stopped" if self._configured else "Setup required"}[state]
         self.sender_status.setText(f"●  {text}")
-        self.sender_status.setStyleSheet(theme.pill_style(theme.CERTAIN if running else theme.MUTED))
-        self.sender_toggle.setText("Stop sender" if running else "Start sender")
-        self.sender_toggle.setEnabled(self._configured)
+        self.sender_status.setToolTip(detail)
+        self.sender_status.setStyleSheet(theme.pill_style(theme.CERTAIN if state == "online" else theme.MUTED))
+        if detail and state == "error":
+            self.setup_status.setText(detail)
+        self.sender_toggle.setText("Stop bot" if active else "Start bot")
+        self.sender_toggle.setEnabled(state != "stopping" and (active or self._configured))
         self._show_summary()
 
     def toggle_sender(self):
-        self.sender_started = not self.sender_started
+        if self.runner and self.runner.status[0] in ("connecting", "online"):
+            self.stop_bot()
+        else:
+            self.start_bot()
+
+    def start_bot(self):
+        if self.runner and self.runner.status[0] in ("connecting", "online", "stopping"):
+            return
+        try:
+            config = discord_summary.load()
+            webhook = discord_group.load_webhook()
+        except (OSError, ValueError) as error:
+            self.setup_status.setText(str(error))
+            return
+        if config is None:
+            return
+        if webhook is None:
+            self.setup_status.setText("Save the Group webhook before starting the bot.")
+            return
+        self.runner = discord_bot.BotRunner(config, webhook, self.bot_changed.emit)
+        self.show_saved_setup(config)
+        self.runner.start()
+
+    def stop_bot(self, *, timeout=None):
+        if self.runner:
+            self.runner.stop(timeout=timeout)
         self.refresh_sender_status()
+
+    def retry_group_outbox(self):
+        try:
+            webhook = discord_group.load_webhook()
+        except (OSError, ValueError) as error:
+            self.win.auto_discord_result.emit(f"Group delivery failed. {error}")
+            return
+        if webhook is None:
+            return
+        if not self._outbox_active.acquire(blocking=False):
+            return
+        self._next_outbox_retry = time.monotonic() + 30
+        history = self.win.match_history_path()
+
+        def deliver():
+            try:
+                for match in match_history.read_history(history):
+                    if match.group_webhook_id == webhook.id and match.player:
+                        discord_group.queue_match(webhook, match, match.player)
+                sent = discord_group.flush(webhook)
+                if sent:
+                    self.win.auto_discord_result.emit(f"Group contributions sent to Discord ({sent}).")
+            except (OSError, ValueError, sqlite3.Error) as error:
+                self.win.auto_discord_result.emit(f"Group delivery failed. {error}")
+            finally:
+                self._outbox_active.release()
+
+        threading.Thread(target=deliver, daemon=True, name="discord-group-outbox").start()
 
     def save_sender_start(self, enabled):
         self.win.save_app_option("auto_start_discord_sender", enabled)
@@ -2437,16 +2713,19 @@ class DiscordPage(QWidget):
         try:
             stored = discord_summary.load() if not self.token.text().strip() else None
             token = self.token.text().strip() or (stored.token if stored else "")
-            config = discord_summary.BotSettings(self.channel.text().strip(), token, self.application_id.text().strip())
+            config = discord_summary.BotSettings("", token, self.application_id.text().strip())
             discord_summary.save(config)
         except (OSError, ValueError) as error:
             self.setup_status.setText(str(error))
             return
         self.token.clear()
+        if self.runner and self.runner.config != config:
+            self.stop_bot()
+            self.runner = None if self.runner.status[0] == "error" else self.runner
         self.show_saved_setup(config)
 
     def forget_setup(self):
-        if not ask(self, "Forget Discord setup?", "Remove the saved channel and bot token from this PC?",
+        if not ask(self, "Forget Discord setup?", "Remove the saved bot setup from this PC?",
                    "Forget", danger=True):
             return
         try:
@@ -2455,20 +2734,19 @@ class DiscordPage(QWidget):
             self.setup_status.setText(str(error))
             return
         self.token.clear()
+        self.stop_bot()
+        if self.runner and self.runner.status[0] in ("stopped", "error"):
+            self.runner = None
         self.show_saved_setup(None)
         self.setup_status.setText("Bot setup removed.")
 
     def send_summary(self):
         match = self.match.currentData()
-        if match is None or self._sending or not self.sender_started:
+        if match is None or self._sending:
             return
-        try:
-            config = discord_summary.load()
-        except (OSError, ValueError) as error:
-            self.status.setText(str(error))
-            return
-        if config is None or self.channel.text().strip() != config.channel or self.token.text():
-            self.status.setText("Save the bot setup before sending a summary.")
+        config = self.runner.report_config if self.runner and self.runner.status[0] == "online" else None
+        if config is None:
+            self.status.setText("Start the bot to resolve the Group report channel.")
             return
         if not ask(self, "Send match summary?", f"Send to Discord channel {config.channel}?\n\n{match.summary()}", "Send"):
             return
@@ -2478,7 +2756,7 @@ class DiscordPage(QWidget):
 
         def deliver():
             try:
-                discord_summary.send(config, match.summary())
+                discord_summary.send(config, match)
                 result = "Summary sent."
             except (OSError, ValueError) as error:
                 result = str(error)
@@ -2776,7 +3054,6 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(920, 640)
         self.window_file = None                 # set by restore_layout() for the real app window only (not tests / self-test)
         self.worker = Worker()
-        self.secondary_worker = Worker()
         self._workers_pending = set()
         self._pending_resets = set()
         self._match_tail = None
@@ -2785,7 +3062,6 @@ class MainWindow(QMainWindow):
         self._match_action = None
         self._match_stop_acks = set()
         self._worker_failed = False
-        self._secondary_failed = False
         self.updates = UM.UpdateManager(is_counting=self.workers_active)
         self.update_dialog = None
         self._update_ticks = 0
@@ -2794,10 +3070,7 @@ class MainWindow(QMainWindow):
         self.mode = "stopped"
         self.counts = (0, 0)
         self.primary_counts = (0, 0)
-        self.secondary_counts = (0, 0)
         self.primary_types = {}
-        self.secondary_types = {}
-        self.secondary_selected = False
         self.entries = deque(maxlen=LOG_LIMIT)
         self.connected = None
         self.started_at = None
@@ -2815,10 +3088,6 @@ class MainWindow(QMainWindow):
             self.preview_reader = PreviewReader(block_name(uuid.uuid4().hex[:12]))
         except Exception:
             self.preview_reader = None
-        try:
-            self.secondary_preview_reader = PreviewReader(block_name(uuid.uuid4().hex[:12]))
-        except Exception:
-            self.secondary_preview_reader = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.stop_timer = QTimer(self)
@@ -3000,28 +3269,6 @@ class MainWindow(QMainWindow):
         dev_video = os.environ.get("FCC_DEV_VIDEO")
         if dev_video:
             items.append((f"Test video (real time):  {Path(dev_video).name}", {"source": "file", "video": dev_video}))
-        secondary = self.dashboard.secondary_source
-        current_secondary = secondary.currentData()
-        secondary_text = secondary.currentText()
-        secondary.blockSignals(True)
-        secondary.clear()
-        secondary.addItem("None (optional)")
-        for text, data in items:
-            if data["source"] != "stream":
-                secondary.addItem(text, data)
-        if current_secondary is not None and secondary.findData(current_secondary) < 0:
-            secondary.addItem(secondary_text.split("   (not found right now)")[0] + "   (not found right now)",
-                              current_secondary)
-        if current_secondary is None:
-            saved_source = load_cfg()[0]["app"]["secondary_source"]
-            index = next((i for i in range(secondary.count())
-                          if json.dumps(secondary.itemData(i), sort_keys=True) == saved_source), 0)
-        else:
-            index = secondary.findData(current_secondary)
-        secondary.setCurrentIndex(max(0, index))
-        secondary.blockSignals(False)
-        if secondary.currentData() != current_secondary:
-            self.secondary_source_changed(save=False)
         current = self.dashboard.source.currentData()
         self.dashboard.source.blockSignals(True)
         self.dashboard.source.clear()
@@ -3043,24 +3290,6 @@ class MainWindow(QMainWindow):
         self._projectors_found = bool(windows)
         self.update_source_hint()
         self.dashboard.refresh.setEnabled(not self.workers_active())
-
-    def secondary_source_changed(self, save=True):
-        source = self.dashboard.secondary_source.currentData()
-        if save and (source is None or source["source"] != "file"):
-            self.save_app_option("secondary_source", json.dumps(source, sort_keys=True))
-        self.secondary_selected = source is not None
-        self.dashboard.clear_recent(source=2)
-        self.dashboard.secondary_status.hide()
-        self.dashboard.secondary_preview.clear()
-        self.dashboard.secondary_preview.setVisible(self.secondary_selected)
-        self.read_secondary_state()
-
-    def show_secondary_status(self, text, color):
-        status = self.dashboard.secondary_status
-        status.setTextFormat(Qt.PlainText)
-        status.setText(text)
-        status.setStyleSheet(f"color: {color};")
-        status.show()
 
     def update_source_hint(self):
         """One short line for the selected source: what it needs (and, for the less tested ones, that they are)."""
@@ -3156,7 +3385,6 @@ class MainWindow(QMainWindow):
         reg = self.fill_profiles()
         self.dashboard.clear_recent()
         self.read_state(force=True)
-        self.read_secondary_state()
         self.write_obs_files(quiet=True)              # OBS shows the selected profile
         live = self.profile_live()
         self.select_source({"source": live["source"], "device": live["device"], "monitor": live["monitor"],
@@ -3281,13 +3509,13 @@ class MainWindow(QMainWindow):
             if self.quit_when_stopped or self._install_pending:
                 return
             try:
-                started = self.start_counting(before_start=self.reset_match_sources)
+                started = self.start_counting(before_start=self.reset_match_source)
             except (C.UserError, OSError) as error:
-                self.match_automation_failed(f"Could not reset both sources. {error}")
+                self.match_automation_failed(f"Could not reset the counter. {error}")
                 return
             if not started:
                 self.stop_counting()
-                self.match_automation_failed("Could not start both configured sources.")
+                self.match_automation_failed("Could not start the configured source.")
                 return
             self._match_active = True
         elif action == "finish":
@@ -3302,11 +3530,11 @@ class MainWindow(QMainWindow):
                 if self.pages.currentWidget() is self.group:
                     self.group.load()
 
-    def reset_match_sources(self):
+    def reset_match_source(self):
         primary = self._cfg_for_actions()
         if not primary["state"]["persist"]:
             raise C.UserError("Enable saving counter state before recording matches.")
-        configs = (primary, self._secondary_cfg(primary)) if self.secondary_selected else (primary,)
+        configs = (primary,)
         backups = {}
         recovery = []
         with ExitStack() as guards:
@@ -3351,11 +3579,10 @@ class MainWindow(QMainWindow):
                         except OSError:
                             pass
                 self.read_state(force=True)
-                self.read_secondary_state()
         self.dashboard.clear_recent()
 
     def workers_active(self):
-        return bool(self._workers_pending) or self.worker.running() or self.secondary_worker.running()
+        return bool(self._workers_pending) or self.worker.running()
 
     def toggle_counting(self):
         if self.workers_active():
@@ -3377,12 +3604,6 @@ class MainWindow(QMainWindow):
     def start_counting(self, *, before_start=None):
         data = self.dashboard.source.currentData()
         if not data or self.workers_active() or self._install_pending or self.updates.state == UM.INSTALLING:
-            return
-        secondary = self.dashboard.secondary_source.currentData()
-        same_monitor = (secondary is not None and data.get("monitor") is not None
-                        and data.get("monitor") == secondary.get("monitor"))
-        if secondary == data or same_monitor:
-            show_error(self, "Choose a different second video source, or select None.")
             return
         cfg, _ = load_cfg()
         argv = ["live", "--gui", "--profile", cfg["profile"]["id"]]
@@ -3419,10 +3640,8 @@ class MainWindow(QMainWindow):
         if data["source"] == "stream" and url != cfg["live"]["url"]:
             self.dashboard.clear_recent(source=1)
         self.dashboard.banner.hide()
-        self.dashboard.secondary_status.hide()
         self.error_seen = False
         self._worker_failed = False
-        self._secondary_failed = False
         self.connected = None
         self.last_status = None
         if self.preview_reader is not None:
@@ -3437,35 +3656,17 @@ class MainWindow(QMainWindow):
         whose = f" (profile {cfg['profile']['name']})" if self.dashboard.profile.count() > 1 else ""
         self.add_log({"type": "info", "text": f"Starting{whose}: {self.dashboard.source.currentText().split('   ')[0]} ..."})
         self.set_mode("connecting")
-        if secondary:
-            cfg = self._secondary_cfg(cfg)
-            argv = ["live", "--gui", *self.source_args(secondary),
-                    "--state", cfg["state"]["path"], "--obs-dir", cfg["state"]["obs_dir"],
-                    "--log-dir", cfg["logging"]["dir"], "--capture-mode", "off"]
-            if self.secondary_preview_reader is not None:
-                self.secondary_preview_reader.discard()
-                argv += ["--preview", self.secondary_preview_reader.name]
-            try:
-                self.secondary_worker.start(argv)
-            except OSError as error:
-                self.show_secondary_status(f"Second source could not start: {error}", theme.REJECT)
-                return
-            self._workers_pending.add("secondary")
-            self.preview_visibility_changed()
-            self.show_secondary_status("Connecting to the second video source…", theme.INFO)
         return True
 
     def stop_counting(self):
         if self.workers_active() and self.mode != "stopping":
             self.set_mode("stopping")
             self.worker.stop()
-            self.secondary_worker.stop()
             self.stop_timer.start(30000)   # a diagnostic recording may need a few seconds to finish
 
     def _stop_timeout(self):
         if self.mode == "stopping":
             self.worker.kill()          # counts are saved after every chest; this only skips the final summary
-            self.secondary_worker.kill()
 
     def set_mode(self, mode):
         self.mode = mode
@@ -3479,7 +3680,6 @@ class MainWindow(QMainWindow):
         restyle(d.start, "danger" if mode in ("connecting", "counting") else "primary")
         d.start.setEnabled(mode != "stopping")
         d.source.setEnabled(not running)
-        d.secondary_source.setEnabled(not running)
         for widget in (d.profile, d.profile_new, d.profile_rename):
             widget.setEnabled(not running)
         d.profile_delete.setEnabled(not running and d.profile.currentData() != profiles.DEFAULT_ID)
@@ -3500,7 +3700,6 @@ class MainWindow(QMainWindow):
             d.metrics.hide()
             d.preview.view.setStyleSheet("")
             d.preview.clear()
-            d.secondary_preview.clear()
         self.preview_visibility_changed()
 
     def _tick(self):
@@ -3511,8 +3710,6 @@ class MainWindow(QMainWindow):
             self._fill_sources(devices, monitors, windows)
         for message in self.worker.drain():
             self.handle(message)
-        for message in self.secondary_worker.drain():
-            self.handle_secondary(message)
         version, status = self.obs_link.status()
         if version != self._obs_version:
             self._obs_version = version
@@ -3534,6 +3731,10 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(AUTO_CHECK_DELAY_MS, self.auto_check)
         except Exception as error:                     # updates must never stop the app from opening
             self.add_log({"type": "warn", "text": f"Could not check the last update ({type(error).__name__}: {error})."})
+        if not installing and self.discord.auto_start.isChecked():
+            self.discord.start_bot()
+        if not installing:
+            self.discord.retry_group_outbox()
 
     def auto_check(self):
         if self.updates.check(manual=False):
@@ -3754,35 +3955,6 @@ class MainWindow(QMainWindow):
                 self.error_seen = True
             self.worker_exited("primary", code)
 
-    def handle_secondary(self, message):
-        kind = message.get("type")
-        self.dashboard.show_opening(message, 2)
-        if kind == "connected" and self.mode != "stopping":
-            self.show_secondary_status("Counting the second video source.", theme.CERTAIN)
-        elif kind in ("counts", "event", "status", "progress"):
-            if message.get("certain") is not None and message.get("approx") is not None:
-                self.secondary_counts = (message["certain"], message["approx"])
-                self.refresh_counts(flash=kind == "event")
-        elif kind == "types":
-            self.secondary_types = message.get("breakdown") or {}
-            self.refresh_types()
-        elif kind == "reset":
-            self.dashboard.clear_recent(source=2)
-            self._pending_resets.discard("secondary")
-        elif kind == "error":
-            self._secondary_failed = True
-            self.show_secondary_status(f"Second source could not continue: {message.get('text', '')}", theme.REJECT)
-        elif kind == "stopped" and self._match_action == "finish" and message.get("stop_reason") == "stopped in the app":
-            self._match_stop_acks.add("secondary")
-        elif kind == "exit":
-            if self.mode != "stopping" and not self._secondary_failed:
-                detail = "\n".join(self.secondary_worker.stderr_tail[-6:])
-                self.show_secondary_status("The second video source stopped unexpectedly." + (f"\n{detail}" if detail else ""),
-                                           theme.REJECT)
-            elif not self._secondary_failed:
-                self.dashboard.secondary_status.hide()
-            self.worker_exited("secondary", message.get("code"))
-
     def worker_exited(self, role, code):
         self._workers_pending.discard(role)
         failed_finish = self._match_action == "finish" and (code != 0 or role not in self._match_stop_acks)
@@ -3794,15 +3966,8 @@ class MainWindow(QMainWindow):
             self._worker_failed = True
         if role in self._pending_resets:
             self._pending_resets.discard(role)
-            self.reset_saved_counts(role)
-        if role == "primary":
-            self.read_state(force=True)
-            if self.workers_active():
-                self.stop_counting()
-        else:
-            self.read_secondary_state()
-            self.dashboard.secondary_preview.clear("Second source stopped")
-            self.preview_visibility_changed()
+            self._set(0, 0, "reset")
+        self.read_state(force=True)
         if self.workers_active():
             return
         self.stop_timer.stop()
@@ -3839,9 +4004,6 @@ class MainWindow(QMainWindow):
 
     def refresh_counts(self, flash=False):
         certain, approx = self.primary_counts
-        if self.secondary_selected:
-            certain += self.secondary_counts[0]
-            approx += self.secondary_counts[1]
         changed = (certain, approx) != self.counts
         self.counts = (certain, approx)
         self.dashboard.certain.set_value(certain, flash=flash and changed)
@@ -3851,11 +4013,6 @@ class MainWindow(QMainWindow):
 
     def refresh_types(self):
         breakdown = self.primary_types
-        if self.secondary_selected:
-            breakdown = {kind: {key: self.primary_types.get(kind, {}).get(key, 0)
-                                     + self.secondary_types.get(kind, {}).get(key, 0)
-                                for key in ("certain", "approx")}
-                         for kind in dict.fromkeys((*self.primary_types, *self.secondary_types))}
         self.dashboard.types.setText(types_text(breakdown))
         self.dashboard.refresh_screen_overlay()
 
@@ -3874,14 +4031,6 @@ class MainWindow(QMainWindow):
         self.primary_types = read_types(path) or C.type_breakdown(C.fresh_state())
         self.refresh_types()
 
-    def read_secondary_state(self):
-        if self.secondary_selected:
-            path = self._secondary_cfg(load_cfg()[0])["state"]["path"]
-            self.secondary_counts = read_counts(path) or (0, 0)
-            self.secondary_types = read_types(path) or {}
-        self.refresh_counts()
-        self.refresh_types()
-
     def write_obs_files(self, quiet=False):
         """The OBS text files from the saved counter (e.g. after an update replaced them with zero placeholders)."""
         try:
@@ -3894,6 +4043,9 @@ class MainWindow(QMainWindow):
                 show_error(self, str(error))
 
     def _tick_slow(self):
+        self.group.sync_scoreboard()
+        if self.group._webhook is not None and time.monotonic() >= self.discord._next_outbox_retry:
+            self.discord.retry_group_outbox()
         if self._result_watch_until is not None:
             if time.monotonic() > self._result_watch_until:
                 self._result_watch_until = None
@@ -3984,12 +4136,9 @@ class MainWindow(QMainWindow):
         wanted = (not self._hidden_in_tray and self.pages.currentWidget() is self.dashboard and self.dashboard.show_preview.isChecked()
                   and self.mode in ("connecting", "counting"))
         primary = wanted and self.preview_reader is not None
-        secondary = wanted and self.secondary_preview_reader is not None and "secondary" in self._workers_pending
         if self.preview_reader is not None:
             self.preview_reader.set_wanted(primary)
-        if self.secondary_preview_reader is not None:
-            self.secondary_preview_reader.set_wanted(secondary)
-        if primary or secondary:
+        if primary:
             self.preview_timer.start(1000 // 8)
         else:
             self.preview_timer.stop()
@@ -3997,8 +4146,6 @@ class MainWindow(QMainWindow):
     def _tick_preview(self):
         if self.preview_reader is not None and self.stream_state not in ("buffering", "ad", "reconnecting", "offline"):
             self._read_preview(self.preview_reader, self.dashboard.preview)
-        if self.secondary_preview_reader is not None and "secondary" in self._workers_pending:
-            self._read_preview(self.secondary_preview_reader, self.dashboard.secondary_preview)
 
     @staticmethod
     def _read_preview(reader, panel):
@@ -4016,21 +4163,11 @@ class MainWindow(QMainWindow):
             cfg[section][key] = str(paths.APP_DIR / cfg[section][key])
         return cfg
 
-    @staticmethod
-    def _secondary_cfg(cfg):
-        state = profiles.secondary_state_path(cfg["state"]["path"])
-        root = state.parent
-        return {**cfg,
-                "state": {**cfg["state"], "path": str(state), "obs_dir": str(root / "obs_output")},
-                "logging": {**cfg["logging"], "dir": str(root / "logs")}}
-
     def edit_counts(self):
         dialog = CountsDialog(self, *self.primary_counts)
-        if self.secondary_selected:
-            dialog.setWindowTitle("Edit primary counts")
         if dialog.exec() != QDialog.Accepted:
             return
-        self._set(dialog.certain.value(), dialog.approx.value(), "set_count")
+        self._set(dialog.certain.value(), dialog.total, "set_count")
 
     @staticmethod
     def match_history_path():
@@ -4043,11 +4180,10 @@ class MainWindow(QMainWindow):
             show_error(self, "Enable saving counter state before recording matches.")
             return
         primary = Path(cfg["state"]["path"])
-        state_paths = (primary, profiles.secondary_state_path(primary)) if self.secondary_selected else (primary,)
-        if self.workers_active() or any(C.counter_is_running(path) for path in state_paths):
-            show_error(self, "Stop counting to let both sources finish, then save the match.")
+        if self.workers_active() or C.counter_is_running(primary):
+            show_error(self, "Stop counting, then save the match.")
             return
-        if not ask(self, "Finish match?", "Save the current combined totals to Group? "
+        if not ask(self, "Finish match?", "Save the current match to Group? "
                    "Use Reset on the Dashboard before starting the next match.", "Save match"):
             return
         try:
@@ -4067,7 +4203,15 @@ class MainWindow(QMainWindow):
         if not cfg["state"]["persist"]:
             raise C.UserError("Enable saving counter state before recording matches.")
         primary = Path(cfg["state"]["path"])
-        state_paths = (primary, profiles.secondary_state_path(primary)) if self.secondary_selected else (primary,)
+        state_paths = (primary,)
+        player = cfg["app"]["group_player"].strip()
+        webhook = None
+        if player and cfg["app"]["group_share_matches"]:
+            try:
+                player = discord_group.validate_player(player)
+                webhook = discord_group.load_webhook()
+            except (OSError, ValueError) as error:
+                self.add_log({"type": "warn", "text": f"Could not read Group setup. {error}"})
         with ExitStack() as guards:
             for path in state_paths:
                 guards.enter_context(C.SingleInstance(path))
@@ -4075,26 +4219,41 @@ class MainWindow(QMainWindow):
             identity = f"{profile['id']}@{profile['created_at'] or ''}"
             snapshot, certain, total = match_history.read_snapshot(identity, state_paths)
             boost = self.dashboard.token_boost.currentData()
+            types = read_types(primary) or {}
+            breakdown = {kind: row["approx"] for kind, row in types.items()
+                         if kind in discord_group.GROUP_TYPE_LABELS and row["approx"] > 0}
+            unclassified = total - sum(breakdown.values())
+            if unclassified > 0:
+                breakdown["unclassified"] = breakdown.get("unclassified", 0) + unclassified
+            if sum(breakdown.values()) > total:
+                breakdown = {}
             match = match_history.Match(snapshot, datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
                                         identity, profile["name"], self.dashboard.token_mode.currentText(),
-                                        certain, total - certain, token_odds_text(total, boost), boost)
+                                        certain, total - certain, token_odds_text(total, boost), boost,
+                                        player=player, chest_types=breakdown,
+                                        group_webhook_id=webhook.id if webhook else "")
             saved = match_history.save_match(self.match_history_path(), match)
-        if saved and cfg["app"]["auto_discord_summary"] and self.discord.sender_started:
+        if saved:
+            self.dashboard.set_recent_matches(match_history.read_history(self.match_history_path()))
+        if saved and webhook is not None:
+            try:
+                discord_group.queue_match(webhook, match, player)
+            except (OSError, ValueError, sqlite3.Error) as error:
+                self.add_log({"type": "warn", "text": f"Could not queue the group contribution. {error}"})
+            self.discord.retry_group_outbox()
+        if saved and cfg["app"]["group_share_matches"] and cfg["app"]["auto_discord_summary"]:
             self.deliver_saved_match(match)
         return saved
 
     def deliver_saved_match(self, match):
-        try:
-            config = discord_summary.load()
-            if config is None:
-                raise ValueError("Save the Discord bot setup first.")
-        except (OSError, ValueError) as error:
-            self.auto_discord_result.emit(f"Discord delivery failed. {error}")
+        runner = self.discord.runner
+        if runner is None or runner.status[0] not in ("online", "connecting") or runner.report_config is None:
             return
+        config = runner.report_config
 
         def deliver():
             try:
-                discord_summary.send(config, match.summary())
+                discord_summary.send(config, match)
                 result = "Match summary sent to Discord."
             except (OSError, ValueError) as error:
                 result = f"Discord delivery failed. {error}"
@@ -4105,34 +4264,9 @@ class MainWindow(QMainWindow):
 
     def reset_counts(self):
         whose = "" if self.dashboard.profile.count() <= 1 else f' of the profile "{self.dashboard.profile.currentText()}"'
-        secondary_path = Path(self._secondary_cfg(self._cfg_for_actions())["state"]["path"])
-        reset_secondary = self.secondary_selected or secondary_path.is_file()
-        which = "the counts from both video sources" if reset_secondary else "both counts"
-        if ask(self, "Reset the counter?", f"Set {which}{whose} to 0? This cannot be undone.", "Reset to 0", danger=True):
-            if not self.secondary_selected:
-                self._set(0, 0, "reset")
-                if reset_secondary:
-                    self.reset_saved_counts("secondary")
-                return
-            for role, worker in (("primary", self.worker), ("secondary", self.secondary_worker)):
-                if role in self._workers_pending:
-                    if role not in self._pending_resets:
-                        self._pending_resets.add(role)
-                        worker.send("reset")  # if the pipe closed, the exit handler resets the saved count
-                else:
-                    self.reset_saved_counts(role)
-
-    def reset_saved_counts(self, role):
-        if role == "primary":
+        if ask(self, "Reset the counter?", f"Set the counts{whose} to 0? This cannot be undone.",
+               "Reset to 0", danger=True):
             self._set(0, 0, "reset")
-            return
-        try:
-            C.set_counts(self._secondary_cfg(self._cfg_for_actions()), 0, 0, "reset")
-        except (C.UserError, OSError) as error:
-            show_error(self, f"Could not reset the second video source: {error}")
-            return
-        self.dashboard.clear_recent(source=2)
-        self.read_secondary_state()
 
     def _set(self, certain, approx, action):
         try:
@@ -4317,9 +4451,8 @@ class MainWindow(QMainWindow):
             self.update_dialog.hide()
         if self.preview_reader is not None:
             self.preview_reader.close()
-        if self.secondary_preview_reader is not None:
-            self.secondary_preview_reader.close()
         self.obs_link.stop(timeout=0.5)
+        self.discord.stop_bot(timeout=2)
         if self._tray is not None:
             self._tray.hide()
         super().closeEvent(event)
@@ -4400,7 +4533,6 @@ def self_test(app, report_path):
         result["screenshot"] = str(report_path.with_suffix(".png"))
         result["ok"] = bool(window.grab().save(result["screenshot"])) and bool(result["sources"]) and result["class_icon"]
         window.preview_reader and window.preview_reader.close()
-        window.secondary_preview_reader and window.secondary_preview_reader.close()
     except Exception:
         result["error"] = traceback.format_exc()
     report_path.write_text(json.dumps(result, indent=2), encoding="utf-8")

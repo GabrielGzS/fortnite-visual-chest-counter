@@ -63,6 +63,8 @@ THIRD_PARTY = ["numpy", "scipy"]
 STREAM_PACKAGES = ["streamlink", "attrs", "certifi", "cffi", "charset-normalizer", "h11", "idna", "isodate", "lxml",
                    "outcome", "pycountry", "pycparser", "pycryptodome", "PySocks", "requests", "sniffio", "sortedcontainers",
                    "trio", "trio-websocket", "urllib3", "websocket-client", "wsproto"]
+DISCORD_PACKAGES = ["discord.py", "aiohappyeyeballs", "aiohttp", "aiosignal", "audioop-lts", "frozenlist",
+                    "multidict", "propcache", "yarl"]
 # The window toolkit: only what QtCore + QtGui + QtWidgets + the Windows platform plugin load (their PE import closure;
 # the C/C++ runtime vcruntime140*.dll comes from runtime\python, which ships a newer one than PySide6).
 QT_FILES = {
@@ -364,7 +366,7 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
         dst = lib / PACKAGE / "templates" / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / "src" / PACKAGE / "templates" / rel, dst)
-    for dist in THIRD_PARTY + STREAM_PACKAGES:
+    for dist in THIRD_PARTY + STREAM_PACKAGES + DISCORD_PACKAGES:
         d, base, checked = verify_record(dist)
         # the package's own folders only (RECORD also lists helper scripts outside site-packages, e.g. ../../Scripts/f2py.exe)
         tops = sorted({Path(f).parts[0] for f in d.files if not str(f).endswith(".pyc") and Path(f).parts[0] != ".."})
@@ -434,7 +436,7 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
         if not files:
             raise SystemExit(f"missing licence text for {dist}")
         shutil.copy2(d.locate_file(files[0]), lic / name)
-    for dist in STREAM_PACKAGES:
+    for dist in STREAM_PACKAGES + DISCORD_PACKAGES:
         d = md.distribution(dist)
         files = [f for f in d.files if re.search(r"dist-info/(licenses/.+|LICEN[CS]E[^/]*|COPYING[^/]*|NOTICE[^/]*)$", str(f))]
         if not files:

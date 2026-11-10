@@ -75,6 +75,7 @@ number closely, but computer vision is never 100%. See <a href="#limits">Known l
   <li><a href="#inputs">Other video inputs</a></li>
   <li><a href="#profiles">Profiles</a></li>
   <li><a href="#types">Chest types</a></li>
+  <li><a href="#discord">Shared Group and Discord</a></li>
   <li><a href="#overlay">Show it on stream</a></li>
   <li><a href="#custom">Customize text</a></li>
   <li><a href="#activity">Activity &amp; preview</a></li>
@@ -303,6 +304,17 @@ English pop-ups.</p>
 <h2 id="reset">Reset the counter (e.g. at the start of a stream)</h2>
 <p>On the Dashboard click <b>Reset&hellip;</b> and confirm. Both numbers (and the chest-type split) of the selected profile go to 0, also while counting. Closing and reopening the app does
 <b>not</b> reset anything; your totals continue.</p>
+
+<h2 id="discord">Shared Group and Discord</h2>
+<p>Each teammate runs one capture on their own PC. In <b>Group</b>, save your player name and the shared Discord webhook.
+Each newly saved match contributes to the group. A failed delivery stays queued for retry.</p>
+<p>On the bot host, save the bot token and Application ID on the <b>Discord</b> page, then select <b>Start bot</b>.
+The webhook determines the server and collection channel. Grant <b>View Channel</b> and <b>Read Message History</b>
+there, then enable <b>Message Content Intent</b> in the Discord Developer Portal. Grant <b>Send Messages</b> for reports
+and <b>Embed Links</b> for rich reports.</p>
+<p>Use <code>/chests</code> or <code>/leaderboard</code> across the server. <code>/add</code> and <code>/reset</code>
+require <b>Manage Server</b>. To share the same ranking with other apps, publish one leaderboard from Group and share
+its message ID.</p>
 
 <h2 id="settings">Settings (optional)</h2>
 <p><b>Most people never need to change anything.</b> The <b>Settings</b> page has the Fortnite language (English, Portuguese (Brazil), Both, or French;

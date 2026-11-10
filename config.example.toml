@@ -51,6 +51,7 @@ medium_counts_alone_languages = ["en", "fr"]  # languages whose medium-confidenc
 #   show = "both" and both_layout = "inline"     -> one line: combined_status_format
 show = "both"
 both_layout = "stacked"
+screen_show_matches = false
 
 # Your own wording. {count} is where the number goes. You may also use {certain} and {approx} anywhere.
 # Any text, symbols and emoji are fine (whether emoji display depends on the font you pick in OBS).
@@ -156,6 +157,9 @@ remember_window = true
 close_to_tray = false
 start_in_tray = false
 auto_match_lifecycle = false
+group_player = ""
+group_scoreboard_id = ""
+group_share_matches = true
 auto_discord_summary = false
 auto_start_discord_sender = true
 
