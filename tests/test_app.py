@@ -627,8 +627,15 @@ def test_review_reports_progress_finishes_and_can_be_stopped():
         env = dict(os.environ, PYTHONPATH=str(ROOT / "src"), PYTHONIOENCODING="utf-8")
         process = subprocess.Popen([sys.executable, "-m", "fortnite_chest_counter", "review", tmp, "--gui"], cwd=tmp, env=env,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        out = process.stdout.read().decode("utf-8")                      # stdin stays open: no stop requested
-        process.wait(timeout=120)
+        try:
+            out = process.stdout.read().decode("utf-8")                  # stdin stays open: no stop requested
+            process.wait(timeout=120)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=10)
+            process.stdin.close()
+            process.stdout.close()
         msgs = [json.loads(l) for l in out.splitlines() if l.startswith("{")]
         kinds = [m["type"] for m in msgs]
         assert process.returncode == 0 and kinds.count("review_start") == 1 and "review_report" in kinds
@@ -976,6 +983,36 @@ def test_app_worker_counts_exactly_what_the_command_line_counts():
                                                          sum(e["approx_counted"] for e in cli_events))
     assert "\x1b[" not in app.stdout and all(l.startswith("{") for l in app.stdout.splitlines() if l.strip())
 
+
+def test_live_source_waits_after_forced_kill_and_closes_decoder_pipes():
+    from fortnite_chest_counter.input.video_sources import LiveSource
+
+    class Process:
+        def __init__(self):
+            self.calls = []
+            self.stdout = io.BytesIO()
+            self.stderr = io.BytesIO()
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.calls.append("terminate")
+
+        def kill(self):
+            self.calls.append("kill")
+
+        def wait(self, timeout):
+            self.calls.append(("wait", timeout))
+            if self.calls.count(("wait", timeout)) == 1:
+                raise subprocess.TimeoutExpired("ffmpeg", timeout)
+            return 0
+
+    source = LiveSource("fixture", [], 15)
+    source._process = process = Process()
+    source.close()
+    assert process.calls == ["terminate", ("wait", 3), "kill", ("wait", 3)]
+    assert process.stdout.closed and process.stderr.closed
 
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

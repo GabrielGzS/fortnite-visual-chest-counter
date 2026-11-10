@@ -4,6 +4,8 @@ CERTAIN / APPROX (detection/chest_types.py, counter.type_breakdown).        Run:
 """
 
 import sys
+
+import pytest
 from pathlib import Path as _P
 
 sys.path.insert(0, str(_P(__file__).resolve().parent.parent / "src"))   # run without installing
@@ -167,6 +169,7 @@ def test_counted_chests_of_every_case_get_the_right_type_or_unknown():
     assert total >= 28 and unknown <= 3, (total, unknown)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="The desktop UI integrates Windows native APIs.")
 def test_app_shows_the_type_split_of_the_selected_profile():
     import os
     try:

@@ -4,6 +4,8 @@ line's --profile / `profiles`, and the desktop app's profile row.        Run:   
 """
 
 import sys
+
+import pytest
 from pathlib import Path as _P
 
 sys.path.insert(0, str(_P(__file__).resolve().parent.parent / "src"))   # run without installing
@@ -227,6 +229,7 @@ def _qt():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="The desktop UI integrates Windows native APIs.")
 def test_app_profile_row_switches_counts_obs_text_and_source():
     qt = _qt()
     if qt is None:

@@ -161,16 +161,23 @@ class LiveSource:
             self._cond.notify_all()
 
     def close(self, wait=True):
-        self._stop = True
-        if self._process and self._process.poll() is None:
-            self._process.terminate()
-            if wait:
-                try:
-                    self._process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    self._process.kill()
-        with self._cond:
-            self._cond.notify_all()
+        self.request_stop()
+        process = self._process
+        if process is None:
+            return
+        if process.poll() is None:
+            process.terminate()
+        if wait:
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3)
+            for reader in (self._thread, self._err_thread):
+                if reader is not None and reader is not threading.current_thread():
+                    reader.join(timeout=1)
+            process.stdout.close()
+            process.stderr.close()
 
     # ---- threads ----
     def _read_stderr(self):

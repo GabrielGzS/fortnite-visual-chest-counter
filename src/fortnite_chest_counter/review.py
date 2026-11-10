@@ -46,11 +46,12 @@ def frames(path, fps):
             yield i / fps, np.frombuffer(raw, np.uint8).reshape(V.NORMALIZED_HEIGHT, V.NORMALIZED_WIDTH, 3)
             i += 1
     finally:
-        process.kill()
+        if process.poll() is None:
+            process.kill()
         try:
-            process.wait(timeout=5)                 # Windows keeps the clip file locked until FFmpeg has really exited
-        except subprocess.TimeoutExpired:
-            pass
+            process.wait(timeout=5)                 # Windows releases the input file after the process has exited.
+        finally:
+            process.stdout.close()
 
 
 class Stopped(Exception):

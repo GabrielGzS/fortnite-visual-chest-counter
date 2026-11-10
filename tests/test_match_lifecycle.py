@@ -170,7 +170,11 @@ def test_qt_drains_before_saving_and_before_next_start(app, monkeypatch, send_en
     from PySide6.QtTest import QTest
 
     win.match_timer.setInterval(10)
-    QTest.qWait(100)
+    from time import monotonic
+
+    deadline = monotonic() + 2
+    while win.worker.starts == 0 and monotonic() < deadline:
+        QTest.qWait(10)
     assert win.counts == (0, 0)
     assert win.worker.starts == 1
 

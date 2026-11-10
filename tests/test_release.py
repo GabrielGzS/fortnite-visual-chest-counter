@@ -617,6 +617,18 @@ def test_console_close_is_a_clean_stop():
         finally:
             if child.poll() is None:
                 child.kill()
+            child.wait(timeout=5)
+        # Console shutdown intentionally requests decoder termination without waiting.
+        # Wait for Windows to release this input before TemporaryDirectory removes it.
+        deadline = _time.monotonic() + 5
+        while True:
+            try:
+                video.unlink()
+                break
+            except PermissionError:
+                if _time.monotonic() >= deadline:
+                    raise
+                _time.sleep(0.05)
         log = next((tmp / "logs").glob("session_*.jsonl")).read_text(encoding="utf-8")
         end = [json.loads(l) for l in log.splitlines() if '"session_end"' in l]
         assert end and end[0]["stop_reason"] == "Ctrl+Break", log[-400:]          # same handler as the X

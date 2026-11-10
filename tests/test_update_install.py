@@ -434,23 +434,38 @@ def test_it_refuses_if_the_old_app_never_closes():
 
 @contextlib.contextmanager
 def program_running_from(folder):
-    """A real program file inside `folder` that keeps running."""
-    copy = Path(folder) / "ping.exe"
-    shutil.copyfile(Path(r"C:\Windows\System32\ping.exe"), copy)
-    process = subprocess.Popen([str(copy), "-n", "40", "127.0.0.1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x08000000)
-    time.sleep(0.2)
-    try:
-        yield process
-    finally:
-        process.kill()
-        process.wait()
+    """Run a sleeping executable inside the runtime, with an explicit startup handshake."""
+    copy = Path(folder) / "runtime-fixture.exe"
+    shutil.copyfile(REAL_PYTHON, copy)
+    environment = dict(os.environ, PYTHONHOME=sys.base_prefix,
+                       PATH=sys.base_prefix + os.pathsep + os.environ.get("PATH", ""))
+    environment.pop("PYTHONPATH", None)
+    with tempfile.TemporaryDirectory(prefix="fcc-running-process-") as tmp:
+        ready = Path(tmp) / "ready.txt"
+        script = "import pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(300)"
+        process = subprocess.Popen([str(copy), "-S", "-B", "-c", script, str(ready)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   creationflags=0x08000000, env=environment)
+        try:
+            deadline = time.monotonic() + 15
+            while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            if process.poll() is not None:
+                _, stderr = process.communicate(timeout=5)
+                raise AssertionError(f"The runtime process exited before the test: {stderr.decode(errors='replace')}")
+            assert ready.exists(), "The runtime process did not finish starting within 15 seconds."
+            yield process
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
 
 
 def test_it_refuses_while_anything_runs_from_the_runtime():
     with env() as e, program_running_from(e.root / "runtime"):
         assert H.processes_under([e.root / "runtime"]), "the scan should see it"
         e.run(constants={"PROCESS_WAIT": 0.3})
-        assert e.result()["reason"] == "runtime_in_use" and "ping.exe" in e.result()["detail"]
+        assert e.result()["reason"] == "runtime_in_use" and "runtime-fixture.exe" in e.result()["detail"]
         assert not e.has_journal() and (e.root / "runtime" / "VERSION").read_text() == OLD
 
 

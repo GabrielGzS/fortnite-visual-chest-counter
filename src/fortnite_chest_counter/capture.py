@@ -221,6 +221,13 @@ class Capture:
         except queue.Full:
             pass
         self._thread.join(timeout)
+        if self._thread.is_alive():
+            self.stopped_reason = self.stopped_reason or "the recorder could not finish before the stop timeout"
+            self._encoder.kill()                  # unblock a writer waiting on a full FFmpeg pipe before closing it
+            self._encoder.wait(timeout=3)
+            self._thread.join(timeout=1)
+            if self._thread.is_alive():
+                raise TimeoutError("the recording writer did not stop after FFmpeg exited")
         try:
             self._encoder.stdin.close()
         except OSError:
@@ -229,6 +236,7 @@ class Capture:
             self._encoder.wait(timeout)
         except subprocess.TimeoutExpired:
             self._encoder.kill()
+            self._encoder.wait(timeout=3)
         self._timeline.close()
         self._encoder_log.close()
         for row in self.events + self.marks:          # exact now that every recorded frame is known
