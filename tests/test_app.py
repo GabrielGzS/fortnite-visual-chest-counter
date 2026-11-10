@@ -322,6 +322,18 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
             paths.APP_DIR = previous_app_dir
             os.chdir(previous_dir)
 
+def test_hdr_tone_map_preserves_chromatic_highlights():
+    from fortnite_chest_counter.input.video_sources import tone_map_scrgb
+
+    pixels = np.array([[[2, 1.5, 1.1, 1], [1, 0.65, 1.1, 1], [0, 0, 0, 1]]], dtype=np.float16)
+    converted = tone_map_scrgb(pixels)
+    assert converted.dtype == np.uint8
+    assert 255 >= converted[0, 0, 0] > converted[0, 0, 1] > converted[0, 0, 2]
+    red, green, blue = map(int, converted[0, 1])
+    assert green + 8 < min(red, blue)
+    assert not converted[0, 2].any()
+
+
 def test_second_source_combines_counts_resets_and_can_stop_independently():
     qt = _qt()
     if qt is None:
@@ -367,6 +379,8 @@ def test_second_source_combines_counts_resets_and_can_stop_independently():
             primary, secondary = dashboard.source, dashboard.secondary_source
             screen1 = {"source": "desktop", "monitor": 1}
             screen2 = {"source": "desktop", "monitor": 2}
+            screen1_hdr = {"source": "desktop-hdr", "monitor": 1}
+            assert primary.findData(screen1_hdr) >= 0 and secondary.findData(screen1_hdr) >= 0
             assert secondary.findData({"source": "obs-camera"}) >= 0
             assert secondary.findData({"source": "window", "window": "Projector"}) >= 0
             primary.setCurrentIndex(primary.findData(screen1))
@@ -375,6 +389,10 @@ def test_second_source_combines_counts_resets_and_can_stop_independently():
             secondary.setCurrentIndex(secondary.findData(screen1))
             win.start_counting()
             assert error.call_count == 1
+            assert win.worker.argv is None and win.secondary_worker.argv is None
+            secondary.setCurrentIndex(secondary.findData(screen1_hdr))
+            win.start_counting()
+            assert error.call_count == 2
             assert win.worker.argv is None and win.secondary_worker.argv is None
             secondary.setCurrentIndex(secondary.findData(screen2))
             win._fill_sources([], [(0, 0, 1280, 720), (1280, 0, 1920, 1080)])

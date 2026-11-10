@@ -1897,6 +1897,7 @@ class MainWindow(QMainWindow):
         items = [("Livestream URL   (Twitch / YouTube - paste the link)", {"source": "stream"})]
         for i, (_, _, w, h) in enumerate(monitors, 1):
             items.append((f"Screen {i}   ·   {w} x {h}", {"source": "desktop", "monitor": i}))
+            items.append((f"Screen {i} HDR → SDR   ·   {w} x {h}", {"source": "desktop-hdr", "monitor": i}))
         items.append(("OBS Virtual Camera", {"source": "obs-camera"}))
         if not self.dashboard.url.text():
             self.dashboard.url.setText(live["url"])
@@ -1973,6 +1974,8 @@ class MainWindow(QMainWindow):
             "stream": "",
             "desktop": "Counts what is on that screen: play the stream (or the game) FULLSCREEN there. A small player inside "
                        "a web page is too small to read.",
+            "desktop-hdr": "Use this for an HDR screen that looks too bright in Live preview. Keep the game or stream "
+                           "fullscreen on that screen.",
             "obs-camera": "For your own OBS scene with the gameplay: click Start Virtual Camera in OBS." if found else
                           "OBS Virtual Camera was not found: open OBS Studio (28 or newer), click Start Virtual Camera, then "
                           "Refresh.",
@@ -2139,7 +2142,9 @@ class MainWindow(QMainWindow):
         if not data or self.workers_active() or self._install_pending or self.updates.state == UM.INSTALLING:
             return
         secondary = self.dashboard.secondary_source.currentData()
-        if secondary == data:
+        same_monitor = (secondary is not None and data.get("monitor") is not None
+                        and data.get("monitor") == secondary.get("monitor"))
+        if secondary == data or same_monitor:
             show_error(self, "Choose a different second video source, or select None.")
             return
         cfg, _ = load_cfg()
@@ -2152,7 +2157,7 @@ class MainWindow(QMainWindow):
             values = {"source": data["source"]}
             if data["source"] == "device":
                 values["device"] = data["device"]
-            if data["source"] == "desktop":
+            if data["source"] in ("desktop", "desktop-hdr"):
                 values["monitor"] = data["monitor"]
             if data["source"] == "window":
                 values["window"] = data["window"]

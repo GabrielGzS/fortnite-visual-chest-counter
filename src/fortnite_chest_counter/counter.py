@@ -1039,6 +1039,9 @@ def explain_source_failure(kind, label, error_text):
                 "    diagnostics to see the exact device names\n"
                 "  - Many capture cards can only be used by ONE program at a time. If OBS is already using it, "
                 "use OBS Virtual Camera (or a screen showing OBS's projector) instead.")
+    if kind == "desktop-hdr":
+        return ("Could not capture this HDR screen. Refresh the source list and select it again. "
+                f"HDR capture needs FFmpeg with 16-bit gfxcapture support.\n\nDetails: {error_text}")
     if kind == "desktop":
         return ("Could not capture the screen. Pick the screen again in the Video source list (Refresh), or count the "
                 "stream from its link (Livestream URL) instead.")
@@ -1337,7 +1340,7 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                 guard.requested.wait(0.5)
             if control is not None and control.requested.is_set():
                 stop_reason = control.reason                # the app's Stop ended the frame source
-            if stop_reason == "stream ended" and kind in ("obs-camera", "device", "desktop", "window", "stream") \
+            if stop_reason == "stream ended" and kind in ("obs-camera", "device", "desktop", "desktop-hdr", "window", "stream") \
                     and not (guard is not None and guard.requested.is_set()):
                 stop_reason = "video source stopped"
                 if kind == "window":
@@ -1982,12 +1985,12 @@ def build_parser():
     p.set_defaults(func=cmd_simulate)
 
     p = sub.add_parser("live", parents=[common], help="count chests from a live video source (the default)")
-    p.add_argument("--source", choices=["obs-camera", "device", "desktop", "window", "stream", "file"],
+    p.add_argument("--source", choices=settings.LIVE_SOURCES,
                    help="override [live] source")
     p.add_argument("--url", help="livestream URL for --source stream (Twitch / YouTube)")
     p.add_argument("--device", help="DirectShow device name for --source device")
     p.add_argument("--window", help="exact window title for --source window (an OBS Windowed Projector)")
-    p.add_argument("--monitor", type=int, help="monitor number for --source desktop")
+    p.add_argument("--monitor", type=int, help="monitor number for --source desktop or desktop-hdr")
     p.add_argument("--video", help="video file for --source file (played in real time; for testing)")
     p.add_argument("--start", type=float, help="start offset in seconds for --source file")
     p.add_argument("--duration", type=float, help="stop after this many seconds (default: run until Ctrl+C)")

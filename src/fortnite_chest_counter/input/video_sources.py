@@ -15,6 +15,7 @@ Backends (all passive pixel capture: nothing touches Fortnite, nothing runs on t
               some card drivers refuse a second reader while OBS holds the device.
   desktop     screen capture (gdigrab) of one monitor. Fallback for single-PC users: alt-tab,
               covering windows, resolution changes and overlays all corrupt what the detector sees.
+  desktop-hdr Windows Graphics Capture of an HDR monitor, tone-mapped to SDR for the detector.
   window      one window, captured with Windows Graphics Capture (FFmpeg `gfxcapture`): meant for an OBS
               "Windowed Projector (Source)" of the gameplay source. For streamers whose capture card is owned by
               OBS and whose Virtual Camera is used by another app. The window may sit behind other windows; a
@@ -37,6 +38,25 @@ from fortnite_chest_counter.detection import visual as V
 
 WIDTH, HEIGHT = V.NORMALIZED_WIDTH, V.NORMALIZED_HEIGHT
 FRAME_BYTES = WIDTH * HEIGHT * 3
+SRGB_LUT_MAX = 4095
+_linear = np.linspace(0, 1, SRGB_LUT_MAX + 1, dtype=np.float32)
+SRGB_LUT = np.rint(255 * np.where(_linear <= 0.0031308, 12.92 * _linear,
+                                  1.055 * _linear ** (1 / 2.4) - 0.055)).astype(np.uint8)
+
+
+def tone_map_scrgb(frame):
+    """Map linear scRGB to sRGB, compressing highlights without clipping individual channels."""
+    channels = [frame[..., i].astype(np.float32) for i in range(3)]
+    for channel in channels:
+        np.fmax(channel, 0, out=channel)
+        np.minimum(channel, 65504, out=channel)
+    peak = np.maximum(np.maximum(channels[0], channels[1]), channels[2])
+    shoulder = np.maximum(peak - 0.75, 0)
+    scale = SRGB_LUT_MAX * (0.75 + shoulder / (1 + 4 * shoulder)) / np.maximum(peak, 0.75)
+    output = np.empty((*frame.shape[:2], 3), dtype=np.uint8)
+    for index, channel in enumerate(channels):
+        output[..., index] = SRGB_LUT[np.rint(channel * scale).astype(np.int32)]
+    return output
 
 
 def list_video_devices():
@@ -48,8 +68,8 @@ def list_video_devices():
             if "Alternative name" not in m[0]]
 
 
-def list_monitors():
-    """Monitors as [(x, y, width, height)] in physical pixels (Windows)."""
+def list_monitors(include_handles=False):
+    """Monitor geometry in physical pixels (Windows), optionally followed by its HMONITOR."""
     import ctypes
     from ctypes import wintypes
     try:
@@ -62,9 +82,10 @@ def list_monitors():
     monitors = []
     proc_type = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
 
-    def callback(_monitor, _dc, rect, _data):
+    def callback(monitor, _dc, rect, _data):
         r = rect.contents
-        monitors.append((r.left, r.top, r.right - r.left, r.bottom - r.top))
+        geometry = (r.left, r.top, r.right - r.left, r.bottom - r.top)
+        monitors.append((*geometry, monitor) if include_handles else geometry)
         return 1
 
     ctypes.windll.user32.EnumDisplayMonitors(0, 0, proc_type(callback), 0)
@@ -72,8 +93,9 @@ def list_monitors():
 
 
 class LiveSource:
-    def __init__(self, label, input_args, fps):
+    def __init__(self, label, input_args, fps, hdr=False):
         self.label, self.input_args, self.fps = label, list(input_args), fps
+        self.hdr = hdr
         self.info = {"input_resolution": None, "input_fps": None}
         self._process, self._thread, self._err_thread = None, None, None
         self._cond = threading.Condition()
@@ -86,8 +108,9 @@ class LiveSource:
 
     # ---- lifecycle ----
     def open(self, timeout=20.0):
+        video_filter = f"fps={self.fps}" if self.hdr else f"scale={WIDTH}:{HEIGHT},fps={self.fps}"
         cmd = (["ffmpeg", "-hide_banner", "-loglevel", "info"] + self.input_args +
-               ["-vf", f"scale={WIDTH}:{HEIGHT},fps={self.fps}", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
+               ["-vf", video_filter, "-pix_fmt", "rgbaf16le" if self.hdr else "rgb24", "-f", "rawvideo", "-"])
         self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10 ** 8,
                                          stdin=paths.child_stdin(), creationflags=paths.child_process_flags())
         self._t0 = time.monotonic()
@@ -139,11 +162,13 @@ class LiveSource:
 
     def _read_frames(self):
         stream = self._process.stdout
+        size = WIDTH * HEIGHT * 8 if self.hdr else FRAME_BYTES
         while not self._stop:
-            raw = stream.read(FRAME_BYTES)
-            if len(raw) < FRAME_BYTES:
+            raw = stream.read(size)
+            if len(raw) < size:
                 break
-            frame = np.frombuffer(raw, np.uint8).reshape(HEIGHT, WIDTH, 3)
+            frame = (np.frombuffer(raw, "<f2").reshape(HEIGHT, WIDTH, 4) if self.hdr else
+                     np.frombuffer(raw, np.uint8).reshape(HEIGHT, WIDTH, 3))
             with self._cond:
                 self._latest = (time.monotonic() - self._t0, frame)
                 self._seq += 1
@@ -171,7 +196,8 @@ class LiveSource:
                 self.frames_dropped += seq - last - 1       # overwritten before the detector got to them
                 self.frames_processed += 1
                 last = seq
-                yield item
+                t, frame = item
+                yield t, tone_map_scrgb(frame) if self.hdr else frame
             elif self.on_idle is not None:
                 self.on_idle()
 
@@ -632,8 +658,17 @@ def make_source(kind, fps, device=None, monitor=1, video=None, start=0.0, durati
             raise ValueError(f"monitor {monitor} not found; available: 1..{len(monitors)}")
         x, y, w, h = monitors[monitor - 1]
         return LiveSource(f"desktop: monitor {monitor} ({w}x{h} at {x},{y})",
-                          ["-f", "gdigrab", "-draw_mouse", "0", "-framerate", "30", "-offset_x", str(x), "-offset_y", str(y),
+                          ["-f", "gdigrab", "-draw_mouse", "0", "-framerate", str(fps), "-offset_x", str(x), "-offset_y", str(y),
                            "-video_size", f"{w}x{h}", "-i", "desktop"], fps)
+    if kind == "desktop-hdr":
+        monitors = list_monitors(include_handles=True)
+        if not 1 <= monitor <= len(monitors):
+            raise ValueError(f"monitor {monitor} not found; available: 1..{len(monitors)}")
+        handle = monitors[monitor - 1][4]
+        # Preserve packed scRGB. FFmpeg's packed-to-planar RGB conversion can clip highlights.
+        graph = (f"gfxcapture=hmonitor={handle}:output_fmt=16bit:capture_cursor=0:max_framerate={fps}:"
+                 f"width={WIDTH}:height={HEIGHT}:resize_mode=scale,hwdownload,format=rgbaf16le")
+        return LiveSource(f"HDR screen: monitor {monitor}", ["-f", "lavfi", "-i", graph], fps, hdr=True)
     if kind == "window":
         if not window:
             raise ValueError("source 'window' needs a window title: pick the OBS projector in the app's Video source list, "

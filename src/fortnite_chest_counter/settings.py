@@ -63,7 +63,7 @@ DEFAULTS = {
         "dir": "captures",
     },
     "live": {
-        "source": "stream",                     # stream | desktop | obs-camera | device | window | file
+        "source": "stream",                     # stream | desktop | desktop-hdr | obs-camera | device | window | file
         "device": "OBS Virtual Camera",         # DirectShow device name for --source device
         "monitor": 1,                           # monitor number for --source desktop
         "window": "",                           # window title for --source window (an OBS "Windowed Projector (Source)")
@@ -90,7 +90,7 @@ DEFAULTS = {
 }
 
 _TIERS = ("CERTAIN", "HIGH")
-_SOURCES = ("obs-camera", "device", "desktop", "window", "stream", "file")
+LIVE_SOURCES = ("obs-camera", "device", "desktop", "desktop-hdr", "window", "stream", "file")
 STREAM_QUALITIES = ("720p", "1080p", "480p")
 # Livestream URL "Stream stability" (input/video_sources.STREAM_STABILITY holds the Streamlink values): key, name, text.
 STREAM_STABILITY_CHOICES = (
@@ -195,7 +195,7 @@ def _check(section, key, value):
     if key == "certain_min_tier":
         return (value in _TIERS, f"must be one of {list(_TIERS)}")
     if key == "source":
-        return (value in _SOURCES, f"must be one of {list(_SOURCES)}")
+        return (value in LIVE_SOURCES, f"must be one of {list(LIVE_SOURCES)}")
     if section == "capture" and key.endswith("_seconds"):
         return (isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 120,
                 "must be a whole number of seconds from 0 to 120")
