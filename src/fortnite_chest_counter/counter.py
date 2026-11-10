@@ -471,7 +471,7 @@ class CounterSession:
 def config_overrides(args):
     return {("detector", "process_fps"): getattr(args, "process_fps", None),
                  ("state", "path"): getattr(args, "state", None), ("state", "obs_dir"): getattr(args, "obs_dir", None),
-                 ("capture", "dir"): getattr(args, "capture_dir", None),
+                 ("capture", "mode"): getattr(args, "capture_mode", None),
                  ("logging", "dir"): getattr(args, "log_dir", None), ("live", "source"): getattr(args, "source", None),
                  ("live", "device"): getattr(args, "device", None), ("live", "monitor"): getattr(args, "monitor", None),
                  ("live", "window"): getattr(args, "window", None), ("live", "url"): getattr(args, "url", None)}
@@ -1997,7 +1997,7 @@ def build_parser():
     p.add_argument("--reset", action="store_true", help="zero the counts first (counts are otherwise kept)")
     p.add_argument("--gui", action="store_true", help=argparse.SUPPRESS)        # desktop-app worker: JSON lines, stdin stop
     p.add_argument("--preview", help=argparse.SUPPRESS)                         # desktop-app preview block name
-    p.add_argument("--capture-dir", help=argparse.SUPPRESS)                     # desktop-app secondary recordings
+    p.add_argument("--capture-mode", choices=settings.CAPTURE_MODES, help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_live)
 
     p = sub.add_parser("video", parents=[common], help="count chests in a recorded gameplay video file")

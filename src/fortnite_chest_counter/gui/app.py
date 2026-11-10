@@ -849,20 +849,34 @@ class Dashboard(QWidget):
         self.token_mode = QComboBox()
         self.token_mode.addItems(["Solo", "Duo", "Trio", "Squad"])
         self.token_mode.setToolTip("Mode utilisé pour l’estimation du jeton.")
+        self.token_boost = QComboBox()
+        for caption, multiplier in (("Normal ×1", 1.0), ("Boost ×1,5", 1.5), ("Boost ×2", 2.0)):
+            self.token_boost.addItem(caption, multiplier)
+        self.token_boost.setToolTip("Simulation du même taux pour tous les coffres du total affiché.")
         self.token_teammates = QSpinBox()
         self.token_teammates.setRange(0, 999_999)
         self.token_teammates.setToolTip("Coffres supplémentaires de tes coéquipiers, à saisir manuellement.")
         self.token_teammate_label = label("Coffres des coéquipiers")
         self.token_odds = label("", "hint", wrap=True)
-        self.token_odds.setToolTip("Estimation cumulative à 1 chance sur 137 500 par coffre en partie normale.")
-        for widget in (self.token_mode, self.token_teammate_label, self.token_teammates, self.token_odds):
+        self.token_odds.setToolTip("Estimation cumulative. Taux normal Epic de 1 sur 137 500 par coffre, "
+                                   "multiplié par le boost choisi pour tout le total affiché.")
+        for widget in (self.token_mode, self.token_boost, self.token_teammate_label, self.token_teammates, self.token_odds):
             token_row.addWidget(widget)
-        token_row.setStretch(3, 1)
+        token_row.setStretch(4, 1)
         layout.addLayout(token_row)
+        overlay_row = QHBoxLayout()
         self.show_screen_overlay = QCheckBox("Overlay à l’écran")
         self.show_screen_overlay.toggled.connect(self.toggle_screen_overlay)
-        token_row.addWidget(self.show_screen_overlay)
+        overlay_row.addWidget(self.show_screen_overlay)
+        self.share_screen_overlay = QCheckBox("Visible dans le partage d’écran")
+        self.share_screen_overlay.setToolTip("Autorise la capture de l’overlay quand tu partages cet écran sur Discord.")
+        self.share_screen_overlay.setEnabled(False)
+        self.share_screen_overlay.toggled.connect(self.apply_screen_overlay_capture)
+        overlay_row.addWidget(self.share_screen_overlay)
+        overlay_row.addStretch()
+        layout.addLayout(overlay_row)
         self.token_mode.currentIndexChanged.connect(lambda _: self.update_token_odds())
+        self.token_boost.currentIndexChanged.connect(lambda _: self.update_token_odds())
         self.token_teammates.valueChanged.connect(lambda _: self.update_token_odds())
         self.update_token_odds()
         types = QHBoxLayout()                                 # v0.2.2: read-only chest-type split of the APPROX total
@@ -1016,12 +1030,15 @@ class Dashboard(QWidget):
         self.token_teammate_label.setVisible(group)
         self.token_teammates.setVisible(group)
         total = max(0, self.win.counts[1]) + (self.token_teammates.value() if group else 0)
-        probability = -math.expm1(min(total, 10_000_000) * math.log1p(-1 / PIRATE_TOKEN_RATE)) if total else 0
+        boost = self.token_boost.currentData()
+        probability = -math.expm1(min(total, 10_000_000) * math.log1p(-boost / PIRATE_TOKEN_RATE)) if total else 0
         chance = f"{probability:.6%}".replace(".", ",").replace("%", " %")
-        self.token_odds.setText(f"Jeton pirate · {chance} · {total} coffres")
+        scenario = f" · {self.token_boost.currentText()} sur tout le total" if boost > 1 else ""
+        self.token_odds.setText(f"Jeton pirate · {chance} · {total} coffres{scenario}")
         self.refresh_screen_overlay()
 
     def toggle_screen_overlay(self, enabled):
+        self.share_screen_overlay.setEnabled(enabled)
         if not enabled:
             if self.screen_overlay is not None:
                 self.screen_overlay.hide()
@@ -1032,12 +1049,17 @@ class Dashboard(QWidget):
             self.screen_overlay = QLabel(None, flags)
             self.screen_overlay.setAttribute(Qt.WA_ShowWithoutActivating)
             self.screen_overlay.setTextFormat(Qt.PlainText)
-            self.screen_overlay.setStyleSheet("background: #141924; color: #ffffff; padding: 8px 12px; font-weight: 600;")
+            self.screen_overlay.setStyleSheet("background: #141924; color: #ffffff; padding: 10px 16px; "
+                                              "font-size: 16px; font-weight: 600;")
         self.reload_screen_overlay()
         self.screen_overlay.show()
-        if sys.platform == "win32":
+        self.apply_screen_overlay_capture()
+
+    def apply_screen_overlay_capture(self):
+        if sys.platform == "win32" and self.screen_overlay is not None:
             hwnd = ctypes.c_void_p(int(self.screen_overlay.winId()))
-            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11)  # WDA_EXCLUDEFROMCAPTURE
+            affinity = 0 if self.share_screen_overlay.isChecked() else 0x11  # WDA_NONE or WDA_EXCLUDEFROMCAPTURE
+            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, affinity)
 
     def reload_screen_overlay(self):
         if self.show_screen_overlay.isChecked():
@@ -1068,7 +1090,7 @@ class Dashboard(QWidget):
                           screen)
         if screen is not None:
             area = screen.availableGeometry()
-            self.screen_overlay.move(area.center().x() - self.screen_overlay.width() // 2, area.top() + 16)
+            self.screen_overlay.move(area.left() + 16, area.top() + 16)
 
     def _panels(self):
         self.log.setVisible(self.show_log.isChecked())
@@ -2255,7 +2277,7 @@ class MainWindow(QMainWindow):
             cfg = self._secondary_cfg(cfg)
             argv = ["live", "--gui", *self.source_args(secondary),
                     "--state", cfg["state"]["path"], "--obs-dir", cfg["state"]["obs_dir"],
-                    "--log-dir", cfg["logging"]["dir"], "--capture-dir", cfg["capture"]["dir"]]
+                    "--log-dir", cfg["logging"]["dir"], "--capture-mode", "off"]
             try:
                 self.secondary_worker.start(argv)
             except OSError as error:
@@ -2778,8 +2800,7 @@ class MainWindow(QMainWindow):
         root = state.parent
         return {**cfg,
                 "state": {**cfg["state"], "path": str(state), "obs_dir": str(root / "obs_output")},
-                "logging": {**cfg["logging"], "dir": str(root / "logs")},
-                "capture": {**cfg["capture"], "dir": str(root / "captures")}}
+                "logging": {**cfg["logging"], "dir": str(root / "logs")}}
 
     def edit_counts(self):
         dialog = CountsDialog(self, *self.primary_counts)
@@ -2836,8 +2857,6 @@ class MainWindow(QMainWindow):
         """Mark button / Ctrl+Alt+M: keep the video around this moment. Only while a recording is running - without one
         there is no video to keep, and the app says so instead of pretending."""
         if self.mark_available():
-            if self.secondary_worker.running():
-                self.secondary_worker.send("mark")
             return self.worker.send("mark")
         why = ("start counting first" if self.mode != "counting" else
                "diagnostic recording is off - choose 'Only around my marks' on the Dashboard (it keeps the 30 s before "
@@ -2857,8 +2876,6 @@ class MainWindow(QMainWindow):
             show_error(self, f"Could not save the recording choice: {error}")
         if self.worker.running():
             self.worker.send(f"capture {mode}")
-        if self.secondary_worker.running():
-            self.secondary_worker.send(f"capture {mode}")
         self.update_recording_ui()
 
     def update_recording_ui(self):

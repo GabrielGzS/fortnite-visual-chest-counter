@@ -170,6 +170,27 @@ def test_french_chest_popups_count_once_including_the_storm():
     assert counted[0]["time"] < 6 and counted[1]["time"] >= 12
 
 
+def test_sharp_french_chest_can_be_confirmed_after_hud_rescaling():
+    defaults = settings.DEFAULTS["detector"]
+    E.configure(dict(defaults, languages=["fr"]))
+    try:
+        estimator = E.ChestEstimator()
+        events = []
+        for t, frame in frames("french_chest"):
+            if t >= 12:
+                break
+            roi = frame[V.ROI_Y:V.ROI_Y + V.ROI_H, V.ROI_X:V.ROI_X + V.ROI_W]
+            enlarged = V.resize_box(roi, round(V.ROI_W / 0.9), round(V.ROI_H / 0.9))
+            roi[:] = enlarged[:V.ROI_H, :V.ROI_W]
+            events.extend(estimator.process_frame(t, frame))
+        events.extend(estimator.flush())
+    finally:
+        E.configure(defaults)
+    counted = [event for event in events if event["approx_counted"]]
+    assert len(counted) == 1 and counted[0]["certain_counted"]
+    assert counted[0]["scaled_popup"]["confirmed"]
+
+
 def test_five_chest_vault_counts_every_step_including_the_third_lines_x2():
     counted = check("replays_vault_five_chests")
     assert sorted((e.get("increment") or {}).get("kind") or "new" for e in counted) == \

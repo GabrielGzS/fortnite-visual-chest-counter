@@ -94,13 +94,14 @@ ROBUST_SEARCH_PX = 8          # the blurred match is searched within this many p
 #   - a blurred onset becomes a pop-up only when the exact path has not fired within SCALED_WAIT seconds of it, so every
 #     exact-path event (incl. back-to-back chests and the CERTAIN rules) is exactly as before
 #   - no "position jumped" re-fire (a stacked "WEAKPOINT STREAK / CHEST" pop-up would count twice)
-#   - such a pop-up is merged with prompts like any pop-up and counts APPROX ONLY (MEDIUM), never CERTAIN.
+#   - such a pop-up is merged with prompts like any pop-up. French can also earn HIGH after repeated sharp matches.
 # Validation: event-identical on every reference clip (English and PS5, clean and compressed); on three large-HUD sessions
 # 11 of 11 verified chests (exact path alone: 3), 0 duplicates, 0 wrong counts.
 SCALE_AWARE_POPUPS = True
 SCALED_POPUP_TEMPLATES = ("en:CHEST", "fr:COFFRE")  # used only when the word counts MEDIUM alone
 SCALED_SCALES = (1.0, 0.9, 0.85, 0.8, 0.75)  # picture made smaller = HUD drawn larger
 SCALED_TRIGGER = 0.80
+FRENCH_SCALED_CONFIRM_FRAMES = 3
 SCALED_REARM = 0.55
 SCALED_PREFILTER_PX = 60
 SCALED_WAIT = 2.0
@@ -235,6 +236,7 @@ class ChestEstimator:
             raise ValueError(f"no chest-word template for languages {sorted(ENABLED_LANGUAGES)}; "
                              f"available: {[t['id'] for t in V.CHEST_TEMPLATES]}")
         self.robust_templates = {t["id"]: V.blur_template(t["array"], ROBUST_SIGMA) for t in self.templates}
+        self.french_template = next((t["array"] for t in self.templates if t["id"] == "fr:COFFRE"), None)
         self.sprite_template = sprite_detector.load_or_build_template()
         evidence.load_disc_template()
         self.popup = OnsetDetector(V.EVENT_HIGH_THRESHOLD, V.EVENT_LOW_THRESHOLD, True)
@@ -469,7 +471,7 @@ class ChestEstimator:
             self.pending_scaled = kept
         while self.exact_onsets and self.exact_onsets[0] < t - SCALED_WAIT - 1.0:
             self.exact_onsets.popleft()
-        best = (0.0, 0, 0, 1.0, None)
+        best = (0.0, 0, 0, 1.0, None, False)
         small = (0.0, 0.0, 0, 0)
         if mask.sum() >= SCALED_PREFILTER_PX:
             a = time.perf_counter()
@@ -485,22 +487,32 @@ class ChestEstimator:
             st["search_ms_max"] = max(st["search_ms_max"], ms)
         if self.small is not None:
             self._small_popup(t, roi, small)
-        score, cy, cx, s, tid = best
-        for p in self.pending_scaled:                       # keep the peak over the pop-up's first second
-            if not p.get("small") and t <= p["onset"] + POPUP_FINISH_DELAY and score > p["blur"]:
-                p.update(blur=score, scale=s, y=cy, x=cx)
-                if SAVE_SNAPSHOTS:
-                    p["roi"] = roi.copy()
+        score, cy, cx, s, tid, strong = best
         if self.scaled_onset.update(t, score, cy, cx):
             if not any(abs(o - t) <= SCALED_WAIT for o in self.exact_onsets) and \
                     not any(abs(p["onset"] - t) <= POPUP_FINISH_DELAY for p in self.pending_popups):
                 self.pending_scaled.append({"onset": t, "blur": score, "scale": s, "y": cy, "x": cx, "template": tid})
+                if tid == "fr:COFFRE":
+                    self.pending_scaled[-1]["origin"] = (s, cy, cx)
                 if SAVE_SNAPSHOTS:
                     self.pending_scaled[-1]["roi"] = roi.copy()
                 self.scaled_stats["onsets"] += 1
                 if s == 1.0 and tid == self.stack_word:
                     self.pending_scaled[-1]["run"] = self._track(t, "normal", {"blur": score, "scale": s}, (cy, cx))
         for p in list(self.pending_scaled):                 # not claimed by the exact path in time -> a pop-up
+            if not p.get("small") and t <= p["onset"] + POPUP_FINISH_DELAY:
+                origin = p.get("origin")
+                same = (origin is None or (tid == p["template"] and s == origin[0]
+                                           and abs(origin[1] - cy) <= 5 and abs(origin[2] - cx) <= 5))
+                if same and score > p["blur"]:
+                    p.update(blur=score, scale=s, y=cy, x=cx)
+                    if SAVE_SNAPSHOTS:
+                        p["roi"] = roi.copy()
+                if origin is not None:
+                    count = p.get("confirmation_frames", 0) + 1 if same and strong else 0
+                    p["confirmation_frames"] = count
+                    if count >= FRENCH_SCALED_CONFIRM_FRAMES:
+                        p["confirmed"] = True
             if t >= p["onset"] + SCALED_WAIT:
                 self.pending_scaled.remove(p)
                 self._promote_scaled(p)
@@ -548,8 +560,9 @@ class ChestEstimator:
         return SCALED_SCALES[max(0, i - 1):i + 2]
 
     def _scaled_best(self, roi, mask):
-        """Best blurred match over the active scales -> (score, centre y, centre x in pop-up box pixels, scale, template)."""
+        """Best blurred match, with a sharp-glyph check at the same position for French."""
         best = (0.0, 0, 0, 1.0, None)
+        winner = None
         for s in self._scaled_scales():
             m = mask if s == 1.0 else V.lavender_mask(V.resize_box(roi, round(roi.shape[1] * s), round(roi.shape[0] * s)))
             if m.sum() < 20:
@@ -559,7 +572,15 @@ class ChestEstimator:
                 if score > best[0]:
                     h, w = tpl.shape
                     best = (score, int((y + h // 2) / s), int((x + w // 2) / s), s, tid)
-        return best
+                    winner = (m, y + h // 2, x + w // 2)
+        strong = False
+        if best[4] == "fr:COFFRE" and best[0] >= ROBUST_HIGH_MIN:
+            m, y, x = winner
+            h, w = self.french_template.shape
+            region = m[max(0, y - h // 2 - 3):y + h // 2 + 4, max(0, x - w // 2 - 3):x + w // 2 + 4]
+            if region.shape[0] >= h and region.shape[1] >= w:
+                strong = V.best_template_correlation(region, self.french_template)[0] >= V.EVENT_HIGH_THRESHOLD
+        return (*best, strong)
 
     def _promote_scaled(self, p):
         """A blurred onset the exact path did not claim becomes a pending pop-up (finished and counted like any other)."""
@@ -571,6 +592,8 @@ class ChestEstimator:
                  "scaled": {"blur": p["blur"], "scale": p["scale"]}}
         if p.get("small"):
             popup["scaled"]["exact_small"] = p.get("exact_small", 0.0)
+        if p.get("confirmed"):
+            popup["scaled"]["confirmed"] = True
         if p.get("run") is not None:
             popup["slot"] = ("small" if p.get("small") else "normal", p["run"], "first")
         if "roi" in p:
@@ -712,10 +735,14 @@ class ChestEstimator:
                       f"{scaled['blur']:.2f} (HUD drawn ~0.8x; normal-word match {p['score']:.2f}) -> MEDIUM, counted "
                       f"approx only (never CERTAIN)")
         elif scaled is not None:
-            # HUD drawn larger: the exact score says nothing here, so the tier rules above do not apply. APPROX only.
+            # The unscaled exact score does not apply here. A French glyph can earn HIGH after rescaling.
             adjusted, certain, approx = "MEDIUM", False, True
             reason = (f"scale-aware pop-up: blurred {p['template']} match {scaled['blur']:.2f} at x{scaled['scale']} "
-                      f"(exact match {p['score']:.2f}; HUD drawn larger) -> MEDIUM, counted approx only (never CERTAIN)")
+                      f"(unscaled exact match {p['score']:.2f}) -> MEDIUM, counted approx only")
+            if scaled.get("confirmed"):
+                adjusted = "HIGH"
+                certain = adjusted in CERTAIN_TIERS
+                reason = "French COFFRE matched sharply across three aligned frames after resizing -> HIGH"
         if inc is not None:
             step = {"new_line": "a chest line was added to the pop-up on screen",
                     "multiplier": "the chest line's multiplier " + ("appeared (X2)" if inc.get("change") == "appeared"
@@ -737,6 +764,8 @@ class ChestEstimator:
         extra.update(chest_type=kind, type_confidence=confidence, type_evidence=type_evidence)
         if scaled is not None:
             extra["scaled_popup"] = {"blur": round(float(scaled["blur"]), 3), "scale": scaled["scale"]}
+            if scaled.get("confirmed"):
+                extra["scaled_popup"]["confirmed"] = True
         if inc is not None:
             extra["increment"] = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in inc.items()}
         event = {**extra, "time": onset, "source": "fused" if merged is not None else "popup",

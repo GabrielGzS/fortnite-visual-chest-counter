@@ -303,10 +303,18 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
             win.timer.stop()
             win.set_counts(5, 10)
             assert "0,007272 % · 10 coffres" in win.dashboard.token_odds.text()
+            win.dashboard.token_boost.setCurrentIndex(1)
+            assert "0,010909 % · 10 coffres · Boost ×1,5" in win.dashboard.token_odds.text()
+            win.dashboard.token_boost.setCurrentIndex(2)
+            assert "0,014545 % · 10 coffres · Boost ×2" in win.dashboard.token_odds.text()
+            win.dashboard.token_boost.setCurrentIndex(0)
             win.dashboard.show_screen_overlay.setChecked(True)
             overlay = win.dashboard.screen_overlay
             assert overlay.windowFlags() & Qt.WindowTransparentForInput
             assert overlay.windowFlags() & Qt.WindowStaysOnTopHint
+            assert win.dashboard.share_screen_overlay.isEnabled()
+            assert not win.dashboard.share_screen_overlay.isChecked()
+            win.dashboard.share_screen_overlay.setChecked(True)
             assert overlay.text().splitlines() == [
                 "CERTAIN OPENED CHESTS: 5", "APPROX. OPENED CHESTS: 10",
                 win.dashboard.token_odds.text(),
@@ -323,6 +331,7 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
             assert "0,000000 %" in overlay.text()
             win.dashboard.show_screen_overlay.setChecked(False)
             assert overlay.isHidden()
+            assert not win.dashboard.share_screen_overlay.isEnabled()
             win.dashboard.token_teammates.setValue(10)
             win.profile_changed()
             assert win.dashboard.token_teammates.value() == 0
@@ -413,6 +422,7 @@ def test_second_source_combines_counts_resets_and_can_stop_independently():
             win.start_counting()
             assert "--profile" in win.worker.argv and "--state" not in win.worker.argv
             assert win.secondary_worker.argv[2:6] == ["--source", "desktop", "--monitor", "2"]
+            assert win.secondary_worker.argv[-2:] == ["--capture-mode", "off"]
             win.handle({"type": "connected"})
             win.handle_secondary({"type": "connected"})
             win.handle({"type": "counts", "certain": 5, "approx": 10})

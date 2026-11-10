@@ -51,11 +51,17 @@ def tone_map_scrgb(frame):
         np.fmax(channel, 0, out=channel)
         np.minimum(channel, 65504, out=channel)
     peak = np.maximum(np.maximum(channels[0], channels[1]), channels[2])
+    low = np.minimum(np.minimum(channels[0], channels[1]), channels[2])
+    # Desaturate vivid colors gradually, keeping the pale lavender XP text largely intact.
+    mix = np.maximum(0.25 * (peak - low) - 0.1 * peak, 0) / np.maximum(peak, 0.01)
+    neutral = 0.5 * peak * mix
     shoulder = np.maximum(peak - 0.75, 0)
     scale = SRGB_LUT_MAX * (0.75 + shoulder / (1 + 4 * shoulder)) / np.maximum(peak, 0.75)
+    colored_scale = scale * (1 - mix)
+    neutral *= scale
     output = np.empty((*frame.shape[:2], 3), dtype=np.uint8)
     for index, channel in enumerate(channels):
-        output[..., index] = SRGB_LUT[np.rint(channel * scale).astype(np.int32)]
+        output[..., index] = SRGB_LUT[np.rint(channel * colored_scale + neutral).astype(np.int32)]
     return output
 
 
@@ -93,9 +99,10 @@ def list_monitors(include_handles=False):
 
 
 class LiveSource:
-    def __init__(self, label, input_args, fps, hdr=False):
+    def __init__(self, label, input_args, fps, hdr=False, soften_sdr=False):
         self.label, self.input_args, self.fps = label, list(input_args), fps
         self.hdr = hdr
+        self.soften_sdr = soften_sdr
         self.info = {"input_resolution": None, "input_fps": None}
         self._process, self._thread, self._err_thread = None, None, None
         self._cond = threading.Condition()
@@ -109,6 +116,8 @@ class LiveSource:
     # ---- lifecycle ----
     def open(self, timeout=20.0):
         video_filter = f"fps={self.fps}" if self.hdr else f"scale={WIDTH}:{HEIGHT},fps={self.fps}"
+        if self.soften_sdr:
+            video_filter += ",format=rgb24,huesaturation=saturation=-0.10:lightness=1"
         cmd = (["ffmpeg", "-hide_banner", "-loglevel", "info"] + self.input_args +
                ["-vf", video_filter, "-pix_fmt", "rgbaf16le" if self.hdr else "rgb24", "-f", "rawvideo", "-"])
         self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10 ** 8,
@@ -659,7 +668,7 @@ def make_source(kind, fps, device=None, monitor=1, video=None, start=0.0, durati
         x, y, w, h = monitors[monitor - 1]
         return LiveSource(f"desktop: monitor {monitor} ({w}x{h} at {x},{y})",
                           ["-f", "gdigrab", "-draw_mouse", "0", "-framerate", str(fps), "-offset_x", str(x), "-offset_y", str(y),
-                           "-video_size", f"{w}x{h}", "-i", "desktop"], fps)
+                           "-video_size", f"{w}x{h}", "-i", "desktop"], fps, soften_sdr=True)
     if kind == "desktop-hdr":
         monitors = list_monitors(include_handles=True)
         if not 1 <= monitor <= len(monitors):
