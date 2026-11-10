@@ -23,12 +23,12 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QPoint, QRect, QSize, Qt, QTimer, QUrl, QUrlQuery
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon, QImage, QPainter, QPalette, QPixmap
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+from PySide6.QtCore import QByteArray, QEasingCurve, QPoint, QRect, QRectF, QSize, Qt, QTimer, QUrl, QUrlQuery, QVariantAnimation
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPalette, QPixmap, QRegion
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
-                               QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QVBoxLayout, QWidget)
+                               QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QStyledItemDelegate, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
 from fortnite_chest_counter import diagnostics_cleanup, paths, profiles, settings
@@ -341,8 +341,9 @@ class PromptDialog(ThemedDialog):
         if no is not None:
             cancel = button(no, on_click=self.reject)
             cancel.setAutoDefault(False)
-            actions.addWidget(cancel)
-        actions.addWidget(confirm)
+            actions.addLayout(connected_buttons(cancel, confirm))
+        else:
+            actions.addWidget(confirm)
         self.content.addLayout(actions)
         if danger and no is not None:
             confirm.setAutoDefault(False)
@@ -479,11 +480,59 @@ class CountCard(QFrame):
         self.value.setText(text)
 
 
+class MaterialMenuItems(QStyledItemDelegate):
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        size.setHeight(max(size.height(), 48))
+        return size
+
+
+class MaterialComboBox(QComboBox):
+    """Use Qt's menu interaction with a themed popup and a brief fade."""
+
+    def __init__(self):
+        super().__init__()
+        self.setItemDelegate(MaterialMenuItems(self))
+        self._popup_window = None
+        self._popup_motion = QVariantAnimation(self)
+        self._popup_motion.setDuration(130)
+        self._popup_motion.setStartValue(0.2)
+        self._popup_motion.setEndValue(1.0)
+        self._popup_motion.setEasingCurve(QEasingCurve.OutCubic)
+
+    def showPopup(self):
+        if not self.count():
+            return
+        popup = self.view().window()
+        if not isinstance(popup, QFrame) or popup.windowType() != Qt.Popup:
+            super().showPopup()
+            return
+        popup.setObjectName("comboPopup")
+        popup.setFrameShape(QFrame.NoFrame)
+        self._popup_motion.stop()
+        if self._popup_window is None:
+            self._popup_window = popup
+            self._popup_motion.valueChanged.connect(popup.setWindowOpacity)
+        animate = theme.animations_enabled()
+        popup.setWindowOpacity(0.2 if animate else 1.0)
+        super().showPopup()
+        if animate:
+            self._popup_motion.start()
+
+    def hidePopup(self):
+        self._popup_motion.stop()
+        super().hidePopup()
+        popup = self.view().window()
+        if popup.windowType() == Qt.Popup:
+            popup.setWindowOpacity(1.0)
+
+
 class ScreenOverlayCard(QFrame):
     """The same on-screen overlay content in settings and in the floating window."""
 
     def __init__(self, flags=Qt.Widget):
         super().__init__(None, flags)
+        self._floating = flags != Qt.Widget
         self.setObjectName("overlayBox")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(9, 6, 13, 6)
@@ -494,6 +543,14 @@ class ScreenOverlayCard(QFrame):
         self.caption.setTextFormat(Qt.PlainText)
         self.caption.setMaximumWidth(720)
         layout.addWidget(self.caption, 1)
+
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._floating:
+            shape = QPainterPath()
+            shape.addRoundedRect(QRectF(self.rect()), 14, 14)
+            self.setMask(QRegion(shape.toFillPolygon().toPolygon()))
 
 
 class PreviewPanel(QFrame):
@@ -571,10 +628,11 @@ class CountsDialog(ThemedDialog):
         self.problem = label("", "hint")
         self.problem.setStyleSheet(f"color: {theme.REJECT};")
         layout.addWidget(self.problem)
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        save = button("Save", "primary", on_click=self._accept)
+        save.setDefault(True)
+        actions = connected_buttons(button("Cancel", on_click=self.reject), save)
+        actions.insertStretch(0, 1)
+        layout.addLayout(actions)
         self.approx.valueChanged.connect(self._check)
         self.certain.valueChanged.connect(self._check)
 
@@ -886,8 +944,12 @@ class Dashboard(QWidget):
         top.addWidget(header)
         top.addStretch(1)
         self.pill = label("", "pill")
+        self.show_capture = button("Capture settings", "toggle")
+        self.show_capture.setCheckable(True)
         self.start = button("Start counting", "primary", on_click=win.toggle_counting)
-        top.addWidget(self.start)
+        for action in (self.show_capture, self.start):
+            action.setMinimumHeight(36)
+        top.addLayout(connected_buttons(self.show_capture, self.start))
         layout.insertLayout(0, top)
 
         # error banner
@@ -921,9 +983,6 @@ class Dashboard(QWidget):
         self.source_summary = label("", "hint", wrap=True)
         self.source_summary.setTextFormat(Qt.PlainText)
         source_row.addWidget(self.source_summary, 1)
-        self.show_capture = button("Capture settings", "toggle")
-        self.show_capture.setCheckable(True)
-        source_row.addWidget(self.show_capture)
         sources_layout.addLayout(source_row)
         self.metrics = label("", "metrics", wrap=True)
         self.metrics.hide()
@@ -949,10 +1008,10 @@ class Dashboard(QWidget):
         odds_title = label("PIRATE TOKEN CHANCE", "countLabel")
         stage_layout.addWidget(odds_title, 0, Qt.AlignHCenter)
         token_row = QHBoxLayout()
-        self.token_mode = QComboBox()
+        self.token_mode = MaterialComboBox()
         self.token_mode.addItems(["Solo", "Duo", "Trio", "Squad"])
         self.token_mode.setToolTip("Current game mode. Odds use the same total in every mode.")
-        self.token_boost = QComboBox()
+        self.token_boost = MaterialComboBox()
         for caption, multiplier in (("Normal ×1", 1.0), ("Boost ×1.5", 1.5), ("Boost ×2", 2.0)):
             self.token_boost.addItem(caption, multiplier)
         self.token_boost.setToolTip("Apply this multiplier to every chest in the estimate.")
@@ -997,7 +1056,13 @@ class Dashboard(QWidget):
         board.addWidget(rail, 4)
         layout.addLayout(board)
         self.update_token_odds()
-        types = QHBoxLayout()                                 # v0.2.2: read-only chest-type split of the APPROX total
+        overlay_card, overlay_layout = card()
+        overlay_header = QHBoxLayout()
+        overlay_header.addWidget(label("On-screen overlay", "cardTitle"))
+        overlay_header.addStretch(1)
+        overlay_header.addWidget(button("Overlay settings", on_click=lambda: win.go_to(1)))
+        overlay_layout.addLayout(overlay_header)
+        types = QHBoxLayout()
         types.addWidget(label("Chest types:", "hint"), 0, Qt.AlignTop)
         self.types = label("", "hint", wrap=True)
         self.types.setToolTip("How the total counted chests split by type. Read from each chest's pop-up "
@@ -1005,17 +1070,14 @@ class Dashboard(QWidget):
                               "'Not classified' = chests counted before v0.2.2, or set with Edit counts. "
                               "OBS still shows only the two totals.")
         types.addWidget(self.types, 1)
-        layout.addLayout(types)
-        viewers = QHBoxLayout()
-        viewers.addWidget(label("On-screen overlay:", "hint"), 0, Qt.AlignTop)
-        self.viewers = label("", "hint", wrap=True)
-        self.viewers.setStyleSheet(f"color: {theme.TEXT};")
-        viewers.addWidget(self.viewers, 1)
-        viewers.addWidget(button("Change what viewers see", "link", on_click=lambda: win.go_to(1)))
-        layout.addLayout(viewers)
+        overlay_layout.addLayout(types)
+        self.viewers = label("", wrap=True)
+        self.viewers.setTextFormat(Qt.PlainText)
+        overlay_layout.addWidget(self.viewers)
         self.obs_line = label("", "hint", wrap=True)          # OBS WebSocket output status (only while it is on)
         self.obs_line.hide()
-        layout.addWidget(self.obs_line)
+        overlay_layout.addWidget(self.obs_line)
+        layout.addWidget(overlay_card)
 
         box, box_layout = card("Capture settings")
         inputs = QGridLayout()
@@ -1023,7 +1085,7 @@ class Dashboard(QWidget):
         inputs.setHorizontalSpacing(12)
         inputs.setVerticalSpacing(8)
         inputs.addWidget(label("Profile"), 0, 0)
-        self.profile = QComboBox()
+        self.profile = MaterialComboBox()
         self.profile.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.profile.setMinimumContentsLength(10)
         self.profile.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1043,7 +1105,7 @@ class Dashboard(QWidget):
         inputs.addLayout(profile_row, 0, 1, 1, 2)
 
         inputs.addWidget(label("Source 1"), 1, 0)
-        self.source = QComboBox()
+        self.source = MaterialComboBox()
         self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.source.setMinimumContentsLength(12)
         self.source.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1051,7 +1113,7 @@ class Dashboard(QWidget):
         self.refresh = button("Refresh", tip="Look for video devices and screens again", on_click=win.refresh_sources)
         inputs.addWidget(self.refresh, 1, 2)
         inputs.addWidget(label("Source 2"), 2, 0)
-        self.secondary_source = QComboBox()
+        self.secondary_source = MaterialComboBox()
         self.secondary_source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.secondary_source.setMinimumContentsLength(12)
         self.secondary_source.addItem("None (optional)")
@@ -1075,7 +1137,7 @@ class Dashboard(QWidget):
         self.update_source_summary()
         stab = QHBoxLayout()
         stab.addWidget(label("Stream stability"))
-        self.stability = QComboBox()
+        self.stability = MaterialComboBox()
         for key, name, _ in settings.STREAM_STABILITY_CHOICES:
             self.stability.addItem(name, key)
         stab.addWidget(self.stability, 1)
@@ -1103,7 +1165,7 @@ class Dashboard(QWidget):
                               on_click=win.analyse_video)
         row = QHBoxLayout()
         row.addWidget(label("Diagnostic recording"))
-        self.rec_mode = QComboBox()
+        self.rec_mode = MaterialComboBox()
         for text, mode in RECORDING_CHOICES:
             self.rec_mode.addItem(text, mode)
         self.rec_mode.setToolTip("Keeps the video the counter analysed so a missed chest can be replayed and checked. "
@@ -1126,7 +1188,7 @@ class Dashboard(QWidget):
         self.show_preview.setCheckable(True)
         row.addLayout(connected_buttons(self.show_log, self.show_preview))
         row.addStretch(1)
-        self.detail = QComboBox()
+        self.detail = MaterialComboBox()
         self.detail.addItem("Normal detail", "normal")
         self.detail.addItem("Debug detail", "debug")
         self.detail.setToolTip("Debug adds every candidate, the full reason for each decision and status lines")
@@ -1381,12 +1443,23 @@ class OverlayPage(QWidget):
         box, box_layout = card("Chest counts on screen and in OBS")
         self.modes = QButtonGroup(self)
         self.mode_buttons = {}
-        for i, mode in enumerate(("stacked", "inline", "approx", "certain")):
-            radio = QRadioButton()
+        self.mode_examples = {}
+        choices = (("stacked", "Both counts on two lines"), ("inline", "Both counts on one line"),
+                   ("approx", "Estimated openings only"), ("certain", "Confirmed openings only"))
+        for i, (mode, caption) in enumerate(choices):
+            radio = QRadioButton(caption)
             self.modes.addButton(radio, i)
             self.mode_buttons[mode] = radio
-            box_layout.addWidget(radio)
+            example = label("", "hint", wrap=True)
+            example.setTextFormat(Qt.PlainText)
+            self.mode_examples[mode] = example
+            row = QHBoxLayout()
+            row.addWidget(radio)
+            row.addWidget(example, 1)
+            box_layout.addLayout(row)
             radio.toggled.connect(self._changed)
+        box_layout.addWidget(label("Examples use the combined on-screen counts. The OBS text file still uses the primary source.",
+                                   "hint", wrap=True))
         self.show_token = QCheckBox("Show Pirate Token odds on screen")
         self.show_types = QCheckBox("Show chest types on screen")
         for toggle in (self.show_token, self.show_types):
@@ -1400,7 +1473,7 @@ class OverlayPage(QWidget):
         form.setVerticalSpacing(8)
         self.certain_label = label("Confirmed chests (CERTAIN)")
         self.certain_text = QLineEdit()
-        self.approx_label = label("Estimated total (APPROX)")
+        self.approx_label = label("Estimated openings (APPROX)")
         self.approx_text = QLineEdit()
         self.total_text = QLineEdit()
         self.total_text.setToolTip("Use # for the total shown next to the on-screen chest counts.")
@@ -1408,7 +1481,7 @@ class OverlayPage(QWidget):
         self.token_text.setToolTip("Use # for the Pirate Token probability, including the percent sign.")
         self.line_label = label("One line")
         self.line_text = QLineEdit()
-        self.line_text.setToolTip("#C = confirmed number, #A = estimated total, e.g.  #C confirmed - #A total")
+        self.line_text.setToolTip("#C = confirmed number, #A = estimated openings, e.g.  #C confirmed - #A estimated")
         for row, (lab, edit) in enumerate(((self.certain_label, self.certain_text), (self.approx_label, self.approx_text),
                                            (self.line_label, self.line_text), (label("On-screen total"), self.total_text),
                                            (label("Pirate Token"), self.token_text))):
@@ -1417,7 +1490,7 @@ class OverlayPage(QWidget):
             edit.textChanged.connect(self._changed)
         form.setColumnStretch(1, 1)
         box_layout.addLayout(form)
-        self.line_hint = label("For one line: #C = confirmed number, #A = estimated total.", "hint")
+        self.line_hint = label("For one line: #C = confirmed openings, #A = estimated openings.", "hint")
         box_layout.addWidget(self.line_hint)
         self.thousands = QCheckBox("Thousands separator (1,234 instead of 1234)")
         self.thousands.toggled.connect(self._changed)
@@ -1471,7 +1544,7 @@ class OverlayPage(QWidget):
         self.ws_port.setRange(1, 65535)
         self.ws_password = QLineEdit()
         self.ws_password.setEchoMode(QLineEdit.Password)
-        self.ws_source = QComboBox()
+        self.ws_source = MaterialComboBox()
         self.ws_source.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.ws_source.activated.connect(self._ws_source_picked)
         grid.addWidget(label("OBS on"), 0, 0)
@@ -1651,8 +1724,8 @@ class OverlayPage(QWidget):
         return {**C.MODE_SETTINGS[mode], **texts}
 
     def _state(self):
-        certain, approx = self.win.primary_counts
-        return {"certain": certain, "approximate": approx}
+        certain, total = self.win.counts
+        return {"certain": certain, "approximate": max(0, total - certain)}
 
     def _changed(self):
         if self._loading:
@@ -1665,16 +1738,21 @@ class OverlayPage(QWidget):
         for widget in (self.line_label, self.line_text, self.line_hint):
             widget.setVisible(mode == "inline")
         self.refresh_preview()
-        state = self._state()
-        for m, radio in self.mode_buttons.items():
-            example = C.overlay_text({**self.display, **C.MODE_SETTINGS[m]}, state).replace("\n", "  /  ")
-            radio.setText(f"{C.MODE_DESCRIPTIONS[m][0].upper()}{C.MODE_DESCRIPTIONS[m][1:]}      e.g.  {example}")
         pending = any(self.display.get(k) != v for k, v in self.changes().items())
         self.saved.setText("Not applied yet." if pending else "")
 
     def refresh_preview(self):
         display = {**self.display, **self.changes()}
         self.preview.caption.setText(self.win.dashboard.screen_overlay_text(display))
+        examples = dict(display)
+        for key, field, convert in (("certain_text", self.certain_text, C.text_from_hash),
+                                    ("approx_text", self.approx_text, C.text_from_hash),
+                                    ("combined_status_format", self.line_text, C.line_from_markers)):
+            if field.text().strip():
+                examples[key] = convert(field.text().strip())
+        state = self._state()
+        for mode, label_ in self.mode_examples.items():
+            label_.setText(C.overlay_text({**examples, **C.MODE_SETTINGS[mode]}, state).replace("\n", "  /  "))
 
     def _defaults(self):
         d = settings.DEFAULTS["display"]
@@ -1715,7 +1793,7 @@ class SettingsPage(QWidget):
                                                     "alarms and a little work, but does not find more chests (no difference on "
                                                     "our English test videos). Automatic language detection will come once the "
                                                     "app recognises matches.")
-        self.language = QComboBox()
+        self.language = MaterialComboBox()
         for text, langs in settings.LANGUAGE_CHOICES:
             self.language.addItem(text, langs)
         box_layout.addWidget(self.language)
@@ -1725,7 +1803,7 @@ class SettingsPage(QWidget):
                                "How many pictures of your gameplay the counter checks every second. A chest pop-up is "
                                "on screen only briefly, so fewer pictures save work on this PC but can miss chests. "
                                "OBS and your stream are not affected either way.")
-        self.fps = QComboBox()
+        self.fps = MaterialComboBox()
         self.fps.currentIndexChanged.connect(self._fps_changed)
         box_layout.addWidget(self.fps)
         self.fps_hint = label("", "hint", wrap=True)
@@ -1767,14 +1845,14 @@ class SettingsPage(QWidget):
         box_layout.addWidget(self.update_auto)
         row = QHBoxLayout()
         row.addWidget(label("Download speed"))
-        self.update_bandwidth = QComboBox()
+        self.update_bandwidth = MaterialComboBox()
         for text, value in (("Adaptive   (recommended)", "adaptive"), ("Unlimited", "unlimited"), ("Custom limit", "custom")):
             self.update_bandwidth.addItem(text, value)
         self.update_bandwidth.currentIndexChanged.connect(self._bandwidth_changed)
         row.addWidget(self.update_bandwidth, 1)
         self.update_limit = QSpinBox()
         row.addWidget(self.update_limit)
-        self.update_unit = QComboBox()
+        self.update_unit = MaterialComboBox()
         self.update_unit.addItem("KB/s", 1)
         self.update_unit.addItem("MB/s", 1000)
         self.update_unit.currentIndexChanged.connect(self._limit_unit_changed)
@@ -2102,10 +2180,46 @@ def navigation_icon(name, color):
     return icon
 
 
+class NavigationIndicator(QLabel):
+    def __init__(self):
+        super().__init__()
+        self._amount = 0.0
+        self._motion = QVariantAnimation(self)
+        self._motion.setDuration(150)
+        self._motion.setEasingCurve(QEasingCurve.OutCubic)
+        self._motion.valueChanged.connect(self._set_amount)
+
+    def set_selected(self, selected):
+        target = float(selected)
+        self._motion.stop()
+        if self.isVisible() and theme.animations_enabled() and self._amount != target:
+            self._motion.setStartValue(self._amount)
+            self._motion.setEndValue(target)
+            self._motion.start()
+        else:
+            self._set_amount(target)
+
+    def _set_amount(self, amount):
+        self._amount = amount
+        self.update()
+
+    def paintEvent(self, event):
+        if self._amount:
+            color = QColor(theme.SURFACE_3)
+            color.setAlphaF(self._amount)
+            with QPainter(self) as painter:
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(color)
+                painter.drawRoundedRect(QRectF(self.rect()), 16, 16)
+        super().paintEvent(event)
+
+
 class NavigationDestination(QPushButton):
     def __init__(self, icon, caption):
         super().__init__()
         self.setObjectName("navDestination")
+        self.setFocusPolicy(Qt.TabFocus)
         self.setCheckable(True)
         self.setAccessibleName(caption)
         self.setFixedSize(80, 64)
@@ -2113,7 +2227,7 @@ class NavigationDestination(QPushButton):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 5, 6, 4)
         layout.setSpacing(3)
-        self.indicator = label("", "navIndicator")
+        self.indicator = NavigationIndicator()
         self.indicator.setAlignment(Qt.AlignCenter)
         self.indicator.setFixedSize(56, 32)
         text = label(caption, "navCaption")
@@ -2125,7 +2239,7 @@ class NavigationDestination(QPushButton):
 
     def _update_indicator(self, selected):
         self.indicator.setPixmap(self._icons[int(selected)])
-        restyle(self.indicator, "navIndicatorSelected" if selected else "navIndicator")
+        self.indicator.set_selected(selected)
 
 
 class MainWindow(QMainWindow):
@@ -2888,8 +3002,6 @@ class MainWindow(QMainWindow):
                 self.set_counts(message["certain"], message["approx"], flash=kind == "event")
             if kind == "status":
                 self.last_status = message
-            if kind == "counts" and message.get("overlay") is not None:
-                self.dashboard.viewers.setText(message["overlay"].replace("\n", "   /   "))
         elif kind == "types":
             self.primary_types = message.get("breakdown") or {}
             self.refresh_types()
@@ -3485,7 +3597,8 @@ def main(argv=None):
     app.setApplicationVersion(__version__)
     app.setWindowIcon(app_icon())
     app.setStyle("Fusion")
-    QFontDatabase.addApplicationFont(str(ASSETS / "GoogleSans.ttf"))
+    for weight in (400, 500, 700):
+        QFontDatabase.addApplicationFont(str(ASSETS / f"GoogleSans-{weight}.ttf"))
     app.setPalette(_palette())
     app.setStyleSheet(theme.STYLE)
     if len(args) == 2 and args[0] == "--self-test":

@@ -506,7 +506,8 @@ def test_second_source_combines_counts_resets_and_can_stop_independently():
                 assert win.secondary_preview_reader.name != win.preview_reader.name
             win.handle({"type": "connected"})
             win.handle_secondary({"type": "connected"})
-            win.handle({"type": "counts", "certain": 5, "approx": 10})
+            win.handle({"type": "counts", "certain": 5, "approx": 10, "overlay": "Primary OBS text"})
+            assert "Total: 10" in dashboard.viewers.text()
             win.handle_secondary({"type": "counts", "certain": 2, "approx": 4})
             assert win.counts == (7, 14)
             assert dashboard.token_odds.text() == "0.010181%"

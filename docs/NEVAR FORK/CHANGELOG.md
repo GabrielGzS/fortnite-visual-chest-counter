@@ -21,10 +21,13 @@
   destinations keyboard-accessible and show the full update status in the content area.
 - Bundle Google Sans and official Material Icons with their licenses. Use connected action groups, themed dropdown
   chevrons, checkboxes, radio controls and numeric steppers.
-- Keep Start counting as the sole primary action in the header. Place capture status next to the sources, and group
-  Edit counts with Reset and Analyse a recording with Mark moment.
+- Pair Capture settings with Start counting in the header, with capture status next to the sources. Group Edit counts
+  with Reset and Analyse a recording with Mark moment. Give the on-screen summary a card and a shortcut to Overlay.
 - Apply themed confirmations and profile prompts. Destructive confirmations default to Cancel. The Windows file
   picker remains a system dialog.
+- Use static Google Sans faces, animate the selection indicator and dropdowns with reduced-motion support, and keep
+  mouse selection free of the extra navigation focus outline. Connect dialog actions and round the floating overlay.
+- Update overlay examples from the combined live counts and draft wording. The OBS text file still uses the primary source.
 - Draw and animate normal, Sprite, blue rare, and unknown chests on the Dashboard and on-screen overlay. Honour the
   Windows reduced-motion preference and keep the latest displayed type in sync with classification corrections.
 - Add cleanup for recognized diagnostic videos, session logs and snapshots, including logs from retired secondary

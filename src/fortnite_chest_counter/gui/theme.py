@@ -47,7 +47,6 @@ QToolTip {{ background: {SURFACE_3}; color: {TEXT}; border: 1px solid {BORDER}; 
 QPushButton#navDestination {{ background: transparent; border: 1px solid transparent; border-radius: 16px; padding: 0; }}
 QPushButton#navDestination:hover {{ background: {SURFACE_2}; }}
 QPushButton#navDestination:focus {{ border-color: {ACCENT}; }}
-#navIndicatorSelected {{ background: {SURFACE_3}; border-radius: 16px; }}
 #navCaption {{ font-size: 12px; font-weight: 500; }}
 
 #pageTitle {{ font-size: 32px; font-weight: 500; }}
@@ -64,32 +63,40 @@ QPushButton#navDestination:focus {{ border-color: {ACCENT}; }}
 #recentOpenings::item {{ padding: 6px 2px; }}
 
 #countCard {{ background: {SURFACE_2}; border: 1px solid transparent; border-radius: 16px; }}
-#countLabel {{ color: {MUTED}; font-size: 9pt; font-weight: 600; letter-spacing: 1px; }}
+#countLabel {{ color: {MUTED}; font-size: 9pt; font-weight: 500; }}
 #countValue {{ font-size: 33pt; font-weight: 700; }}
 #countSub {{ color: {MUTED}; font-size: 9pt; }}
 
-#pill {{ border-radius: 11px; padding: 3px 12px; font-size: 9pt; font-weight: 600; }}
+#pill {{ border-radius: 11px; padding: 3px 12px; font-size: 9pt; font-weight: 500; }}
 #banner {{ background: #3a1d22; border: 1px solid #6b2a33; border-radius: 8px; }}
 #bannerText {{ color: #ffd7dc; }}
 #notice {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 8px; }}
-#overlayBox {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 7px; }}
-#screenOverlayCaption {{ color: {TEXT}; font-size: 12pt; font-weight: 600; }}
+#overlayBox {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 14px; }}
+#screenOverlayCaption {{ color: {TEXT}; font-size: 12pt; font-weight: 500; }}
 
 QPushButton {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 12px; padding: 7px 14px; }}
 QPushButton:hover {{ background: {SURFACE_3}; }}
 QPushButton:pressed {{ background: {BORDER}; }}
 QPushButton:focus {{ border-color: {ACCENT}; }}
 QPushButton:disabled {{ color: {DIM}; background: {SURFACE}; }}
-QPushButton#primary {{ background: {ACCENT}; border: 1px solid {ACCENT}; color: {BG}; font-weight: 600; border-radius: 18px; padding: 9px 22px; }}
+QPushButton#primary {{ background: {ACCENT}; border: 1px solid {ACCENT}; color: {BG}; font-weight: 500; border-radius: 18px; padding: 9px 22px; }}
 QPushButton#primary:hover {{ background: {ACCENT_HOVER}; border-color: {ACCENT_HOVER}; }}
 QPushButton#primary:disabled {{ background: {SURFACE_3}; border-color: {SURFACE_3}; color: {MUTED}; }}
-QPushButton#danger {{ background: {DANGER}; border: 1px solid {DANGER}; color: {DANGER_INK}; font-weight: 600; border-radius: 18px; padding: 9px 22px; }}
+QPushButton#danger {{ background: {DANGER}; border: 1px solid {DANGER}; color: {DANGER_INK}; font-weight: 500; border-radius: 18px; padding: 9px 22px; }}
 QPushButton#danger:hover {{ background: #ffc8c1; }}
 QPushButton#toggle {{ background: transparent; border: 1px solid {BORDER}; border-radius: 14px; padding: 5px 14px; color: {MUTED}; }}
 QPushButton#toggle:checked {{ background: {SURFACE_2}; color: {TEXT}; border-color: {ACCENT}; }}
-QPushButton[groupPosition], QPushButton#toggle[groupPosition] {{ border-radius: 4px; }}
-QPushButton[groupPosition="first"], QPushButton#toggle[groupPosition="first"] {{ border-top-left-radius: 16px; border-bottom-left-radius: 16px; }}
-QPushButton[groupPosition="last"], QPushButton#toggle[groupPosition="last"] {{ border-top-right-radius: 16px; border-bottom-right-radius: 16px; }}
+QPushButton[groupPosition="middle"] {{ border-radius: 4px; }}
+QPushButton[groupPosition="first"], QPushButton#primary[groupPosition="first"],
+QPushButton#danger[groupPosition="first"], QPushButton#toggle[groupPosition="first"] {{
+    border-top-left-radius: 16px; border-bottom-left-radius: 16px;
+    border-top-right-radius: 4px; border-bottom-right-radius: 4px;
+}}
+QPushButton[groupPosition="last"], QPushButton#primary[groupPosition="last"],
+QPushButton#danger[groupPosition="last"], QPushButton#toggle[groupPosition="last"] {{
+    border-top-left-radius: 4px; border-bottom-left-radius: 4px;
+    border-top-right-radius: 16px; border-bottom-right-radius: 16px;
+}}
 QPushButton#toggle[groupPosition]:checked {{ background: {SURFACE_3}; border-color: {ACCENT}; border-radius: 16px; }}
 QPushButton#link {{ background: transparent; border: none; color: {ACCENT}; padding: 0; }}
 QPushButton#link:hover {{ color: {ACCENT_HOVER}; text-decoration: underline; }}
@@ -103,6 +110,7 @@ QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: top rig
 QComboBox::down-arrow {{ image: url("{ASSET_DIR}/dropdown_arrow.png"); width: 12px; height: 8px; }}
 QComboBox:disabled {{ color: {DIM}; }}
 QComboBox::down-arrow:disabled {{ image: url("{ASSET_DIR}/dropdown_arrow_disabled.png"); }}
+#comboPopup {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 12px; }}
 QComboBox QAbstractItemView, QMenu {{ background: {SURFACE}; border: 1px solid {BORDER};
                                       outline: none; border-radius: 12px; padding: 4px; selection-background-color: {SURFACE_3};
                                       selection-color: {TEXT}; }}
@@ -130,7 +138,7 @@ QSpinBox::up-button, QSpinBox::down-button {{ subcontrol-origin: border; width: 
                                             border: none; background: transparent; }}
 QSpinBox::up-button {{ subcontrol-position: top right; border-top-right-radius: 12px; }}
 QSpinBox::down-button {{ subcontrol-position: bottom right; border-bottom-right-radius: 12px; }}
-QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background: {SURFACE_3}; }}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background: transparent; }}
 QSpinBox::up-arrow {{ image: url("{ASSET_DIR}/stepper_up.png"); width: 10px; height: 6px; }}
 QSpinBox::down-arrow {{ image: url("{ASSET_DIR}/dropdown_arrow.png"); width: 10px; height: 6px; }}
 QSpinBox::up-arrow:disabled, QSpinBox::down-arrow:disabled {{ image: none; }}
@@ -154,9 +162,7 @@ QSplitter::handle {{ background: transparent; }}
 #promptSurface {{ background: {SURFACE_2}; border-radius: 28px; }}
 #dialogHeading {{ font-size: 24px; font-weight: 500; }}
 #dialogBody {{ color: {MUTED}; font-size: 14px; }}
-QDialogButtonBox QPushButton:default {{ background: {ACCENT}; border-color: {ACCENT}; color: {BG}; }}
-QDialogButtonBox QPushButton:default:focus {{ border-color: {TEXT}; }}
-QDialogButtonBox QPushButton:default:disabled {{ background: {SURFACE_3}; border-color: {BORDER}; color: {DIM}; }}
+
 """
 
 

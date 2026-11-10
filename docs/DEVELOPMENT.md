@@ -64,7 +64,9 @@ When running from source, user data (`config.toml`, `state/`, `logs/`, `obs_outp
 Keep visual tokens in the shared Qt theme, application assets beside that theme, and engine behavior outside the GUI.
 The navigation rail follows [Material 3](https://m3.material.io/components/navigation-rail/overview). Its icons come from
 [Google Material Icons](https://github.com/google/material-design-icons) and its typeface is
-[Google Sans](https://github.com/googlefonts/googlesans). Their licenses ship alongside the assets.
+[Google Sans](https://github.com/googlefonts/googlesans). Their licenses ship alongside the assets. The bundled
+Google Sans faces are static Latin subsets at weights 400, 500 and 700, pinned at optical size 18 and grade 0.
+Generate them from the upstream variable font with FontTools when updating the assets.
 
 The Help page can remove generated diagnostics from `logs/` and `captures/`. Keep these folders, user state, and BMAD
 working artifacts out of commits. Run UI and worker tests with isolated settings and a temporary working directory.
