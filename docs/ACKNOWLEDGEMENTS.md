@@ -6,7 +6,7 @@
 
 The animated chest geometry is adapted from [Chest Tracker](https://github.com/Xxoris190/chest-tracker), also under the MIT License. The illustration credit is retained in [the source](../src/fortnite_chest_counter/gui/chest_illustration.py) and the project license. The app logo and README banner reuse the app's chest artwork.
 
-The README layout takes cues from Chest Tracker and N-Zik. The app's tonal surfaces and component direction follow [Material Design 3](https://m3.material.io/).
+The README layout takes cues from Chest Tracker and [N-Zik’s README](https://github.com/N-Zik-Group/N-Zik#readme). The app's tonal surfaces and component direction follow [Material Design 3](https://m3.material.io/).
 
 ## Fonts, icons and runtime
 
@@ -27,6 +27,6 @@ The [distribution notice](../packaging/LICENSE-NOTICE.txt) lists runtime locatio
 
 The Pirate Token estimate can be compared with the [independent calculator](https://piratetoken.quest/drop-rate/) and the [Fortnite Status announcement](https://x.com/FortniteStatus/status/2119202610322227327). The formula and assumptions are described in the [overlay guide](guides/obs-overlay.md).
 
-Development used Codex assistance, including GPT-6.1 Sol at medium reasoning effort. Validation notes distinguish automated checks and replay evidence from live verification. See [changes and validation](CHANGES.md).
+The upstream commit history credits [Claude Opus 5.5](https://github.com/GabrielGzS/fortnite-visual-chest-counter/commit/032df3b4ebdaea57e49dbc54ba6496d9c2e0364b) as a co-author. Development on this branch used Codex assistance, including GPT-6.1 Sol at medium reasoning effort. Validation notes distinguish automated checks and replay evidence from live verification. See [changes and validation](CHANGES.md).
 
 Fortnite is a trademark of Epic Games, Inc. This independent project has no Epic Games affiliation or approval.

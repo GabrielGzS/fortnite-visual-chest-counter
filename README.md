@@ -98,7 +98,10 @@ The webhook receives submissions in its feed channel. The public bot leaderboard
 
 The screenshots show the application with sample data.
 
-<p align="center"><a href="docs/previews/dashboard.png"><img src="docs/previews/dashboard.png" alt="Dashboard with personal, team and all-match stats" width="1080"></a></p>
+<table>
+<tr><td><a href="docs/previews/dashboard.png"><img src="docs/previews/dashboard.png" alt="Dashboard with personal, team and all-match stats" width="1080"></a></td></tr>
+<tr><td align="center">Dashboard — personal counts, verified team stats and cumulative match totals.</td></tr>
+</table>
 
 <table>
   <tr>
@@ -108,7 +111,10 @@ The screenshots show the application with sample data.
   <tr><td align="center">Match history and Group</td><td align="center">Overlay settings</td></tr>
 </table>
 
-<p align="center"><a href="docs/previews/overlay.png"><img src="docs/previews/overlay.png" alt="Floating overlay with the current chest type and three statistic scopes" width="600"></a></p>
+<table>
+<tr><td align="center"><a href="docs/previews/overlay.png"><img src="docs/previews/overlay.png" alt="Floating overlay with the current chest type and three statistic scopes" width="600"></a></td></tr>
+<tr><td align="center">Overlay — Personal, Team and All matches sections with custom text and token estimates.</td></tr>
+</table>
 
 ### Discord previews
 
@@ -145,11 +151,11 @@ Counting reads video frames. Optional match features read the local Fortnite log
 
 Use an editable Python installation or `debug-chest-counter.bat` from a configured checkout. The [development guide](docs/DEVELOPMENT.md) covers tests and Windows packaging. The [documentation index](docs/index.md) links to guides, research, releases and maintenance notes.
 
-The project uses Codex-assisted development, including GPT-6.1 Sol at medium reasoning effort. Detector changes should be checked against independent gameplay recordings. Discord integration tests use simulated responses; a live Host/Guest check is part of release validation.
+Upstream commits credit Claude Opus 5.5 as a co-author. This branch uses Codex-assisted development, including GPT-6.1 Sol at medium reasoning effort. Detector changes should be checked against independent gameplay recordings. Discord integration tests use simulated responses; a live Host/Guest check is part of release validation.
 
 ## Acknowledgements and license
 
-[Fortnite Visual Chest Counter](https://github.com/GabrielGzS/fortnite-visual-chest-counter) by Gabriel Gomez provides the foundation. The animated chest is adapted from [Chest Tracker](https://github.com/Xxoris190/chest-tracker), with its MIT attribution retained. The presentation takes cues from Chest Tracker and N-Zik's README.
+[Fortnite Visual Chest Counter](https://github.com/GabrielGzS/fortnite-visual-chest-counter) by Gabriel Gomez provides the foundation. The animated chest is adapted from [Chest Tracker](https://github.com/Xxoris190/chest-tracker), with its MIT attribution retained. The presentation takes cues from Chest Tracker and [N-Zik's README](https://github.com/N-Zik-Group/N-Zik#readme).
 
 **[MIT License](LICENSE)** · **[Acknowledgements](docs/ACKNOWLEDGEMENTS.md)** · **[Distribution notices](packaging/LICENSE-NOTICE.txt)**
 
