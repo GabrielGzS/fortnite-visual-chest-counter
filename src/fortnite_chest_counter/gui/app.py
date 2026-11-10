@@ -897,6 +897,20 @@ class Dashboard(QWidget):
         self.start.setMinimumWidth(160)
         row.addWidget(self.start)
         box_layout.addLayout(row)
+        row = QHBoxLayout()
+        row.addWidget(label("Second video source"))
+        self.secondary_source = QComboBox()
+        self.secondary_source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.secondary_source.setMinimumContentsLength(24)
+        self.secondary_source.addItem("None (optional)")
+        self.secondary_source.setToolTip("Count a teammate's video too. For Discord, play the stream fullscreen on a separate "
+                                         "screen or send it to an OBS Virtual Camera or Windowed Projector.")
+        self.secondary_source.currentIndexChanged.connect(lambda _: win.secondary_source_changed())
+        row.addWidget(self.secondary_source, 1)
+        box_layout.addLayout(row)
+        self.secondary_status = label("", "hint", wrap=True)
+        self.secondary_status.hide()
+        box_layout.addWidget(self.secondary_status)
         self.url_row = QWidget()                            # only for "Livestream URL"
         url_layout = QVBoxLayout(self.url_row)
         url_layout.setContentsMargins(0, 0, 0, 0)
@@ -992,7 +1006,7 @@ class Dashboard(QWidget):
         self.detail.currentIndexChanged.connect(lambda _: win.render_log())
 
     def update_token_odds(self):
-        group = self.token_mode.currentIndex() > 0
+        group = self.token_mode.currentIndex() > 0 and not self.win.secondary_selected
         self.token_teammate_label.setVisible(group)
         self.token_teammates.setVisible(group)
         total = max(0, self.win.counts[1]) + (self.token_teammates.value() if group else 0)
@@ -1276,7 +1290,7 @@ class OverlayPage(QWidget):
         return {**C.MODE_SETTINGS[mode], **texts}
 
     def _state(self):
-        certain, approx = self.win.counts
+        certain, approx = self.win.primary_counts
         return {"certain": certain, "approximate": approx}
 
     def _changed(self):
@@ -1715,13 +1729,23 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(920, 640)
         self.window_file = None                 # set by restore_layout() for the real app window only (not tests / self-test)
         self.worker = Worker()
-        self.updates = UM.UpdateManager(is_counting=lambda: self.worker.running())
+        self.secondary_worker = Worker()
+        self._workers_pending = set()
+        self._pending_resets = set()
+        self._worker_failed = False
+        self._secondary_failed = False
+        self.updates = UM.UpdateManager(is_counting=self.workers_active)
         self.update_dialog = None
         self._update_ticks = 0
         self._install_pending = False           # counting is being stopped so that an update can be installed
         self._result_watch_until = None         # started by the updater: wait for its verdict before saying anything
         self.mode = "stopped"
         self.counts = (0, 0)
+        self.primary_counts = (0, 0)
+        self.secondary_counts = (0, 0)
+        self.primary_types = {}
+        self.secondary_types = {}
+        self.secondary_selected = False
         self.entries = deque(maxlen=LOG_LIMIT)
         self.connected = None
         self.started_at = None
@@ -1741,6 +1765,9 @@ class MainWindow(QMainWindow):
             self.preview_reader = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
+        self.stop_timer = QTimer(self)
+        self.stop_timer.setSingleShot(True)
+        self.stop_timer.timeout.connect(self._stop_timeout)
         self.slow = QTimer(self)
         self.slow.timeout.connect(self._tick_slow)
         self.preview_timer = QTimer(self)
@@ -1892,6 +1919,20 @@ class MainWindow(QMainWindow):
         dev_video = os.environ.get("FCC_DEV_VIDEO")
         if dev_video:
             items.append((f"Test video (real time):  {Path(dev_video).name}", {"source": "file", "video": dev_video}))
+        secondary = self.dashboard.secondary_source
+        current_secondary = secondary.currentData()
+        secondary_text = secondary.currentText()
+        secondary.blockSignals(True)
+        secondary.clear()
+        secondary.addItem("None (optional)")
+        for text, data in items:
+            if data["source"] != "stream":
+                secondary.addItem(text, data)
+        if current_secondary is not None and secondary.findData(current_secondary) < 0:
+            secondary.addItem(secondary_text.split("   (not found right now)")[0] + "   (not found right now)",
+                              current_secondary)
+        secondary.setCurrentIndex(max(0, secondary.findData(current_secondary)))
+        secondary.blockSignals(False)
         current = self.dashboard.source.currentData()
         self.dashboard.source.blockSignals(True)
         self.dashboard.source.clear()
@@ -1910,7 +1951,19 @@ class MainWindow(QMainWindow):
         self._obs_camera_found = "OBS Virtual Camera" in devices
         self._projectors_found = bool(windows)
         self.update_source_hint()
-        self.dashboard.refresh.setEnabled(True)
+        self.dashboard.refresh.setEnabled(not self.workers_active())
+
+    def secondary_source_changed(self):
+        self.secondary_selected = self.dashboard.secondary_source.currentData() is not None
+        self.dashboard.secondary_status.hide()
+        self.read_secondary_state()
+
+    def show_secondary_status(self, text, color):
+        status = self.dashboard.secondary_status
+        status.setTextFormat(Qt.PlainText)
+        status.setText(text)
+        status.setStyleSheet(f"color: {color};")
+        status.show()
 
     def update_source_hint(self):
         """One short line for the selected source: what it needs (and, for the less tested ones, that they are)."""
@@ -1970,14 +2023,14 @@ class MainWindow(QMainWindow):
             box.addItem(p["name"], p["id"])
         box.setCurrentIndex(max(box.findData(reg["active"]), 0))
         box.blockSignals(False)
-        self.dashboard.profile_delete.setEnabled(reg["active"] != profiles.DEFAULT_ID and not self.worker.running())
+        self.dashboard.profile_delete.setEnabled(reg["active"] != profiles.DEFAULT_ID and not self.workers_active())
         name = profiles.active(reg)["name"]
         self.setWindowTitle(APP_NAME if len(reg["profiles"]) == 1 else f"{APP_NAME}  -  {name}")
         return reg
 
     def _profile_busy(self):
         """A counter (this window's or a console one) is writing the active profile's counts right now."""
-        if self.worker.running():
+        if self.workers_active():
             return True
         return C.counter_is_running(load_cfg()[0]["state"]["path"])
 
@@ -2003,6 +2056,7 @@ class MainWindow(QMainWindow):
         reg = self.fill_profiles()
         self.dashboard.token_teammates.setValue(0)
         self.read_state(force=True)
+        self.read_secondary_state()
         self.write_obs_files(quiet=True)              # OBS shows the selected profile
         live = self.profile_live()
         self.select_source({"source": live["source"], "device": live["device"], "monitor": live["monitor"],
@@ -2060,24 +2114,40 @@ class MainWindow(QMainWindow):
         self.profile_changed()
 
     # ---- counting
+    def workers_active(self):
+        return bool(self._workers_pending) or self.worker.running() or self.secondary_worker.running()
+
     def toggle_counting(self):
-        if self.worker.running():
+        if self.workers_active():
             self.stop_counting()
         else:
             self.start_counting()
 
+    @staticmethod
+    def source_args(data):
+        kind = data["source"]
+        argv = ["--source", kind]
+        for key in ("device", "monitor", "window", "video"):
+            if key in data:
+                argv += [f"--{key}", str(data[key])]
+        if kind == "file" and os.environ.get("FCC_DEV_VIDEO_START"):
+            argv += ["--start", os.environ["FCC_DEV_VIDEO_START"]]
+        return argv
+
     def start_counting(self):
         data = self.dashboard.source.currentData()
-        if not data or self.worker.running() or self._install_pending or self.updates.state == UM.INSTALLING:
+        if not data or self.workers_active() or self._install_pending or self.updates.state == UM.INSTALLING:
+            return
+        secondary = self.dashboard.secondary_source.currentData()
+        if secondary == data:
+            show_error(self, "Choose a different second video source, or select None.")
             return
         cfg, _ = load_cfg()
         argv = ["live", "--gui", "--profile", cfg["profile"]["id"]]
         if self.preview_reader is not None:
             argv += ["--preview", self.preview_reader.name]
         if data["source"] == "file":                                 # developers: FCC_DEV_VIDEO (+ FCC_DEV_VIDEO_START)
-            argv += ["--source", "file", "--video", data["video"]]
-            if os.environ.get("FCC_DEV_VIDEO_START"):
-                argv += ["--start", os.environ["FCC_DEV_VIDEO_START"]]
+            argv += self.source_args(data)
         else:
             values = {"source": data["source"]}
             if data["source"] == "device":
@@ -2101,7 +2171,10 @@ class MainWindow(QMainWindow):
                 show_error(self, f"Could not save the video source choice: {error}")
                 return
         self.dashboard.banner.hide()
+        self.dashboard.secondary_status.hide()
         self.error_seen = False
+        self._worker_failed = False
+        self._secondary_failed = False
         self.connected = None
         self.last_status = None
         try:
@@ -2110,19 +2183,34 @@ class MainWindow(QMainWindow):
             show_error(self, f"The counter could not start ({error}). Extract the whole zip again and keep every file "
                              "and folder together.")
             return
+        self._workers_pending.add("primary")
         whose = f" (profile {cfg['profile']['name']})" if self.dashboard.profile.count() > 1 else ""
         self.add_log({"type": "info", "text": f"Starting{whose}: {self.dashboard.source.currentText().split('   ')[0]} ..."})
         self.set_mode("connecting")
+        if secondary:
+            cfg = self._secondary_cfg(cfg)
+            argv = ["live", "--gui", *self.source_args(secondary),
+                    "--state", cfg["state"]["path"], "--obs-dir", cfg["state"]["obs_dir"],
+                    "--log-dir", cfg["logging"]["dir"], "--capture-dir", cfg["capture"]["dir"]]
+            try:
+                self.secondary_worker.start(argv)
+            except OSError as error:
+                self.show_secondary_status(f"Second source could not start: {error}", theme.REJECT)
+                return
+            self._workers_pending.add("secondary")
+            self.show_secondary_status("Connecting to the second video source…", theme.INFO)
 
     def stop_counting(self):
-        if self.worker.running():
+        if self.workers_active() and self.mode != "stopping":
             self.set_mode("stopping")
             self.worker.stop()
-            QTimer.singleShot(30000, self._stop_timeout)   # a diagnostic recording may need a few seconds to finish
+            self.secondary_worker.stop()
+            self.stop_timer.start(30000)   # a diagnostic recording may need a few seconds to finish
 
     def _stop_timeout(self):
-        if self.mode == "stopping" and self.worker.running():
+        if self.mode == "stopping":
             self.worker.kill()          # counts are saved after every chest; this only skips the final summary
+            self.secondary_worker.kill()
 
     def set_mode(self, mode):
         self.mode = mode
@@ -2136,6 +2224,7 @@ class MainWindow(QMainWindow):
         restyle(d.start, "danger" if mode in ("connecting", "counting") else "primary")
         d.start.setEnabled(mode != "stopping")
         d.source.setEnabled(not running)
+        d.secondary_source.setEnabled(not running)
         for widget in (d.profile, d.profile_new, d.profile_rename):
             widget.setEnabled(not running)
         d.profile_delete.setEnabled(not running and d.profile.currentData() != profiles.DEFAULT_ID)
@@ -2166,6 +2255,8 @@ class MainWindow(QMainWindow):
             self._fill_sources(devices, monitors, windows)
         for message in self.worker.drain():
             self.handle(message)
+        for message in self.secondary_worker.drain():
+            self.handle_secondary(message)
         version, status = self.obs_link.status()
         if version != self._obs_version:
             self._obs_version = version
@@ -2257,7 +2348,7 @@ class MainWindow(QMainWindow):
             m.refuse_install(blocker)
             self.update_changed()
             return
-        if not self.worker.running():
+        if not self.workers_active():
             self._launch_installer()
             return
         if not ask(self, "Stop counting and install?", f"Counting will stop and your counts will be saved. The app will then close, install v{m.version_text()} "
@@ -2276,7 +2367,8 @@ class MainWindow(QMainWindow):
     def _refuse_install_after_stop(self):
         self._install_pending = False
         self.updates.refuse_install("Counting did not stop cleanly, so the update was not installed. Your counts are safe.")
-        self.set_mode("error" if self.error_seen else self.mode if self.worker.running() else "stopped")
+        if not self.workers_active():
+            self.set_mode("error" if self.error_seen else "stopped")
         self.update_changed()
 
     def _launch_installer(self):
@@ -2331,7 +2423,8 @@ class MainWindow(QMainWindow):
         self.add_log(message)
         if kind == "connected":
             self.connected = message
-            self.set_mode("counting")
+            if self.mode != "stopping":
+                self.set_mode("counting")
             self.add_log({"type": "info", "text": "Counting. Chests are saved the moment they are counted."
                           + ("" if message.get("persist", True) else " (Saving is turned off in config.toml.)")})
         elif kind in ("counts", "event", "status", "progress"):
@@ -2342,7 +2435,10 @@ class MainWindow(QMainWindow):
             if kind == "counts" and message.get("overlay") is not None:
                 self.dashboard.viewers.setText(message["overlay"].replace("\n", "   /   "))
         elif kind == "types":
-            self.dashboard.types.setText(types_text(message.get("breakdown")))
+            self.primary_types = message.get("breakdown") or {}
+            self.refresh_types()
+        elif kind == "reset":
+            self._pending_resets.discard("primary")
         elif kind == "stream":
             self.show_stream_state(message.get("state"))
         elif kind == "error":
@@ -2398,16 +2494,58 @@ class MainWindow(QMainWindow):
                                            "every chest). If it keeps happening, run Help & diagnostics and send the report "
                                            "and the logs folder." + (f"\n\n{tail}" if tail else ""))
                 self.error_seen = True
-            self.set_mode("error" if self.error_seen else "stopped")
+            self.worker_exited("primary", code)
+
+    def handle_secondary(self, message):
+        kind = message.get("type")
+        if kind == "connected" and self.mode != "stopping":
+            self.show_secondary_status("Counting the second video source.", theme.CERTAIN)
+        elif kind in ("counts", "event", "status", "progress"):
+            if message.get("certain") is not None and message.get("approx") is not None:
+                self.secondary_counts = (message["certain"], message["approx"])
+                self.refresh_counts(flash=kind == "event")
+        elif kind == "types":
+            self.secondary_types = message.get("breakdown") or {}
+            self.refresh_types()
+        elif kind == "reset":
+            self._pending_resets.discard("secondary")
+        elif kind == "error":
+            self._secondary_failed = True
+            self.show_secondary_status(f"Second source could not continue: {message.get('text', '')}", theme.REJECT)
+        elif kind == "exit":
+            if self.mode != "stopping" and not self._secondary_failed:
+                detail = "\n".join(self.secondary_worker.stderr_tail[-6:])
+                self.show_secondary_status("The second video source stopped unexpectedly." + (f"\n{detail}" if detail else ""),
+                                           theme.REJECT)
+            elif not self._secondary_failed:
+                self.dashboard.secondary_status.hide()
+            self.worker_exited("secondary", message.get("code"))
+
+    def worker_exited(self, role, code):
+        self._workers_pending.discard(role)
+        if self._install_pending and code not in (0, None):
+            self._worker_failed = True
+        if role in self._pending_resets:
+            self._pending_resets.discard(role)
+            self.reset_saved_counts(role)
+        if role == "primary":
             self.read_state(force=True)
-            if self._install_pending:
-                if code in (0, None):                  # stopped and saved normally
-                    self._install_pending = False
-                    self._launch_installer()
-                else:
-                    self._refuse_install_after_stop()
-            if self.quit_when_stopped:
-                self.close()
+            if self.workers_active():
+                self.stop_counting()
+        else:
+            self.read_secondary_state()
+        if self.workers_active():
+            return
+        self.stop_timer.stop()
+        self.set_mode("error" if self.error_seen else "stopped")
+        if self._install_pending:
+            if self._worker_failed:
+                self._refuse_install_after_stop()
+            else:
+                self._install_pending = False
+                self._launch_installer()
+        if self.quit_when_stopped:
+            self.close()
 
     def show_stream_state(self, state):
         """Livestream URL: the Dashboard pill and the preview say when the stream is not delivering video."""
@@ -2425,17 +2563,35 @@ class MainWindow(QMainWindow):
             preview.view.setStyleSheet("")
 
     def set_counts(self, certain, approx, flash=False):
+        primary_changed = (certain, approx) != self.primary_counts
+        self.primary_counts = (certain, approx)
+        self.refresh_counts(flash)
+        if primary_changed:
+            self.refresh_viewers()
+
+    def refresh_counts(self, flash=False):
+        certain, approx = self.primary_counts
+        if self.secondary_selected:
+            certain += self.secondary_counts[0]
+            approx += self.secondary_counts[1]
         changed = (certain, approx) != self.counts
         self.counts = (certain, approx)
         self.dashboard.certain.set_value(certain, flash=flash and changed)
         self.dashboard.approx.set_value(approx, flash=flash and changed)
         self.dashboard.update_token_odds()
-        if changed:
-            self.refresh_viewers()
+
+    def refresh_types(self):
+        breakdown = self.primary_types
+        if self.secondary_selected:
+            breakdown = {kind: {key: self.primary_types.get(kind, {}).get(key, 0)
+                                     + self.secondary_types.get(kind, {}).get(key, 0)
+                                for key in ("certain", "approx")}
+                         for kind in dict.fromkeys((*self.primary_types, *self.secondary_types))}
+        self.dashboard.types.setText(types_text(breakdown))
 
     def refresh_viewers(self):
         cfg, _ = load_cfg()
-        text = C.overlay_text(cfg["display"], {"certain": self.counts[0], "approximate": self.counts[1]})
+        text = C.overlay_text(cfg["display"], {"certain": self.primary_counts[0], "approximate": self.primary_counts[1]})
         self.dashboard.viewers.setText(text.replace("\n", "   /   "))
 
     def read_state(self, force=False):
@@ -2450,7 +2606,16 @@ class MainWindow(QMainWindow):
         self._state_mtime = mtime
         counts = read_counts(path)
         self.set_counts(*(counts or (0, 0)))
-        self.dashboard.types.setText(types_text(read_types(path) or C.type_breakdown(C.fresh_state())))
+        self.primary_types = read_types(path) or C.type_breakdown(C.fresh_state())
+        self.refresh_types()
+
+    def read_secondary_state(self):
+        if self.secondary_selected:
+            path = self._secondary_cfg(load_cfg()[0])["state"]["path"]
+            self.secondary_counts = read_counts(path) or (0, 0)
+            self.secondary_types = read_types(path) or {}
+        self.refresh_counts()
+        self.refresh_types()
 
     def write_obs_files(self, quiet=False):
         """The OBS text files from the saved counter (e.g. after an update replaced them with zero placeholders)."""
@@ -2469,7 +2634,7 @@ class MainWindow(QMainWindow):
                 self._result_watch_until = None
             else:
                 self.show_update_result()
-        if not self.worker.running():
+        if not self.workers_active():
             self.read_state()
         elif self.mode == "counting" and self.started_at is not None:
             elapsed = int(time.monotonic() - self.started_at)
@@ -2543,16 +2708,49 @@ class MainWindow(QMainWindow):
             cfg[section][key] = str(paths.APP_DIR / cfg[section][key])
         return cfg
 
+    @staticmethod
+    def _secondary_cfg(cfg):
+        state = profiles.secondary_state_path(cfg["state"]["path"])
+        root = state.parent
+        return {**cfg,
+                "state": {**cfg["state"], "path": str(state), "obs_dir": str(root / "obs_output")},
+                "logging": {**cfg["logging"], "dir": str(root / "logs")},
+                "capture": {**cfg["capture"], "dir": str(root / "captures")}}
+
     def edit_counts(self):
-        dialog = CountsDialog(self, *self.counts)
+        dialog = CountsDialog(self, *self.primary_counts)
+        if self.secondary_selected:
+            dialog.setWindowTitle("Edit primary counts")
         if dialog.exec() != QDialog.Accepted:
             return
         self._set(dialog.certain.value(), dialog.approx.value(), "set_count")
 
     def reset_counts(self):
         whose = "" if self.dashboard.profile.count() <= 1 else f' of the profile "{self.dashboard.profile.currentText()}"'
-        if ask(self, "Reset the counter?", f"Set both counts{whose} to 0? This cannot be undone.", "Reset to 0", danger=True):
+        which = "the counts from both video sources" if self.secondary_selected else "both counts"
+        if ask(self, "Reset the counter?", f"Set {which}{whose} to 0? This cannot be undone.", "Reset to 0", danger=True):
+            if not self.secondary_selected:
+                self._set(0, 0, "reset")
+                return
+            self.dashboard.token_teammates.setValue(0)
+            for role, worker in (("primary", self.worker), ("secondary", self.secondary_worker)):
+                if role in self._workers_pending:
+                    if role not in self._pending_resets:
+                        self._pending_resets.add(role)
+                        worker.send("reset")  # if the pipe closed, the exit handler resets the saved count
+                else:
+                    self.reset_saved_counts(role)
+
+    def reset_saved_counts(self, role):
+        if role == "primary":
             self._set(0, 0, "reset")
+            return
+        try:
+            C.set_counts(self._secondary_cfg(self._cfg_for_actions()), 0, 0, "reset")
+        except (C.UserError, OSError) as error:
+            show_error(self, f"Could not reset the second video source: {error}")
+            return
+        self.read_secondary_state()
 
     def _set(self, certain, approx, action):
         try:
@@ -2574,6 +2772,8 @@ class MainWindow(QMainWindow):
         """Mark button / Ctrl+Alt+M: keep the video around this moment. Only while a recording is running - without one
         there is no video to keep, and the app says so instead of pretending."""
         if self.mark_available():
+            if self.secondary_worker.running():
+                self.secondary_worker.send("mark")
             return self.worker.send("mark")
         why = ("start counting first" if self.mode != "counting" else
                "diagnostic recording is off - choose 'Only around my marks' on the Dashboard (it keeps the 30 s before "
@@ -2593,6 +2793,8 @@ class MainWindow(QMainWindow):
             show_error(self, f"Could not save the recording choice: {error}")
         if self.worker.running():
             self.worker.send(f"capture {mode}")
+        if self.secondary_worker.running():
+            self.secondary_worker.send(f"capture {mode}")
         self.update_recording_ui()
 
     def update_recording_ui(self):
@@ -2670,7 +2872,7 @@ class MainWindow(QMainWindow):
 
     # ---- closing
     def closeEvent(self, event):
-        if self.worker.running():
+        if self.workers_active():
             if not self.quit_when_stopped:
                 if not ask(self, "Stop counting?", "The counter is running. Stop counting and close the app?\n\n"
                                                    "Your counts are saved and kept for next time.", "Stop and close"):

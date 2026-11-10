@@ -297,6 +297,7 @@ class CounterSession:
         self.latencies = []
         self.recent = {}                      # event time -> (event id, chest type, certain, approx): for type updates
         self._warned = set()
+        self._reset_pending_ack = False
         self._mtime = self._state_mtime()
 
     def _state_mtime(self):
@@ -319,13 +320,32 @@ class CounterSession:
                 save_state(self.state_path, self.state)
             except OSError as error:                 # never let a locked/full disk kill a live session
                 self._warn_once("state", f"could not save {self.state_path} ({error}); will retry on the next chest")
+                return
             self._mtime = self._state_mtime()
+        if self._reset_pending_ack:
+            self._reset_pending_ack = False
+            CONSOLE.emit("reset")
 
     def write_obs(self):
         try:
             write_obs_files(self.state, self.obs_dir, self.display)
         except OSError as error:
             self._warn_once("obs", f"could not update the OBS text files in {self.obs_dir} ({error}); will retry on the next chest")
+
+    def reset_from_app(self, estimator):
+        """Reset on the worker's counting thread so a simultaneous chest cannot overwrite the reset."""
+        estimator.flush()                       # discard pre-reset detections without rearming visual onset detectors
+        estimator.take_type_updates()
+        previous = {"certain": self.state["certain"], "approximate": self.state["approximate"]}
+        self.state.clear()
+        self.state.update(fresh_state())
+        self.recent.clear()
+        self._reset_pending_ack = True
+        self.save()
+        self.write_obs()
+        self.log.write({"event_id": "MANUAL", "source": "manual", "action": "reset",
+                        "previous": previous, "logged_at": now_iso()})
+        self.announce()
 
     def sync_external_changes(self):
         """`Reset Counter` / `adjust` run as separate programs and edit the state file. If that happened
@@ -451,6 +471,7 @@ class CounterSession:
 def config_overrides(args):
     return {("detector", "process_fps"): getattr(args, "process_fps", None),
                  ("state", "path"): getattr(args, "state", None), ("state", "obs_dir"): getattr(args, "obs_dir", None),
+                 ("capture", "dir"): getattr(args, "capture_dir", None),
                  ("logging", "dir"): getattr(args, "log_dir", None), ("live", "source"): getattr(args, "source", None),
                  ("live", "device"): getattr(args, "device", None), ("live", "monitor"): getattr(args, "monitor", None),
                  ("live", "window"): getattr(args, "window", None), ("live", "url"): getattr(args, "url", None)}
@@ -898,6 +919,7 @@ class AppControl:
         self.on_request = None
         self._marks = deque()                   # "mark [label]" lines: the app's Mark button / hotkey
         self._captures = deque()                # "capture off|marks|events|session": the app's Recording choice
+        self._reset = threading.Event()
         self._stream = stream if stream is not None else sys.stdin
         threading.Thread(target=self._read, daemon=True, name="app-control").start()
 
@@ -913,6 +935,12 @@ class AppControl:
             modes.append(self._captures.popleft())
         return modes
 
+    def take_reset(self):
+        if not self._reset.is_set():
+            return False
+        self._reset.clear()
+        return True
+
     def _read(self):
         try:
             for line in self._stream:
@@ -921,6 +949,8 @@ class AppControl:
                     break
                 if command.lower() == "mark":
                     self._marks.append(rest.strip() or "mark")
+                if command.lower() == "reset":
+                    self._reset.set()
                 if command.lower() == "capture" and rest.strip().lower() in ("off", "marks", "events", "session"):
                     self._captures.append(rest.strip().lower())
             else:
@@ -1219,6 +1249,13 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
     capture_warned = False
     if guard is not None:
         guard.on_request = source.request_stop
+
+    def apply_pending_reset():
+        if control is not None and control.take_reset():
+            session.reset_from_app(est)
+
+    if control is not None:
+        source.on_idle = apply_pending_reset
     try:
         for t, frame in source.frames():
             if guard is not None and guard.requested.is_set():
@@ -1229,6 +1266,7 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
             if args.duration and t >= args.duration:          # applies to every source type
                 stop_reason = "duration reached"
                 break
+            apply_pending_reset()
             t0 = time.perf_counter()
             applied = session.apply(est.process_frame(t, frame), t)
             session.apply_type_updates(est.take_type_updates())
@@ -1318,6 +1356,8 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
         if closing:
             stop_reason = guard.reason or "window closed (X)"
         # Persist first (the console may already be gone when the window was closed), print last.
+        apply_pending_reset()
+        session.sync_external_changes()
         flushed = session.apply(est.flush(), source.elapsed(), quiet=closing)
         session.apply_type_updates(est.take_type_updates())
         session.save()
@@ -1895,14 +1935,14 @@ def cmd_evaluate(args):
     evaluate(events, args.name)
 
 
-def report_crash(error):
+def report_crash(error, log_dir="logs"):
     """Unexpected bug: keep the full traceback in logs/ for a bug report, show the user something calm."""
     import platform
     import traceback
 
     where = None
     try:
-        log_dir = Path("logs")
+        log_dir = Path(log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         where = log_dir / f"crash_{datetime.now():%Y%m%d_%H%M%S}.txt"
         where.write_text(f"{APP_NAME} v{__version__} on {platform.platform()}\n\n"
@@ -1954,6 +1994,7 @@ def build_parser():
     p.add_argument("--reset", action="store_true", help="zero the counts first (counts are otherwise kept)")
     p.add_argument("--gui", action="store_true", help=argparse.SUPPRESS)        # desktop-app worker: JSON lines, stdin stop
     p.add_argument("--preview", help=argparse.SUPPRESS)                         # desktop-app preview block name
+    p.add_argument("--capture-dir", help=argparse.SUPPRESS)                     # desktop-app secondary recordings
     p.set_defaults(func=cmd_live)
 
     p = sub.add_parser("video", parents=[common], help="count chests in a recorded gameplay video file")
@@ -2029,7 +2070,7 @@ def main(argv=None):
     except SystemExit:
         raise
     except Exception as error:                # a bug, not a setup problem
-        report_crash(error)
+        report_crash(error, getattr(args, "log_dir", None) or "logs")
         return 2
 
 

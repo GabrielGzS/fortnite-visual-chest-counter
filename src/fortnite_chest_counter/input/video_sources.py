@@ -154,6 +154,8 @@ class LiveSource:
             self._cond.notify_all()
 
     # ---- consumer ----
+    on_idle = None
+
     def frames(self):
         last = 0
         while not self._stop:
@@ -170,6 +172,8 @@ class LiveSource:
                 self.frames_processed += 1
                 last = seq
                 yield item
+            elif self.on_idle is not None:
+                self.on_idle()
 
     def elapsed(self):
         return time.monotonic() - self._t0
@@ -558,6 +562,8 @@ class StreamSource:
         else:
             CONSOLE.warn(text)
 
+    on_idle = None
+
     def frames(self):
         last, buffering, lagging = time.monotonic(), False, False   # notices are printed here, in the counting thread
         while not self._stop.is_set():
@@ -568,6 +574,8 @@ class StreamSource:
             except queue.Empty:
                 if self._done:
                     return
+                if self.on_idle is not None:
+                    self.on_idle()
                 if not buffering and not self._reconnecting and time.monotonic() - last > self.BUFFERING_AFTER:
                     buffering = True
                     self._say("buffering", f"BUFFERING - no video from the stream for {self.BUFFERING_AFTER:.0f} s (slow "

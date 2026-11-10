@@ -223,8 +223,8 @@ def test_set_counts_and_reset_from_the_app():
         C.set_counts(cfg, 0, 0, "reset")
         state = C.load_state(cfg["state"]["path"])
         assert (state["certain"], state["approximate"]) == (0, 0)
-        actions = [json.loads(l).get("action") for l in next((Path(tmp) / "logs").glob("*.jsonl")).read_text(
-            encoding="utf-8").splitlines()]
+        actions = [json.loads(line).get("action") for log in (Path(tmp) / "logs").glob("*.jsonl")
+                   for line in log.read_text(encoding="utf-8").splitlines()]
         assert "set_count" in actions and "reset" in actions
 
 
@@ -321,6 +321,126 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
                 qt.processEvents()
             paths.APP_DIR = previous_app_dir
             os.chdir(previous_dir)
+
+def test_second_source_combines_counts_resets_and_can_stop_independently():
+    qt = _qt()
+    if qt is None:
+        return
+    from unittest.mock import patch
+
+    from fortnite_chest_counter.gui import app as A
+
+    class FakeWorker:
+        def __init__(self):
+            self.argv = None
+            self.alive = False
+            self.commands = []
+            self.stderr_tail = []
+
+        def running(self):
+            return self.alive
+
+        def start(self, argv):
+            self.argv = argv
+            self.alive = True
+
+        def send(self, command):
+            self.commands.append(command)
+            return self.alive
+
+        def stop(self):
+            self.send("stop")
+
+    with (tempfile.TemporaryDirectory() as tmp,
+          patch.object(paths, "APP_DIR", Path(tmp)),
+          patch.object(A.MainWindow, "refresh_sources"),
+          patch.object(A, "ask", return_value=True),
+          patch.object(A, "show_error") as error):
+        win = A.MainWindow()
+        win.timer.stop()
+        win.slow.stop()
+        win.worker, win.secondary_worker = FakeWorker(), FakeWorker()
+        dashboard = win.dashboard
+        try:
+            win._fill_sources(["OBS Virtual Camera"], [(0, 0, 1280, 720), (1280, 0, 1920, 1080)],
+                              [("Projector", False)])
+            primary, secondary = dashboard.source, dashboard.secondary_source
+            screen1 = {"source": "desktop", "monitor": 1}
+            screen2 = {"source": "desktop", "monitor": 2}
+            assert secondary.findData({"source": "obs-camera"}) >= 0
+            assert secondary.findData({"source": "window", "window": "Projector"}) >= 0
+            primary.setCurrentIndex(primary.findData(screen1))
+            dashboard.token_mode.setCurrentText("Duo")
+            dashboard.token_teammates.setValue(20)
+            secondary.setCurrentIndex(secondary.findData(screen1))
+            win.start_counting()
+            assert error.call_count == 1
+            assert win.worker.argv is None and win.secondary_worker.argv is None
+            secondary.setCurrentIndex(secondary.findData(screen2))
+            win._fill_sources([], [(0, 0, 1280, 720), (1280, 0, 1920, 1080)])
+            assert secondary.currentData() == screen2
+            win.start_counting()
+            assert "--profile" in win.worker.argv and "--state" not in win.worker.argv
+            assert win.secondary_worker.argv[2:6] == ["--source", "desktop", "--monitor", "2"]
+            win.handle({"type": "connected"})
+            win.handle_secondary({"type": "connected"})
+            win.handle({"type": "counts", "certain": 5, "approx": 10})
+            win.handle_secondary({"type": "counts", "certain": 2, "approx": 4})
+            assert win.counts == (7, 14)
+            assert "14 coffres" in dashboard.token_odds.text()
+            assert dashboard.token_mode.currentText() == "Duo" and dashboard.token_teammates.isHidden()
+            assert "10" in dashboard.viewers.text()
+            win.reset_counts()
+            assert win.worker.commands == ["reset"] and win.secondary_worker.commands == ["reset"]
+            win.handle({"type": "reset"})
+            win.handle({"type": "counts", "certain": 0, "approx": 0})
+            win.handle_secondary({"type": "reset"})
+            win.handle_secondary({"type": "counts", "certain": 0, "approx": 0})
+            assert win.counts == (0, 0)
+            win.handle({"type": "counts", "certain": 2, "approx": 3})
+            win.handle_secondary({"type": "counts", "certain": 4, "approx": 5})
+            assert win.counts == (6, 8)
+            primary_cfg = win._cfg_for_actions()
+            secondary_cfg = win._secondary_cfg(primary_cfg)
+            assert win.secondary_worker.argv[win.secondary_worker.argv.index("--state") + 1] == secondary_cfg["state"]["path"]
+            C.set_counts(primary_cfg, 2, 3)
+            C.set_counts(secondary_cfg, 4, 5)
+            win.secondary_worker.alive = False
+            win.handle_secondary({"type": "exit", "code": 0})
+            assert "stopped unexpectedly" in dashboard.secondary_status.text()
+            assert win.mode == "counting" and win.counts == (6, 8)
+            win.stop_counting()
+            assert win.worker.commands[-1] == "stop"
+            win.worker.alive = False
+            win.handle({"type": "exit", "code": 0})
+            assert win.mode == "stopped"
+            win.reset_counts()
+            assert A.read_counts(primary_cfg["state"]["path"]) == (0, 0)
+            assert A.read_counts(secondary_cfg["state"]["path"]) == (0, 0)
+            secondary.setCurrentIndex(0)
+            win.start_counting()
+            assert win._workers_pending == {"primary"}
+            dashboard.token_teammates.setValue(8)
+            assert not dashboard.token_teammates.isHidden()
+            assert "8 coffres" in dashboard.token_odds.text()
+            win.worker.alive = False
+            win.handle({"type": "exit", "code": 0})
+            secondary.setCurrentIndex(secondary.findData(screen2))
+            win.start_counting()
+            win.close()
+            assert win.worker.commands[-1] == win.secondary_worker.commands[-1] == "stop"
+            assert win.mode == "stopping" and win.quit_when_stopped
+            win.worker.alive = False
+            win.handle({"type": "exit", "code": 0})
+            assert win.mode == "stopping" and win._workers_pending == {"secondary"}
+            win.secondary_worker.alive = False
+            win.handle_secondary({"type": "exit", "code": 0})
+            assert win.mode == "stopped" and not win.workers_active()
+        finally:
+            win.worker.alive = win.secondary_worker.alive = False
+            win._workers_pending.clear()
+            win.close()
+            qt.processEvents()
 
 
 # ------------------------------------------------------------------ diagnostic capture

@@ -38,10 +38,10 @@ class Worker:
             raise RuntimeError("the worker is already running")
         cmd = [paths.worker_python(), "-m", "fortnite_chest_counter", *argv]
         env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
-        self.stderr_tail, self.exit_code = [], None
-        self.process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                        cwd=str(paths.APP_DIR), env=env,
-                                        creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0)
+        process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   cwd=str(paths.APP_DIR), env=env,
+                                   creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0)
+        self.process, self.stderr_tail, self.exit_code = process, [], None
         out = threading.Thread(target=self._read_stdout, args=(self.process,), daemon=True, name="worker-stdout")
         err = threading.Thread(target=self._read_stderr, args=(self.process,), daemon=True, name="worker-stderr")
         out.start()
@@ -57,7 +57,7 @@ class Worker:
             process.stdin.write(line.encode("utf-8") + b"\n")
             process.stdin.flush()
             return True
-        except OSError:
+        except (OSError, ValueError):
             return False
 
     def stop(self):
@@ -69,7 +69,7 @@ class Worker:
             process.stdin.write(b"stop\n")
             process.stdin.flush()
             process.stdin.close()
-        except OSError:
+        except (OSError, ValueError):
             pass
 
     def kill(self):
