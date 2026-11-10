@@ -40,6 +40,18 @@ DEFAULTS = {
         "screen_total_text": "Total: #",
         "screen_show_types": True,
         "screen_show_matches": True,
+        "screen_opacity": 100,
+        "screen_personal_enabled": True,
+        "screen_team_enabled": True,
+        "screen_cumulative_enabled": True,
+        "screen_personal_title": "PERSONAL · CURRENT MATCH",
+        "screen_team_title": "TEAM · CURRENT MATCH",
+        "screen_cumulative_title": "ALL MATCHES",
+        "screen_personal_template": "Chests · {total}\nConfirmed · {certain}    Estimated · {approx}\nPirate Token · {chance}\n{types}",
+        "screen_team_template": "Chests · {total}    Players · {players}\nPirate Token · {chance}",
+        "screen_cumulative_template": "Chests · {total}\nMatches · {matches}\nPirate Token · {chance}",
+        "screen_team_text": "Team · # chests · {chance}",
+        "screen_cumulative_text": "All matches · # chests · {chance}",
         # v0.1.0 names, still understood: a config that sets only these gets "<label>: {count}" as its text.
         "certain_label": "CERTAIN OPENED CHESTS",
         "approximate_label": "APPROX. OPENED CHESTS",
@@ -92,6 +104,18 @@ DEFAULTS = {
         "token_boost": "Normal ×1",
         "live_preview": False,
         "show_activity": False,
+        "bot_name": "Chest Counter",
+        "bot_avatar_path": "",
+        "webhook_name": "Chest Counter",
+        "webhook_avatar_url": "https://raw.githubusercontent.com/NEVARLeVrai/fortnite-visual-chest-counter/ui/chest-tracker-dashboard/docs/previews/logo.png",
+        "discord_presence_enabled": True,
+        "discord_presence_rotate": True,
+        "discord_presence_interval": 30,
+        "discord_presence_activity": "watching",
+        "discord_presence_team_text": "{players} players · {total} chests",
+        "discord_presence_token_text": "Team token chance · {chance}",
+        "discord_presence_group_text": "Group · {total} chests · {matches} matches",
+        "discord_presence_idle_text": "the group leaderboard",
         "group_player": "",
         "group_scoreboard_id": "",
         "group_share_matches": False,
@@ -216,6 +240,31 @@ def _check(section, key, value):
     if section == "update" and key == "custom_limit_kb_per_second":
         return (isinstance(value, int) and not isinstance(value, bool) and MIN_CUSTOM_LIMIT_KB <= value <= MAX_CUSTOM_LIMIT_KB,
                 f"must be a whole number from {MIN_CUSTOM_LIMIT_KB} to {MAX_CUSTOM_LIMIT_KB}")
+    if section == "display" and key.startswith("screen_") and key.endswith(("_text", "_title", "_template")):
+        return (isinstance(value, str) and len(value) <= 4096 and "\x00" not in value, "must be text up to 4096 characters")
+    if section == "app" and key == "bot_avatar_path":
+        return (isinstance(value, str) and "\x00" not in value, "must be a file path or empty")
+    if section == "app" and key.startswith("discord_presence_") and key.endswith("_text"):
+        return (isinstance(value, str) and len(value) <= 128 and "\x00" not in value, "must be text up to 128 characters")
+    if section == "app" and key == "discord_presence_interval":
+        return (type(value) is int and 30 <= value <= 300, "must be a whole number from 30 to 300")
+    if section == "app" and key == "discord_presence_activity":
+        return (value in ("watching", "playing", "listening"), "must be watching, playing or listening")
+    if section == "app" and key in ("bot_name", "webhook_name"):
+        limit = 32 if key == "bot_name" else 80
+        return (isinstance(value, str) and 2 <= len(value) <= limit and value.isprintable(),
+                f"must be a printable name of 2 to {limit} characters")
+    if section == "app" and key == "webhook_avatar_url":
+        from urllib.parse import urlsplit
+        try:
+            parsed = urlsplit(value) if isinstance(value, str) else None
+        except ValueError:
+            parsed = None
+        return (value == "" or parsed is not None and len(value) <= 2048 and parsed.scheme == "https"
+                and bool(parsed.hostname) and not parsed.username and not parsed.password,
+                "must be an HTTPS image URL or empty")
+    if section == "display" and key == "screen_opacity":
+        return (type(value) is int and 20 <= value <= 100, "must be a whole number from 20 to 100")
     if key == "certain_min_tier":
         return (value in _TIERS, f"must be one of {list(_TIERS)}")
     if key == "source":

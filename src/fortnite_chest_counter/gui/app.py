@@ -30,10 +30,10 @@ from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QGuiAp
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
                                QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QMenu, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
-                               QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QSystemTrayIcon, QVBoxLayout, QWidget)
+                               QScrollArea, QSizePolicy, QSlider, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QSystemTrayIcon, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
-from fortnite_chest_counter import diagnostics_cleanup, discord_bot, discord_group, discord_scoreboard, discord_summary, match_history, match_lifecycle, paths, profiles, settings
+from fortnite_chest_counter import diagnostics_cleanup, discord_bot, discord_group, discord_scoreboard, discord_summary, match_history, match_lifecycle, match_stats, paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -594,35 +594,63 @@ class MaterialComboBox(QComboBox):
 
 
 class ScreenOverlayCard(QFrame):
-    """The same on-screen overlay content in settings and in the floating window."""
+    """Render personal, team and lifetime statistics as distinct overlay sections."""
 
     def __init__(self, flags=Qt.Widget):
         super().__init__(None, flags)
         self._floating = flags != Qt.Widget
+        self.plain_text = ""
         self.setObjectName("overlayBox")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(9, 6, 13, 6)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 10, 16, 10)
+        layout.setSpacing(12)
         self.chest = ChestIllustration(compact=True)
-        layout.addWidget(self.chest)
-        self.caption = label("", "screenOverlayCaption", wrap=True)
-        self.caption.setTextFormat(Qt.PlainText)
-        self.caption.setMaximumWidth(720)
-        layout.addWidget(self.caption, 1)
-        layout.addStretch()
+        layout.addWidget(self.chest, 0, Qt.AlignTop)
+        content = QVBoxLayout()
+        content.setSpacing(8)
+        self.sections = []
+        for index, title in enumerate(("PERSONAL · CURRENT MATCH", "TEAM · CURRENT MATCH", "ALL MATCHES")):
+            group = QFrame()
+            group.setObjectName("overlaySection")
+            column = QVBoxLayout(group)
+            column.setContentsMargins(0, 7 if index else 0, 0, 0)
+            column.setSpacing(3)
+            heading = label(title, "overlaySectionTitle")
+            column.addWidget(heading)
+            value = label("", "screenOverlayCaption", wrap=True)
+            value.setTextFormat(Qt.PlainText)
+            value.setMaximumWidth(720)
+            column.addWidget(value)
+            if index:
+                group.setStyleSheet(f"QFrame#overlaySection {{ border-top: 1px solid {theme.BORDER}; }}")
+                group.hide()
+            content.addWidget(group)
+            self.sections.append((group, value))
+            if not hasattr(self, "headings"):
+                self.headings = []
+            self.headings.append(heading)
+        self.caption = self.sections[0][1]
+        layout.addLayout(content, 1)
 
-    def set_text(self, text):
-        if self.caption.text() == text:
+    def set_text(self, text, *, sections=None, titles=None):
+        if titles is not None:
+            for heading, title in zip(self.headings, titles):
+                heading.setText(title)
+        parts = tuple(sections) if sections is not None else (text, "", "")
+        if text == self.plain_text and parts == getattr(self, "_parts", None):
             return
-        if self._floating:
-            self.ensurePolished()
-            self.caption.ensurePolished()
-            metrics = self.caption.fontMetrics()
-            width = max((metrics.horizontalAdvance(line) for line in text.splitlines()), default=0) + 4
-            limit = self.caption.maximumWidth()
-            self.caption.setWordWrap(width > limit)
-            self.caption.setMinimumWidth(min(limit, width))
-        self.caption.setText(text)
+        self.plain_text = text
+        self._parts = parts
+        for (group, value), part in zip(self.sections, parts):
+            group.setVisible(bool(part))
+            value.setText(part)
+            if self._floating:
+                value.ensurePolished()
+                metrics = value.fontMetrics()
+                width = max((metrics.horizontalAdvance(line) for line in part.splitlines()), default=0) + 4
+                limit = value.maximumWidth()
+                value.setWordWrap(width > limit)
+                value.setMinimumWidth(min(limit, width))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1395,6 +1423,7 @@ class Dashboard(QWidget):
         self.detail.currentIndexChanged.connect(lambda _: win.render_log())
 
     def set_recent_matches(self, matches):
+        self.saved_matches = tuple(matches)
         self.saved_match_count = len(matches)
         self.refresh_screen_overlay()
         lines = [f"{match.finished_at} · {match.mode}\n{match.total:,} chests"
@@ -1538,7 +1567,33 @@ class Dashboard(QWidget):
         self.screen_overlay_display = load_cfg()[0]["display"]
         self.refresh_screen_overlay()
 
-    def screen_overlay_text(self, display):
+    def match_summaries(self):
+        cfg = load_cfg()[0]
+        group = getattr(self.win, "group", None)
+        sessions = {session.fingerprint: session for session in group._sessions} if group is not None else {}
+        webhook = group._webhook if group is not None else None
+        webhook_id = webhook.id if webhook else ""
+        player = cfg["app"]["group_player"].strip()
+        sharing = bool(cfg["app"]["group_share_matches"] and webhook)
+        certain, total = self.win.counts
+        boost = self.token_boost.currentData()
+        fingerprint = self.win._match_fingerprint
+        try:
+            profile = profiles.apply(cfg)
+            identity = f"{profile['id']}@{profile['created_at'] or ''}"
+            snapshot, _, _ = match_history.read_snapshot(identity, (Path(cfg["state"]["path"]),))
+        except (OSError, ValueError, C.UserError):
+            snapshot = ""
+        matches = getattr(self, "saved_matches", ())
+        if not fingerprint:
+            fingerprint = next((match.session_fingerprint for match in matches if match.snapshot == snapshot
+                                and match.group_webhook_id == webhook_id), "")
+        current = match_stats.team(sessions.get(fingerprint), player, current=(certain, total, boost)) if sharing and fingerprint else None
+        cumulative = match_stats.cumulative(matches, sessions, webhook_id, snapshot=snapshot, certain=certain,
+                                           total=total, boost=boost, fingerprint=fingerprint, player=player, sharing=sharing, active=self.win._match_active)
+        return current, cumulative
+
+    def screen_overlay_sections(self, display):
         certain, total = self.win.counts
         approx = max(0, total - certain)
         total_text = display["screen_total_text"]
@@ -1557,7 +1612,59 @@ class Dashboard(QWidget):
             lines.append(f"Matches saved · {fmt(self.saved_match_count)}")
         if display["screen_show_types"] and self.types.text():
             lines.append(f"Chest types: {self.types.text()}")
-        return "\n".join(lines)
+        extras = []
+        team, cumulative = self.match_summaries()
+        for key, result in (("screen_team_text", team), ("screen_cumulative_text", cumulative)):
+            wording = display.get(key, "")
+            text = ""
+            if wording.strip() and result is not None:
+                text = wording.replace("#", settings.format_count(result.total, display["use_thousands_separator"]))
+                text = text.replace("{chance}", result.chance).replace("{players}", str(len(result.players)))
+            extras.append(text)
+        legacy = ("\n".join(lines), *extras)
+        values = {
+            "total": settings.format_count(total, display["use_thousands_separator"]),
+            "certain": settings.format_count(certain, display["use_thousands_separator"]),
+            "approx": settings.format_count(approx, display["use_thousands_separator"]),
+            "chance": self.token_chance,
+            "types": f"Chest types · {self.types.text()}" if display["screen_show_types"] and self.types.text() else "",
+            "matches": str(1 if total or self.win._match_active else 0),
+        }
+        result = []
+        for index, (scope, summary) in enumerate((("personal", None), ("team", team), ("cumulative", cumulative))):
+            if not display.get(f"screen_{scope}_enabled", True) or scope == "team" and summary is None:
+                result.append("")
+                continue
+            template = display.get(f"screen_{scope}_template", "")
+            if not template:
+                result.append(legacy[index])
+                continue
+            fields = dict(values)
+            if summary is not None:
+                fields.update(total=settings.format_count(summary.total, display["use_thousands_separator"]),
+                              certain=settings.format_count(summary.certain, display["use_thousands_separator"]),
+                              approx=settings.format_count(summary.total - summary.certain, display["use_thousands_separator"]),
+                              chance=summary.chance, matches=str(summary.matches),
+                              players=str(len(summary.players)), names=" · ".join(summary.players))
+            else:
+                fields.update(players="1", names=load_cfg()[0]["app"]["group_player"])
+            hidden = {"chance"} if not display["screen_show_token"] else set()
+            if not display.get("screen_show_matches"):
+                hidden.add("matches")
+            section = []
+            for line in template.replace("\\n", "\n").splitlines():
+                if any("{" + key + "}" in line for key in hidden) or "{types}" in line and not fields["types"]:
+                    continue
+                for key, value in fields.items():
+                    line = line.replace("{" + key + "}", value)
+                if line.strip():
+                    section.append(line)
+            result.append("\n".join(section))
+        return tuple(result)
+
+    def screen_overlay_text(self, display):
+        return "\n".join(part for part in self.screen_overlay_sections(display) if part)
+
 
     def refresh_screen_overlay(self):
         page = getattr(self.win, "overlay", None)
@@ -1565,12 +1672,20 @@ class Dashboard(QWidget):
             page.refresh_preview()
         if self.screen_overlay_display is None:
             return
-        text = self.screen_overlay_text(self.screen_overlay_display)
-        self.overlay_preview.set_text(text)
+        sections = self.screen_overlay_sections(self.screen_overlay_display)
+        text = "\n".join(part for part in sections if part)
+        titles = tuple(self.screen_overlay_display[f"screen_{scope}_title"] for scope in ("personal", "team", "cumulative"))
+        self.overlay_preview.set_text(text, sections=sections, titles=titles)
         if self.screen_overlay is None or not page.show_screen_overlay.isChecked():
             return
-        if text != self.screen_overlay.caption.text():
-            self.screen_overlay.set_text(text)
+        if not text:
+            self.screen_overlay.hide()
+            return
+        self.screen_overlay.setWindowOpacity(self.screen_overlay_display["screen_opacity"] / 100)
+        if not self.screen_overlay.isVisible():
+            self.screen_overlay.show()
+        if text != self.screen_overlay.plain_text:
+            self.screen_overlay.set_text(text, sections=sections, titles=titles)
             self.screen_overlay.adjustSize()
             self.position_screen_overlay()
 
@@ -1629,9 +1744,46 @@ class OverlayPage(QWidget):
         self.share_screen_overlay.toggled.connect(win.dashboard.apply_screen_overlay_capture)
         self.share_screen_overlay.toggled.connect(lambda enabled: self._save_screen_option("screen_overlay_shared", enabled))
         box_layout.addWidget(self.share_screen_overlay)
+        opacity_row = QHBoxLayout()
+        opacity_row.addWidget(label("Transparency"))
+        self.transparency = QSlider(Qt.Horizontal)
+        self.transparency.setRange(0, 80)
+        self.transparency.setSingleStep(5)
+        self.transparency.setAccessibleName("Overlay transparency")
+        self.transparency_value = label("0%")
+        opacity_row.addWidget(self.transparency, 1)
+        opacity_row.addWidget(self.transparency_value)
+        box_layout.addLayout(opacity_row)
+        self.transparency.valueChanged.connect(self._changed)
         layout.addWidget(box)
 
-        box, box_layout = card("Chest counts on screen and in OBS")
+        box, box_layout = card("On-screen sections", "Edit each section independently. Use {total}, {certain}, {approx}, "
+                               "{chance}, {matches}, {players}, {names} and {types}. Team appears only for a verified shared match.")
+        self.section_enabled = {}
+        self.section_titles = {}
+        self.section_templates = {}
+        for scope, caption in (("personal", "Personal"), ("team", "Team"), ("cumulative", "All matches")):
+            header = QHBoxLayout()
+            enabled = QCheckBox(caption)
+            title = QLineEdit()
+            title.setPlaceholderText("Section title")
+            header.addWidget(enabled)
+            header.addWidget(title, 1)
+            box_layout.addLayout(header)
+            template = QPlainTextEdit()
+            template.setMinimumHeight(76)
+            template.setMaximumHeight(100)
+            template.setPlaceholderText("One line per statistic")
+            box_layout.addWidget(template)
+            self.section_enabled[scope] = enabled
+            self.section_titles[scope] = title
+            self.section_templates[scope] = template
+            enabled.toggled.connect(self._changed)
+            title.textChanged.connect(self._changed)
+            template.textChanged.connect(self._changed)
+        layout.addWidget(box)
+
+        box, box_layout = card("OBS text layout")
         self.modes = QButtonGroup(self)
         self.mode_buttons = {}
         self.mode_examples = {}
@@ -1652,7 +1804,7 @@ class OverlayPage(QWidget):
             examples_layout.addWidget(example, i, 1)
             radio.toggled.connect(self._changed)
         box_layout.addLayout(examples_layout)
-        box_layout.addWidget(label("The selected example matches the on-screen preview. OBS shows only the selected counts.", "hint", wrap=True))
+        box_layout.addWidget(label("These layouts control the OBS text output. Configure the floating overlay using On-screen sections.", "hint", wrap=True))
         self.show_token = QCheckBox("Show Pirate Token odds on screen")
         self.show_types = QCheckBox("Show chest types on screen")
         self.show_matches = QCheckBox("Show saved match count on screen")
@@ -1661,7 +1813,7 @@ class OverlayPage(QWidget):
             toggle.toggled.connect(self._changed)
         layout.addWidget(box)
 
-        box, box_layout = card("Wording", "Use # for a number, or #C and #A for the combined line.")
+        box, box_layout = card("OBS wording", "Use # for a number, or #C and #A for the combined line.")
         form = QGridLayout()
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(8)
@@ -1684,7 +1836,7 @@ class OverlayPage(QWidget):
         form.setColumnStretch(1, 1)
         self.line_hint = label("#C = confirmed openings · #A = estimated openings", "hint", wrap=True)
         form.addWidget(self.line_hint, 3, 1)
-        form.addWidget(label("On-screen labels", "cardTitle"), 4, 0, 1, 2)
+        form.addWidget(label("Legacy labels (used when the Personal template is empty)", "cardTitle"), 4, 0, 1, 2)
         for row, (name, edit) in enumerate((("Total", self.total_text), ("Pirate Token", self.token_text)), 5):
             form.addWidget(label(name), row, 0)
             form.addWidget(edit, row, 1)
@@ -1701,6 +1853,8 @@ class OverlayPage(QWidget):
 
         box, box_layout = card("On-screen preview", "Preview of the overlay using the current counts.")
         self.preview = ScreenOverlayCard()
+        self.preview_opacity = QGraphicsOpacityEffect(self.preview)
+        self.preview.setGraphicsEffect(self.preview_opacity)
         box_layout.addWidget(self.preview)
         layout.addWidget(box)
 
@@ -1794,6 +1948,11 @@ class OverlayPage(QWidget):
         self.total_text.setText(self.display["screen_total_text"])
         self.show_types.setChecked(self.display["screen_show_types"])
         self.show_matches.setChecked(self.display["screen_show_matches"])
+        self.transparency.setValue(100 - self.display["screen_opacity"])
+        for scope in self.section_enabled:
+            self.section_enabled[scope].setChecked(self.display[f"screen_{scope}_enabled"])
+            self.section_titles[scope].setText(self.display[f"screen_{scope}_title"])
+            self.section_templates[scope].setPlainText(self.display[f"screen_{scope}_template"])
         ws = cfg["obs_websocket"]
         self.ws_enabled.blockSignals(True)
         self.ws_enabled.setChecked(ws["enabled"])
@@ -1909,7 +2068,12 @@ class OverlayPage(QWidget):
         texts = {"use_thousands_separator": self.thousands.isChecked(),
                  "screen_show_token": self.show_token.isChecked(),
                  "screen_show_types": self.show_types.isChecked(),
-                 "screen_show_matches": self.show_matches.isChecked()}
+                 "screen_show_matches": self.show_matches.isChecked(),
+                 "screen_opacity": 100 - self.transparency.value()}
+        for scope in self.section_enabled:
+            texts[f"screen_{scope}_enabled"] = self.section_enabled[scope].isChecked()
+            texts[f"screen_{scope}_title"] = self.section_titles[scope].text().strip()
+            texts[f"screen_{scope}_template"] = self.section_templates[scope].toPlainText().strip()
         if self.token_text.text().strip():
             texts["screen_token_text"] = self.token_text.text().strip()
         if self.total_text.text().strip():
@@ -1928,6 +2092,10 @@ class OverlayPage(QWidget):
         if self._loading:
             return
         mode = self._mode()
+        self.transparency_value.setText(f"{self.transparency.value()}%")
+        floating = self.win.dashboard.screen_overlay
+        if floating is not None:
+            floating.setWindowOpacity((100 - self.transparency.value()) / 100)
         self.certain_label.setVisible(mode in ("certain", "stacked"))
         self.certain_text.setVisible(mode in ("certain", "stacked"))
         self.approx_label.setVisible(mode in ("approx", "stacked"))
@@ -1942,17 +2110,22 @@ class OverlayPage(QWidget):
         display = {**self.display, **self.changes()}
         render = self.win.dashboard.screen_overlay_text
         preview_text = render(display)
-        self.preview.set_text(preview_text)
+        self.preview_opacity.setOpacity(display["screen_opacity"] / 100)
+        self.preview.set_text(preview_text, sections=self.win.dashboard.screen_overlay_sections(display),
+                              titles=tuple(display[f"screen_{scope}_title"] for scope in ("personal", "team", "cumulative")))
         examples = dict(display)
         for key, field, convert in (("certain_text", self.certain_text, C.text_from_hash),
                                     ("approx_text", self.approx_text, C.text_from_hash),
                                     ("combined_status_format", self.line_text, C.line_from_markers)):
             if field.text().strip():
                 examples[key] = convert(field.text().strip())
-        examples.update(screen_show_token=False, screen_show_types=False, screen_show_matches=False)
+        examples.update(screen_show_token=False, screen_show_types=False, screen_show_matches=False,
+                        screen_team_text="", screen_cumulative_text="", screen_personal_template="",
+                        screen_team_enabled=False, screen_cumulative_enabled=False)
         selected_mode = C.display_mode(display)
         for mode, example in self.mode_examples.items():
-            example.setText(preview_text if mode == selected_mode else render({**examples, **C.MODE_SETTINGS[mode]}))
+            example.setText(C.overlay_text({**examples, **C.MODE_SETTINGS[mode]},
+                                          {"certain": self.win.counts[0], "approximate": self.win.counts[1]}))
 
     def _defaults(self):
         d = settings.DEFAULTS["display"]
@@ -1961,6 +2134,9 @@ class OverlayPage(QWidget):
         self.line_text.setText(C.markers_from_line(d["combined_status_format"]))
         self.token_text.setText(d["screen_token_text"])
         self.total_text.setText(d["screen_total_text"])
+        for scope in self.section_enabled:
+            self.section_titles[scope].setText(d[f"screen_{scope}_title"])
+            self.section_templates[scope].setPlainText(d[f"screen_{scope}_template"])
 
     def _copy_path(self):
         QApplication.clipboard().setText(self.obs_path.text())
@@ -2011,7 +2187,7 @@ class SettingsPage(QWidget):
         layout.addWidget(box)
 
         box, box_layout = card("Session logs", "Logs are small text files in the logs folder. They are what you send when "
-                                               "reporting a problem.")
+                                               "reporting a problem. Save changes to apply logging preferences to the active session.")
         self.logging = QCheckBox("Keep a log of every counting session")
         self.snapshots = QCheckBox("Also save a small picture of every chest pop-up (to report missed or wrong chests)")
         box_layout.addWidget(self.logging)
@@ -2210,6 +2386,7 @@ class GroupPage(QWidget):
     scoreboard_result = Signal(object)
     scoreboard_removed = Signal(object)
     players_reset = Signal(object)
+    public_board_result = Signal(object)
 
     """Local match history and the shared Discord leaderboard."""
 
@@ -2221,13 +2398,19 @@ class GroupPage(QWidget):
         self._ranks_key = None
         self._team_summary = None
         self._host_match_settings = None
+        self._sessions = ()
         self._scoreboard_id = ""
         self._scoreboard_pending = False
         self._published = None
+        self._public_pending = False
+        self._publish_channel = None
+        self._channels = ()
+        self._published_channel = ""
         self._next_scoreboard_refresh = 0.0
         self.scoreboard_result.connect(self._scoreboard_result)
         self.scoreboard_removed.connect(self._scoreboard_removed)
         self.players_reset.connect(self._players_reset)
+        self.public_board_result.connect(self._public_board_result)
         layout = self.group_layout = page_layout(self, "Group", "Save your matches and contribute to one shared Discord leaderboard.")
         setup, setup_layout = card("Player setup", "Use your own player name and the webhook shared by your group.")
         form = QGridLayout()
@@ -2248,9 +2431,17 @@ class GroupPage(QWidget):
         form.addWidget(label("Group webhook"), 1, 0)
         form.addWidget(self.webhook, 1, 1)
         self.scoreboard = QLineEdit()
-        self.scoreboard.setPlaceholderText("Shared message link or ID")
-        form.addWidget(label("Leaderboard message"), 2, 0)
+        self.scoreboard.setPlaceholderText("Shared data message link or ID")
+        form.addWidget(label("Shared data message"), 2, 0)
         form.addWidget(self.scoreboard, 2, 1)
+        self.webhook_name = QLineEdit()
+        self.webhook_avatar = QLineEdit()
+        self.webhook_name.setMaxLength(80)
+        self.webhook_avatar.setPlaceholderText("HTTPS image URL, or empty for the webhook avatar")
+        form.addWidget(label("Webhook display name"), 4, 0)
+        form.addWidget(self.webhook_name, 4, 1)
+        form.addWidget(label("Webhook avatar URL"), 5, 0)
+        form.addWidget(self.webhook_avatar, 5, 1)
         setup_layout.addLayout(form)
         self.share_matches = QCheckBox("Share matches with my group")
         self.share_matches.setToolTip("Turn this off to keep new matches in your local history only.")
@@ -2277,7 +2468,8 @@ class GroupPage(QWidget):
         history_layout.addLayout(row)
         self.stats = label("", "hint", wrap=True)
         history_layout.addWidget(self.stats)
-        self.history = self._table(("Finished", "Player", "Mode", "Certain", "Approx", "Total", "Token chance"))
+        self.history = self._table(("Finished", "Player", "Mode", "Certain", "Approx", "Total", "Token chance",
+                                    "Team players", "Team total", "Team chance"))
         self.history.currentItemChanged.connect(self._selection_changed)
         self.history.itemChanged.connect(lambda *_: self.update_checked_actions())
         self.select_matches.clicked.connect(lambda checked: self.check_all(self.history, checked))
@@ -2286,10 +2478,15 @@ class GroupPage(QWidget):
         history_layout.addWidget(self.feedback)
         layout.addWidget(history)
 
-        ranks, ranks_layout = card("Shared leaderboard", "The host publishes one message. Share its link with players to show the same board here.")
+        ranks, ranks_layout = card("Shared leaderboard", "Choose where the bot publishes the live board. Share the data message ID with Guests to sync their apps.")
         controls = QHBoxLayout()
-        self.publish_board = button("Publish leaderboard", on_click=lambda: self.sync_scoreboard(publish=True))
-        self.copy_board = button("Copy message ID", on_click=self.copy_scoreboard_id)
+        self.leaderboard_channel = MaterialComboBox()
+        self.leaderboard_channel.setMinimumWidth(180)
+        self.leaderboard_channel.setToolTip("Discord text channels where the online bot can send embeds.")
+        self.leaderboard_channel.addItem("Start the bot to list channels", None)
+        controls.addWidget(self.leaderboard_channel, 1)
+        self.publish_board = button("Publish leaderboard", on_click=self.publish_in_channel)
+        self.copy_board = button("Copy sync ID", on_click=self.copy_scoreboard_id)
         self.delete_board = button("Delete message...", on_click=self.delete_scoreboard)
         controls.addLayout(connected_buttons(self.publish_board, self.copy_board, self.delete_board))
         controls.addStretch(1)
@@ -2334,6 +2531,7 @@ class GroupPage(QWidget):
             self.bot_settings.setChecked(False)
         self.bot_section.setVisible(role == "host")
         self.delete_board.setVisible(role == "host")
+        self.leaderboard_channel.setVisible(role == "host")
         self.rank_actions.setVisible(role == "host")
         if self._ranks_key is not None:
             self.render_ranks(self._ranks_key[0], self._team_summary)
@@ -2378,9 +2576,23 @@ class GroupPage(QWidget):
             row.setCheckState(0, Qt.Unchecked)
             self.history.addTopLevelItem(row)
         self.history.setCurrentItem(self.history.topLevelItem(0))
+        self.refresh_history_teams()
+    def refresh_history_teams(self):
+        sessions = {session.fingerprint: session for session in self._sessions}
+        webhook_id = self._webhook.id if self._webhook else ""
+        for i in range(self.history.topLevelItemCount()):
+            item = self.history.topLevelItem(i)
+            match = self.matches[item.data(0, Qt.UserRole)]
+            result = match_stats.saved_team(match, sessions, webhook_id)
+            for column, text in zip((7, 8, 9), ((" · ".join(result.players), fmt(result.total), result.chance)
+                                               if result is not None else ("", "", ""))):
+                item.setText(column, text)
+
     def load_player_setup(self):
         cfg = load_cfg()[0]["app"]
         self.player.setText(cfg["group_player"])
+        self.webhook_name.setText(cfg["webhook_name"])
+        self.webhook_avatar.setText(cfg["webhook_avatar_url"])
         self.share_matches.blockSignals(True)
         self.share_matches.setChecked(cfg["group_share_matches"])
         self.share_matches.blockSignals(False)
@@ -2458,6 +2670,11 @@ class GroupPage(QWidget):
         previous = self._webhook, self._scoreboard_id
         try:
             player = discord_group.validate_player(self.player.text())
+            for key, value in (("webhook_name", self.webhook_name.text().strip()),
+                               ("webhook_avatar_url", self.webhook_avatar.text().strip())):
+                valid, reason = settings._check("app", key, value)
+                if not valid:
+                    raise ValueError(f"{key} {reason}.")
             ident = discord_scoreboard.message_id(self.scoreboard.text())
             if self.webhook.text().strip():
                 old = self._webhook
@@ -2466,13 +2683,16 @@ class GroupPage(QWidget):
                     if old is not None and old.id != self._webhook.id and ident == self._scoreboard_id:
                         ident = ""
                     self.win.discord.stop_bot()
-            C.update_config_file(config_file(), "app", {"group_player": player, "group_scoreboard_id": ident})
+            C.update_config_file(config_file(), "app", {"group_player": player, "group_scoreboard_id": ident,
+                                                        "webhook_name": self.webhook_name.text().strip(),
+                                                        "webhook_avatar_url": self.webhook_avatar.text().strip()})
         except (C.UserError, OSError, ValueError) as error:
             self.player_status.setText(str(error))
             return
         self.load_player_setup()
         if previous != (self._webhook, self._scoreboard_id):
             self._host_match_settings = None
+            self._sessions = ()
             self.apply_match_settings()
             self.render_ranks(())
         self.player_status.setText("Player setup saved." if self._webhook else "Player saved. Add the shared webhook to contribute.")
@@ -2493,6 +2713,7 @@ class GroupPage(QWidget):
             return
         self.load_player_setup()
         self._host_match_settings = None
+        self._sessions = ()
         self.apply_match_settings()
         self.render_ranks(())
         self.player_status.setText("Webhook removed.")
@@ -2500,7 +2721,7 @@ class GroupPage(QWidget):
     def copy_scoreboard_id(self):
         if self._scoreboard_id:
             QApplication.clipboard().setText(self._scoreboard_id)
-            self.player_status.setText("Leaderboard message ID copied.")
+            self.player_status.setText("Shared data message ID copied.")
 
     def _is_board_host(self):
         runner = self.win.discord.runner
@@ -2508,17 +2729,82 @@ class GroupPage(QWidget):
                 and runner.status[0] == "online"
                 and getattr(runner, "webhook", None) == self._webhook)
 
+    def refresh_leaderboard_channels(self):
+        runner = self.win.discord.runner
+        online = self._is_board_host()
+        channels = runner.channels() if online and hasattr(runner, "channels") else ()
+        if channels != self._channels or not self.leaderboard_channel.count() or not channels:
+            chosen = self.leaderboard_channel.currentData()
+            self._channels = channels
+            self.leaderboard_channel.clear()
+            if channels:
+                for ident, name in channels:
+                    self.leaderboard_channel.addItem(name, ident)
+                selected = chosen or getattr(runner, "published_channel", "")
+                self.leaderboard_channel.setCurrentIndex(max(0, self.leaderboard_channel.findData(selected)))
+            else:
+                self.leaderboard_channel.addItem("No accessible channels" if online else "Start the bot to list channels", None)
+        published = getattr(runner, "published_channel", "") if online else ""
+        if published != self._published_channel:
+            self._published_channel = published
+            if published and self.leaderboard_channel.findData(published) >= 0:
+                self.leaderboard_channel.setCurrentIndex(self.leaderboard_channel.findData(published))
+        self.leaderboard_channel.setEnabled(online and bool(channels) and not self._public_pending)
+
+    def publish_in_channel(self):
+        if not self._is_board_host() or self._public_pending or self._scoreboard_pending:
+            return
+        channel = self.leaderboard_channel.currentData()
+        if channel is None:
+            self.player_status.setText("Choose an accessible Discord channel first.")
+            return
+        self._publish_channel = channel
+        self.sync_scoreboard(publish=True)
+
+    def publish_public_board(self):
+        channel, self._publish_channel = self._publish_channel, None
+        runner = self.win.discord.runner
+        if channel is None or not self._is_board_host():
+            return
+        mode = self.win.current_game_mode()
+        settings = (mode, self.win.dashboard.token_boost.currentData()) if mode in discord_scoreboard.MODES else None
+        self._public_pending = True
+        self.publish_board.setEnabled(False)
+        try:
+            future = runner.publish_board(channel, settings=settings)
+        except ValueError as error:
+            self._public_pending = False
+            self.player_status.setText(str(error))
+            return
+        def done(result):
+            try:
+                link, error = result.result(), ""
+            except Exception:
+                link, error = "", "Could not publish the board. Check View Channel, Send Messages and Embed Links."
+            self.public_board_result.emit((runner, link, error))
+        future.add_done_callback(done)
+
+    def _public_board_result(self, result):
+        runner, link, error = result
+        self._public_pending = False
+        if runner is not self.win.discord.runner:
+            return
+        self.player_status.setText(error or f"Leaderboard published. {link}")
+        self.refresh_leaderboard_channels()
+
     def sync_scoreboard(self, publish=False):
         webhook = self._webhook
         ident = self._scoreboard_id
         host = self._is_board_host()
         self.publish_board.setVisible(self.win.group_role == "host")
-        self.publish_board.setEnabled(host and not self._scoreboard_pending)
+        self.refresh_leaderboard_channels()
+        self.publish_board.setEnabled(host and bool(self.leaderboard_channel.currentData())
+                                      and not self._scoreboard_pending and not self._public_pending)
         self.copy_board.setEnabled(bool(ident))
         self.update_checked_actions()
-        self.delete_board.setEnabled(bool(webhook and ident and self.win.group_role == "host"
-                                         and not self._scoreboard_pending))
+        self.delete_board.setEnabled(bool(webhook and ident and host and not self._scoreboard_pending))
         if webhook is None:
+            self._sessions = ()
             self.render_ranks(())
             return
         if publish and not host:
@@ -2527,26 +2813,33 @@ class GroupPage(QWidget):
             return
         if not host and (not ident or self.win.pages.currentWidget() not in (self, self.win.dashboard)):
             return
-        self._next_scoreboard_refresh = time.monotonic() + 10
+        self._next_scoreboard_refresh = time.monotonic() + 5
         self._scoreboard_pending = True
         previous = self._published
         dashboard = self.win.dashboard
         game_mode = self.win.current_game_mode()
         host_settings = (game_mode, dashboard.token_boost.currentData()) if game_mode in discord_scoreboard.MODES else None
+        if host and hasattr(self.win.discord.runner, "set_board_settings"):
+            self.win.discord.runner.set_board_settings(host_settings)
 
         def sync():
             try:
                 created = None
                 if host:
                     settings = host_settings
-                    players, team = discord_group.GroupStore(webhook.id).board()
+                    store = discord_group.GroupStore(webhook.id)
+                    players, team = store.board()
+                    sessions = store.sessions()
                     ranking = discord_scoreboard.rows(players)
                     if (self._is_board_host() and webhook == self._webhook and ident == self._scoreboard_id and
-                            (publish or (ident and previous != (webhook.id, ident, ranking, team, settings)))):
-                        created, _ = discord_scoreboard.publish(webhook, ident, ranking, team, settings=settings)
+                            (publish or (ident and previous != (webhook.id, ident, ranking, team, settings, sessions)))):
+                        created, _ = discord_scoreboard.publish(webhook, ident, ranking, team, settings=settings, sessions=sessions, data_only=True)
                 else:
-                    ranking, team, settings = discord_scoreboard.fetch(webhook, ident, with_settings=True)
-                result = (webhook, ident, host, ranking, team, settings, created, "")
+                    ranking, team, settings, sessions = discord_scoreboard.fetch(webhook, ident, with_sessions=True)
+                    store = discord_group.GroupStore(webhook.id)
+                    store.merge_sessions(sessions)
+                    sessions = store.sessions()
+                result = (webhook, ident, host, ranking, team, settings, created, "", sessions)
             except (OSError, ValueError, sqlite3.Error) as error:
                 result = (webhook, ident, host, (), None, None, None, str(error))
             self.scoreboard_result.emit(result)
@@ -2555,7 +2848,7 @@ class GroupPage(QWidget):
 
     def delete_scoreboard(self):
         webhook, ident = self._webhook, self._scoreboard_id
-        if self.win.group_role != "host" or not webhook or not ident or self._scoreboard_pending:
+        if not self._is_board_host() or not webhook or not ident or self._scoreboard_pending:
             return
         if not ask(self, "Delete the leaderboard message?", "Remove the published message from Discord? "
                    "Saved matches and shared standings are kept.", "Delete message", danger=True):
@@ -2567,12 +2860,15 @@ class GroupPage(QWidget):
         self.publish_board.setEnabled(False)
         self.delete_board.setEnabled(False)
 
+        runner = self.win.discord.runner
         def remove():
             try:
+                if runner is not None and hasattr(runner, "delete_board"):
+                    runner.delete_board().result(timeout=15)
                 discord_scoreboard.delete(webhook, ident)
                 error = ""
-            except (OSError, ValueError) as failure:
-                error = str(failure)
+            except Exception:
+                error = "Could not delete the board. Check the bot and its channel permissions."
             self.scoreboard_removed.emit((webhook, ident, error))
 
         threading.Thread(target=remove, daemon=True, name="group-scoreboard-delete").start()
@@ -2597,7 +2893,7 @@ class GroupPage(QWidget):
         self.sync_scoreboard()
 
     def _scoreboard_result(self, result):
-        webhook, ident, host, ranking, team, settings, published, error = result
+        webhook, ident, host, ranking, team, settings, published, error, *received_sessions = result
         self._scoreboard_pending = False
         if webhook != self._webhook or ident != self._scoreboard_id:
             self._next_scoreboard_refresh = 0
@@ -2605,11 +2901,12 @@ class GroupPage(QWidget):
         if host and self.win.group_role != "host" and not published:
             return
         if error:
+            self._publish_channel = None
             self.player_status.setText(error)
             self.publish_board.setEnabled(self._is_board_host())
             return
         if published:
-            self._published = (webhook.id, published, ranking, team, settings)
+            self._published = (webhook.id, published, ranking, team, settings, received_sessions[0] if received_sessions else ())
             if not ident:
                 self._scoreboard_id = published
                 self.scoreboard.setText(published)
@@ -2618,12 +2915,17 @@ class GroupPage(QWidget):
                 except (C.UserError, OSError) as error:
                     self.player_status.setText(f"Leaderboard published. Copy and save its message ID. {error}")
                 else:
-                    self.player_status.setText("Leaderboard published. Share its message ID with your group.")
+                    self.player_status.setText("Group sync ready. Share its data message ID with Guests.")
             self.copy_board.setEnabled(True)
+        if received_sessions:
+            self._sessions = received_sessions[0]
+            self.refresh_history_teams()
+            self.win.dashboard.refresh_screen_overlay()
         if not host and self.win.group_role == "guest" and settings != self._host_match_settings:
             self._host_match_settings = settings
             self.apply_match_settings()
         self.render_ranks(ranking, team)
+        self.publish_public_board()
 
     def render_ranks(self, ranking, team=None):
         self._team_summary = team
@@ -2742,6 +3044,7 @@ class GroupPage(QWidget):
 class DiscordPage(QWidget):
     send_result = Signal(str)
     bot_changed = Signal()
+    branding_result = Signal(object)
 
     def __init__(self, win):
         super().__init__()
@@ -2751,6 +3054,8 @@ class DiscordPage(QWidget):
         self._next_outbox_retry = 0.0
         self.runner = None
         self._configured = False
+        self._branding_pending = False
+        self.branding_result.connect(self._branding_done)
         self.send_result.connect(self._sent)
         self.bot_changed.connect(self.refresh_sender_status, Qt.QueuedConnection)
         layout = QVBoxLayout(self)
@@ -2799,6 +3104,53 @@ class DiscordPage(QWidget):
         setup_layout.addWidget(self.setup_status)
         layout.addWidget(setup)
 
+        appearance, appearance_layout = card("Bot profile", "Apply changes to the bot's Discord profile in every server.")
+        form = QGridLayout()
+        self.bot_name = QLineEdit()
+        self.bot_name.setMaxLength(32)
+        self.bot_avatar = QLineEdit()
+        self.bot_avatar.setPlaceholderText("Empty uses the bundled chest logo")
+        form.addWidget(label("Bot name"), 0, 0)
+        form.addWidget(self.bot_name, 0, 1)
+        form.addWidget(label("Avatar PNG or JPEG"), 1, 0)
+        form.addWidget(self.bot_avatar, 1, 1)
+        form.addWidget(button("Browse...", on_click=self.pick_bot_avatar), 1, 2)
+        appearance_layout.addLayout(form)
+        self.apply_branding = button("Apply bot profile", on_click=lambda: self.save_bot_preferences(apply_profile=True))
+        appearance_layout.addWidget(self.apply_branding, 0, Qt.AlignRight)
+        layout.addWidget(appearance)
+
+        presence, presence_layout = card("Bot presence", "Use {total}, {players}, {matches} and {chance}. Text rotates while the bot is online.")
+        self.presence_enabled = QCheckBox("Show bot activity")
+        self.presence_rotate = QCheckBox("Rotate activity messages")
+        presence_layout.addWidget(self.presence_enabled)
+        presence_layout.addWidget(self.presence_rotate)
+        row = QHBoxLayout()
+        self.presence_activity = MaterialComboBox()
+        for text, value in (("Watching", "watching"), ("Playing", "playing"), ("Listening", "listening")):
+            self.presence_activity.addItem(text, value)
+        row.addWidget(self.presence_activity, 1)
+        row.addWidget(label("Rotate every"))
+        self.presence_interval = QSpinBox()
+        self.presence_interval.setRange(30, 300)
+        self.presence_interval.setSuffix(" s")
+        row.addWidget(self.presence_interval)
+        presence_layout.addLayout(row)
+        form = QGridLayout()
+        self.presence_texts = {}
+        for index, (key, title) in enumerate((("team", "Current team"), ("token", "Team odds"),
+                                            ("group", "Group totals"), ("idle", "Idle"))):
+            edit = QLineEdit()
+            edit.setMaxLength(128)
+            self.presence_texts[key] = edit
+            form.addWidget(label(title), index, 0)
+            form.addWidget(edit, index, 1)
+        presence_layout.addLayout(form)
+        presence_layout.addWidget(button("Save profile and presence", on_click=self.save_bot_preferences), 0, Qt.AlignRight)
+        self.appearance_status = label("", "hint", wrap=True)
+        presence_layout.addWidget(self.appearance_status)
+        layout.addWidget(presence)
+
         summary, summary_layout = card("Match reports", "Send a saved match manually, or post each new match after it is saved.")
         self.auto_report = QCheckBox("Automatically send new match reports")
         self.auto_report.toggled.connect(self.save_report_mode)
@@ -2819,6 +3171,15 @@ class DiscordPage(QWidget):
         self.refresh_sender_status()
 
     def load(self):
+        cfg = load_cfg()[0]["app"]
+        self.bot_name.setText(cfg["bot_name"])
+        self.bot_avatar.setText(cfg["bot_avatar_path"])
+        self.presence_enabled.setChecked(cfg["discord_presence_enabled"])
+        self.presence_rotate.setChecked(cfg["discord_presence_rotate"])
+        self.presence_interval.setValue(cfg["discord_presence_interval"])
+        self.presence_activity.setCurrentIndex(max(0, self.presence_activity.findData(cfg["discord_presence_activity"])))
+        for key, edit in self.presence_texts.items():
+            edit.setText(cfg[f"discord_presence_{key}_text"])
         self.token.clear()
         self.auto_report.blockSignals(True)
         self.auto_report.setChecked(load_cfg()[0]["app"]["auto_discord_summary"])
@@ -2835,6 +3196,52 @@ class DiscordPage(QWidget):
         except (OSError, ValueError) as error:
             self.status.setText(str(error))
         self._show_summary()
+
+    def pick_bot_avatar(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Choose bot avatar", "", "Images (*.png *.jpg *.jpeg)")
+        if path:
+            self.bot_avatar.setText(path)
+
+    def save_bot_preferences(self, *, apply_profile=False):
+        values = {"bot_name": self.bot_name.text().strip(), "bot_avatar_path": self.bot_avatar.text().strip(),
+                  "discord_presence_enabled": self.presence_enabled.isChecked(),
+                  "discord_presence_rotate": self.presence_rotate.isChecked(),
+                  "discord_presence_interval": self.presence_interval.value(),
+                  "discord_presence_activity": self.presence_activity.currentData()}
+        values.update((f"discord_presence_{key}_text", edit.text().strip()) for key, edit in self.presence_texts.items())
+        try:
+            C.update_config_file(config_file(), "app", values)
+        except (C.UserError, OSError) as error:
+            self.appearance_status.setText(str(error))
+            return
+        self.appearance_status.setText("Profile and presence preferences saved.")
+        if not apply_profile:
+            return
+        if self.runner is None or self.runner.status[0] != "online" or self._branding_pending:
+            self.appearance_status.setText("Start the bot before applying its Discord profile.")
+            return
+        runner = self.runner
+        try:
+            future = runner.apply_branding(values["bot_name"], values["bot_avatar_path"])
+        except ValueError as error:
+            self.appearance_status.setText(str(error))
+            return
+        self._branding_pending = True
+        self.apply_branding.setEnabled(False)
+        def done(result):
+            try:
+                text = result.result()
+            except Exception as error:
+                text = str(error) if isinstance(error, ValueError) else "Discord could not update the profile. Check the image and try later."
+            self.branding_result.emit((runner, text))
+        future.add_done_callback(done)
+
+    def _branding_done(self, result):
+        runner, text = result
+        self._branding_pending = False
+        if runner is self.runner:
+            self.appearance_status.setText(text)
+        self.refresh_sender_status()
 
     def _show_summary(self, *_):
         match = self.match.currentData()
@@ -2882,6 +3289,7 @@ class DiscordPage(QWidget):
         self.sender_status.setStyleSheet(theme.pill_style(theme.CERTAIN if state == "online" else theme.MUTED))
         if detail and state == "error":
             self.setup_status.setText(detail)
+        self.apply_branding.setEnabled(state == "online" and not self._branding_pending)
         self.sender_toggle.setText("Stop bot" if active else "Start bot")
         self.sender_toggle.setEnabled(state != "stopping" and (active or self._configured))
         self._show_summary()
@@ -3298,6 +3706,7 @@ class MainWindow(QMainWindow):
         self._mode_tail = None
         self._detected_mode = None
         self._match_events = deque()
+        self._next_live_share = 0.0
         self._match_active = False
         self._match_fingerprint = ""
         self._pending_match_fingerprint = ""
@@ -4370,7 +4779,29 @@ class MainWindow(QMainWindow):
             if not quiet:
                 show_error(self, str(error))
 
+    def publish_live_counts(self):
+        if time.monotonic() < self._next_live_share:
+            return
+        self._next_live_share = time.monotonic() + 5
+        if not self._match_active or not self._match_fingerprint or not self.workers_active():
+            return
+        cfg = load_cfg()[0]["app"]
+        if not cfg["group_share_matches"] or not cfg["group_player"].strip():
+            return
+        try:
+            webhook = discord_group.load_webhook()
+            if webhook is None:
+                return
+            certain, total = self.counts
+            discord_group.queue_live(webhook, self._match_fingerprint, cfg["group_player"], certain, total,
+                                     self.dashboard.token_boost.currentData())
+        except (OSError, ValueError, sqlite3.Error) as error:
+            self.add_log({"type": "warn", "text": f"Live Group update unavailable. {error}"})
+            return
+        self.discord.retry_group_outbox()
+
     def _tick_slow(self):
+        self.publish_live_counts()
         self.group.sync_scoreboard()
         if self.group._webhook is not None and time.monotonic() >= self.discord._next_outbox_retry:
             self.discord.retry_group_outbox()

@@ -185,7 +185,7 @@ def test_qt_drains_before_saving_and_before_next_start(app, monkeypatch, send_en
     assert (saved.certain, saved.total) == win.counts == (9, 14)
     assert win.worker.starts == 1
     display = {**gui.load_cfg()[0]["display"], "screen_show_matches": True}
-    assert "Matches saved · 1" in win.dashboard.screen_overlay_text(display)
+    assert "Matches · 1" in win.dashboard.screen_overlay_text(display)
 
     # Saving the same snapshot manually is still a no-op.
     win.finish_match()
@@ -468,7 +468,7 @@ def test_qt_republishes_a_team_update_when_ranking_is_unchanged(app, monkeypatch
                "embeds": [{"footer": {"text": gui.discord_scoreboard._MARKER}}]}
     edits = []
 
-    def request(_, suffix, method, payload=None):
+    def request(_, suffix, method, payload=None, **kwargs):
         if method == "PATCH":
             message.update(payload)
             edits.append(payload)
@@ -596,3 +596,45 @@ def test_qt_reset_all_settings_keeps_other_preferences_and_counts(app, monkeypat
     assert cfg["app"]["token_mode"] == "Duo"
     assert win.counts == (2, 5)
     assert page.saved.text() == "Defaults restored."
+
+def test_qt_custom_overlay_sections_opacity_and_team_history(app, monkeypatch):
+    gui, win, _ = app
+    now = 1_790_000_000.0
+    webhook = gui.discord_group.Webhook("123456789012345678", "fixture-placeholder")
+    win.group._webhook = webhook
+    sessions = (
+        gui.discord_group.TeamSession("a" * 64, (
+            gui.discord_group.SessionPlayer("Alex", 8, 10, 1, True, 1, now),
+            gui.discord_group.SessionPlayer("Sam", 4, 5, 2, True, 1, now),
+        )),
+    )
+    gui.C.update_config_file(gui.config_file(), "app", {"group_player": "Alex", "group_share_matches": True})
+    seed(gui, win, (8, 10))
+    win.save_current_match(session_fingerprint="a" * 64)
+    # This local save did not resolve a webhook in the fixture, so explicitly model a shared saved result.
+    rows = gui.match_history.read_history(win.match_history_path())
+    from dataclasses import replace
+    gui.match_history._write_history(win.match_history_path(), [replace(rows[0], group_webhook_id=webhook.id)])
+    win.group.load()
+    win.group._webhook = webhook
+    win.group._sessions = sessions
+    win.group.refresh_history_teams()
+    win.dashboard.set_recent_matches(gui.match_history.read_history(win.match_history_path()))
+    item = win.group.history.topLevelItem(0)
+    assert item.text(7) == "Alex · Sam" and item.text(8) == "15"
+    page = win.overlay
+    page.section_templates["personal"].setPlainText("Mine {total}")
+    page.section_templates["team"].setPlainText("Team {total} / {players}")
+    page.section_templates["cumulative"].setPlainText("{matches} games / {total} / {chance}")
+    page.transparency.setValue(45)
+    page.apply()
+    cfg = gui.load_cfg()[0]["display"]
+    assert cfg["screen_opacity"] == 55
+    personal, team, cumulative = win.dashboard.screen_overlay_sections(cfg)
+    assert personal == "Mine 10"
+    assert team == "Team 15 / 2"
+    assert cumulative.startswith("1 games / 15 / ")
+    assert abs(win.dashboard.screen_overlay.windowOpacity() - 0.55) < 0.01
+    # Sharing off hides current team stats, while saved group history remains in the lifetime result.
+    win.group.share_matches.setChecked(False)
+    assert win.dashboard.screen_overlay_sections(cfg)[1] == ""

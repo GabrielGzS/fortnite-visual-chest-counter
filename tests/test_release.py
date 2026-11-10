@@ -255,7 +255,7 @@ def test_scale_aware_popup_counts_a_larger_hud_word_as_approx_only():
     (ev,) = _run_estimator(_word_frames(1.25), scale_aware=True)
     assert ev["adjusted_tier"] == "MEDIUM" and ev["approx_counted"] and not ev["certain_counted"]
     assert ev["scaled_popup"]["scale"] == 0.8 and ev["scaled_popup"]["blur"] >= estimator.SCALED_TRIGGER
-    assert "scale-aware" in ev["reason"] and "never CERTAIN" in ev["reason"]
+    assert "scale-aware" in ev["reason"] and "counted approx only" in ev["reason"]
     assert abs(ev["time"] - 1.0) < 0.1                                                # onset time, not promotion time
 
 

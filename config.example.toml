@@ -52,6 +52,11 @@ medium_counts_alone_languages = ["en", "fr"]  # languages whose medium-confidenc
 show = "both"
 both_layout = "inline"
 screen_show_matches = true
+# Floating overlay opacity, 20..100. Text and chest fade together.
+screen_opacity = 100
+# Leave either label empty to hide it. # = chests, {chance} = modelled drop chance, {players} = submitted players.
+screen_team_text = "Team · # chests · {chance}"
+screen_cumulative_text = "All matches · # chests · {chance}"
 
 # Your own wording. {count} is where the number goes. You may also use {certain} and {approx} anywhere.
 # Any text, symbols and emoji are fine (whether emoji display depends on the font you pick in OBS).
@@ -69,6 +74,21 @@ combined_status_format = "{certain} certain • ~{approx} estimated"
 # true -> 1,232      false -> 1232
 use_thousands_separator = true
 screen_show_types = true
+screen_token_text = "Pirate Token · #"
+screen_show_token = true
+screen_show_total = true
+screen_total_text = "Total: #"
+screen_personal_enabled = true
+screen_team_enabled = true
+screen_cumulative_enabled = true
+screen_personal_title = "PERSONAL · CURRENT MATCH"
+screen_team_title = "TEAM · CURRENT MATCH"
+screen_cumulative_title = "ALL MATCHES"
+screen_personal_template = "Chests · {total}\nConfirmed · {certain}    Estimated · {approx}\nPirate Token · {chance}\n{types}"
+screen_team_template = "Chests · {total}    Players · {players}\nPirate Token · {chance}"
+screen_cumulative_template = "Chests · {total}\nMatches · {matches}\nPirate Token · {chance}"
+certain_label = "CERTAIN OPENED CHESTS"
+approximate_label = "APPROX. OPENED CHESTS"
 
 [console]
 # The black counter window (not what viewers see).
@@ -169,6 +189,20 @@ screen_overlay_enabled = true
 screen_overlay_shared = true
 show_activity = false
 group_role = "host"
+token_boost = "Normal ×1"
+live_preview = false
+bot_name = "Chest Counter"
+bot_avatar_path = ""
+webhook_name = "Chest Counter"
+webhook_avatar_url = "https://raw.githubusercontent.com/NEVARLeVrai/fortnite-visual-chest-counter/ui/chest-tracker-dashboard/docs/previews/logo.png"
+discord_presence_enabled = true
+discord_presence_rotate = true
+discord_presence_interval = 30
+discord_presence_activity = "watching"
+discord_presence_team_text = "{players} players · {total} chests"
+discord_presence_token_text = "Team token chance · {chance}"
+discord_presence_group_text = "Group · {total} chests · {matches} matches"
+discord_presence_idle_text = "the group leaderboard"
 
 [update]
 # Look for a new version shortly after the app opens. Nothing is downloaded or installed unless you choose to.

@@ -5,11 +5,42 @@ in OBS as you like. Same steps for every setup - on a dual-PC setup, do this in 
 
 ## On-screen overlay
 
-Enable the on-screen overlay in **Overlay** and apply your changes. Enable the screen-share option if the overlay should
-be visible when sharing the monitor. The preview shows the wording, total and any enabled extras, including Pirate Token
-odds, chest types and saved match count.
+Enable the on-screen overlay in **Overlay** and apply your changes. Enable **Visible when sharing your screen** to include it in Discord screen sharing. The **Transparency** slider controls its opacity, and the preview shows the current wording and statistics.
 
-PH
+The overlay can show three scopes in order.
+
+| Scope | Counts and estimate |
+|---|---|
+| Personal | Your current match, with the selected count layout and Pirate Token estimate. |
+| Team | Submitted counts for the same verified session, shown when a teammate has contributed. |
+| All matches | Your local saved matches and the current counter, with linked team sessions counted once. |
+
+Each on-screen section has its own heading and multiline content editor. You can rename the Personal, Team and All matches headings and change which values each section shows. The All matches section includes the total match count.
+
+| Placeholder | Value |
+|---|---|
+| `{total}` | Chest total for the section. |
+| `{certain}` | Confirmed openings. |
+| `{approx}` | Additional estimated openings. |
+| `{chance}` | Estimated Pirate Token percentage. |
+| `{players}` | Submitted players in the verified team. |
+| `{matches}` | Match count for the cumulative section. |
+| `{types}` | Available chest-type breakdown. |
+
+For example, an All matches heading can use the content below.
+
+```text
+{total} chests across {matches} matches
+Pirate Token · {chance}
+```
+
+The Personal section shows your live counter. The Team section appears when a teammate has contributed to the same verified session. The All matches section combines the known history and current counter. Use the preview to check the text before applying it. Legacy count wording for OBS continues to use `#`, `#C` and `#A` where offered.
+
+The cumulative estimate preserves the boost used in each match. For `nᵢ` chests at per-chest probability `pᵢ`, it uses `1 − ∏(1 − pᵢ)ⁿᵢ`. Solo matches use your personal counts. Verified shared sessions use received team counts once, including your own contribution. A delayed result updates that session's total.
+
+Team totals can be partial while a player's app or the bot is disconnected. No teammate count is invented. See [live sharing](matches-and-discord.md#live-sessions-and-history).
+
+![Overlay showing sample personal, team and cumulative stats](../previews/overlay.png)
 
 ## Add the Text source
 

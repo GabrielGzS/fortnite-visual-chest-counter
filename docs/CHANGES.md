@@ -17,6 +17,10 @@ This page describes the local desktop work. Versioned release notes describe pub
   a manual selector.
 - Put sharing and bot setup together in Group. Add Host and Guest roles, one published leaderboard, Discord
   match reports and team matching by verified session fingerprint.
+- Share coalesced current-match updates, recover edited live feed messages after reconnect and keep final saved results authoritative. Add matching team participants and totals to local history.
+- Show personal, verified team and cumulative match totals with boost-aware Pirate Token estimates. Add overlay transparency and custom headings and multiline templates for Personal, Team and All matches, including cumulative match count.
+- Publish the same detailed leaderboard from the app's channel dropdown or Discord's `/leaderboard publish:true`. Preserve a separate shared data message for Guest sync.
+- Add a README banner and badges, preview assets and explicit component acknowledgements. Configure bot and webhook branding separately and rotate the bot presence through live team and saved group statistics.
 - Add tray options, diagnostic cleanup and a Settings reset. Keep a console debug batch file and a buildable
   Windows development launcher.
 
@@ -39,6 +43,10 @@ off. Automatic match reports also require a configured bot and enabled sharing.
 
 The initial work used Codex with GPT-6.1 Sol at medium reasoning effort. Maintainers should independently replay
 their own recordings before merging detector changes.
+
+## Acknowledgements
+
+See [project, artwork and dependency credits](ACKNOWLEDGEMENTS.md).
 
 ## References
 

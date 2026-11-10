@@ -74,6 +74,15 @@ Python 3.11+. FFmpeg must be on PATH when running from source (the packaged app 
 When running from source, user data (`config.toml`, `state/`, `logs/`, `obs_output/`) lives in the **current directory**
 (or `FCC_HOME`), never inside `src/`.
 
+## Continuous integration
+
+The Tests workflow runs on each push, pull request and manual dispatch. Windows executes the full test suite;
+Linux executes the portable backend tests. Both use Python 3.13, the pinned runtime requirements and an isolated
+temporary working directory. Failed runs retain JUnit reports for seven days.
+
+Run the complete suite locally with `python -m pytest tests -q`. Use a temporary working directory and `FCC_HOME`
+when checking app startup so local user settings do not influence the run.
+
 ## Desktop UI and local data
 
 Keep visual tokens in the shared Qt theme, application assets beside that theme, and engine behavior outside the GUI.

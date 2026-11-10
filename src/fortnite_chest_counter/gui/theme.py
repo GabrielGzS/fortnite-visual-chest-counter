@@ -139,10 +139,14 @@ QComboBox QAbstractItemView {{ background: transparent; border: none; outline: n
 QMenu {{ background: {SURFACE}; border: 1px solid {BORDER};
                                       outline: none; border-radius: 12px; padding: 4px; selection-background-color: {SURFACE_3};
                                       selection-color: {TEXT}; }}
+#overlaySectionTitle {{ color: {MUTED}; font-size: 10px; font-weight: 700; letter-spacing: 1px; }}
 QMenu#trayMenu {{ border-radius: 0; }}
 QComboBox QAbstractItemView::item, QMenu::item {{ padding: 6px 10px; }}
 QMenu::item:selected {{ background: {SURFACE_3}; color: {ACCENT}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 7px; }}
+QSlider::groove:horizontal {{ height: 8px; background: {SURFACE_3}; border-radius: 4px; }}
+QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 4px; }}
+QSlider::handle:horizontal {{ width: 5px; margin: -7px 0; background: {ACCENT}; border-radius: 2px; }}
 QLineEdit:read-only {{ color: {MUTED}; }}
 
 QCheckBox, QRadioButton {{ spacing: 10px; padding: 3px 0; }}

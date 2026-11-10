@@ -258,16 +258,29 @@ def write_png(path, rgb):
 
 class SessionLog:
     def __init__(self, log_cfg):
-        self.enabled, self.log_candidates = log_cfg["enabled"], log_cfg["log_candidates"]
+        self.directory = Path(log_cfg["dir"])
         self.path = None
-        if self.enabled:
-            Path(log_cfg["dir"]).mkdir(parents=True, exist_ok=True)
-            self.path = Path(log_cfg["dir"]) / f"session_{datetime.now():%Y%m%d_%H%M%S}.jsonl"
-        self.snapshot_dir = (Path(log_cfg["dir"]) / "snapshots" / self.path.stem) if self.enabled and log_cfg.get("save_snapshots") else None
+        self.enabled = False
+        self.snapshot_dir = None
+        self.configure(log_cfg)
+
+    def configure(self, log_cfg):
+        """Apply logging switches while retaining this run's path and directory."""
+        self.enabled = False
+        self.snapshot_dir = None
+        self.log_candidates = log_cfg["log_candidates"]
+        if not log_cfg["enabled"]:
+            return
+        if self.path is None:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            self.path = self.directory / f"session_{datetime.now():%Y%m%d_%H%M%S}.jsonl"
+        self.enabled = True
+        if log_cfg.get("save_snapshots"):
+            self.snapshot_dir = self.directory / "snapshots" / self.path.stem
 
     def save_snapshot(self, name, rgb):
         """Popup-region image for one event, so a human can later check what was (not) counted. -> file name or None."""
-        if self.snapshot_dir is None or rgb is None:
+        if not self.enabled or self.snapshot_dir is None or rgb is None:
             return None
         try:
             self.snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -482,9 +495,7 @@ def config_path(args):
 
 
 class DisplayConfigWatcher:
-    """The app's Overlay page / the configure command (or Notepad) edit config.toml while the counter runs: re-read [display] and [console]
-    within a second and rewrite the OBS files, so the overlay changes without a restart. Detector settings still need a
-    restart (they are not touched here)."""
+    """Reload display, console and logging switches while counting. Detector settings still need a restart."""
 
     def __init__(self, args):
         self.args, self.path = args, config_path(args)
@@ -497,7 +508,7 @@ class DisplayConfigWatcher:
             return None
 
     def check(self, session):
-        """-> True if the overlay settings were reloaded."""
+        """Return True when live display, console and logging settings were reloaded."""
         mtime = self._mtime()
         if mtime == self.mtime:
             return False
@@ -505,6 +516,14 @@ class DisplayConfigWatcher:
         cfg, _, warnings = settings.load_config(getattr(self.args, "config", None), config_overrides(self.args))
         for w in warnings:
             CONSOLE.warn(w)
+        logging_options = {key: cfg["logging"][key] for key in ("enabled", "log_candidates", "save_snapshots")}
+        session.cfg["logging"].update(logging_options)
+        try:
+            session.log.configure(logging_options)
+        except OSError as error:
+            session._warn_once("logging", f"could not enable session logging ({error})")
+        from fortnite_chest_counter import estimator
+        estimator.SAVE_SNAPSHOTS = session.log.enabled and session.log.snapshot_dir is not None
         session.display = cfg["display"]
         CONSOLE.configure(cfg["console"]["verbosity"], cfg["console"]["colors"])
         session.write_obs()

@@ -5,8 +5,8 @@ Fortnite Visual Chest Counter is free, open-source software under the MIT Licens
 Source code: the project's GitHub repository.
 
 It is an independent fan-made tool. It is not made by, affiliated with or endorsed by Epic Games. "Fortnite" is a
-trademark of Epic Games, Inc. The program only looks at video frames you give it (passively); it does not read or modify
-the game, its memory, the network traffic or your account.
+trademark of Epic Games, Inc. Chest counting reads video frames. Optional match features read the local Fortnite log.
+Optional Discord sharing sends player statistics and a session fingerprint.
 
 Bundled third-party components (all inside the "runtime" folder; where each one comes from, with checksums, is listed in
 runtime\PROVENANCE.txt):
@@ -30,3 +30,11 @@ dynamically loaded files; where to get their source code is explained in runtime
 
 "Fortnite Visual Chest Counter.exe" is a small launcher that is part of this program (MIT): it starts the app with the
 bundled Python. Its source code is packaging/launcher/launcher.c in the project's repository.
+
+Illustration, font and icon credits
+----------------------------------
+Animated chest geometry adapted from Xxoris190/chest-tracker (MIT). Its attribution is retained in LICENSE.txt
+and the illustration source. The app logo and README banner reuse this artwork.
+Google Sans: SIL Open Font License 1.1, copyright The Google Sans Project Authors.
+Google Material Icons: Apache License 2.0.
+Font and icon license texts are in runtime/lib/fortnite_chest_counter/gui/assets/.

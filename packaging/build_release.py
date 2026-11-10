@@ -232,6 +232,71 @@ def verify_record(dist):
     return d, base, checked
 
 
+def apply_launcher_icon(target, icon):
+    """Replace the known launcher icon resources with the current bundled artwork."""
+    import ctypes
+    from ctypes import wintypes
+    import struct
+
+    data = Path(icon).read_bytes()
+    reserved, kind, count = struct.unpack_from("<HHH", data)
+    if reserved or kind != 1 or not count:
+        raise ValueError("The launcher icon is not an ICO file.")
+    directory = bytearray(struct.pack("<HHH", 0, 1, count))
+    images = []
+    for index in range(count):
+        width, height, colors, reserved, planes, bits, size, offset = struct.unpack_from("<BBBBHHII", data, 6 + index * 16)
+        image = data[offset:offset + size]
+        if not size or len(image) != size:
+            raise ValueError("The launcher icon contains an invalid image.")
+        images.append(image)
+        directory.extend(struct.pack("<BBBBHHIH", width, height, colors, reserved, planes, bits, size, index + 1))
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.LoadLibraryExW.argtypes = (wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD)
+    kernel.LoadLibraryExW.restype = wintypes.HMODULE
+    kernel.FreeLibrary.argtypes = (wintypes.HMODULE,)
+    kernel.BeginUpdateResourceW.argtypes = (wintypes.LPCWSTR, wintypes.BOOL)
+    kernel.BeginUpdateResourceW.restype = wintypes.HANDLE
+    kernel.UpdateResourceW.argtypes = (wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p,
+                                       wintypes.WORD, ctypes.c_void_p, wintypes.DWORD)
+    kernel.UpdateResourceW.restype = wintypes.BOOL
+    kernel.EndUpdateResourceW.argtypes = (wintypes.HANDLE, wintypes.BOOL)
+    kernel.EndUpdateResourceW.restype = wintypes.BOOL
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMODULE, ctypes.c_void_p,
+                                      ctypes.c_void_p, wintypes.WORD, ctypes.c_ssize_t)
+    kernel.EnumResourceLanguagesW.argtypes = (wintypes.HMODULE, ctypes.c_void_p, ctypes.c_void_p,
+                                              callback_type, ctypes.c_ssize_t)
+    kernel.EnumResourceLanguagesW.restype = wintypes.BOOL
+    languages = []
+    callback = callback_type(lambda module, kind, name, language, parameter: languages.append(language) or True)
+    module = kernel.LoadLibraryExW(str(Path(target).resolve()), None, 2)
+    if not module:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not kernel.EnumResourceLanguagesW(module, 14, 1, callback, 0):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.FreeLibrary(module)
+    handle = kernel.BeginUpdateResourceW(str(Path(target).resolve()), False)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        for language in languages:
+            for index, image in enumerate(images, 1):
+                buffer = ctypes.create_string_buffer(image)
+                if not kernel.UpdateResourceW(handle, 3, index, language, buffer, len(image)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            buffer = ctypes.create_string_buffer(bytes(directory))
+            if not kernel.UpdateResourceW(handle, 14, 1, language, buffer, len(directory)):
+                raise ctypes.WinError(ctypes.get_last_error())
+    except Exception:
+        kernel.EndUpdateResourceW(handle, True)
+        raise
+    if not kernel.EndUpdateResourceW(handle, False):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
 def build_launcher(target, work, mingw=None, *, development=False):
     """Compile packaging/launcher (C + icon + version info + manifest) into `target`. Reproducible: no timestamps."""
     env = dict(os.environ)
@@ -286,7 +351,8 @@ def signature_report(app_root):
 
 def write_package_files(runtime):
     """runtime/package-files.json: everything this release puts in runtime/. The updater uses it to notice anything else in there."""
-    files = sorted(p.relative_to(runtime).as_posix() for p in runtime.rglob("*") if p.is_file())
+    files = sorted(p.relative_to(runtime).as_posix() for p in runtime.rglob("*")
+                   if p.is_file() and p != runtime / PACKAGE_FILES)
     (runtime / PACKAGE_FILES).write_text(json.dumps({"format": 1, "version": __version__, "files": files}, indent=0) + "\n",
                                          encoding="utf-8", newline="\n")
 
@@ -452,7 +518,8 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
     # ---- 5. the launcher + user-facing files
     if prebuilt_launcher:
         shutil.copy2(prebuilt_launcher, app_root / EXE_NAME)
-        gcc = "a prebuilt launcher (compiled from the same source on the release PC)"
+        apply_launcher_icon(app_root / EXE_NAME, LAUNCHER_DIR / "app.ico")
+        gcc = "a prebuilt launcher with the current app icon resources"
     else:
         gcc = build_launcher(app_root / EXE_NAME, out / "_launcher-build", mingw)
     provenance += [f"launcher        : {EXE_NAME} built from packaging/launcher/launcher.c with {gcc}",

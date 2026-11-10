@@ -1,75 +1,143 @@
-# Fortnite Visual Chest Counter
+<div align="center">
+  <img src="docs/previews/banner.png" alt="Fortnite Visual Chest Counter" width="1080">
+  <p>Count your chests, follow the squad and keep the stats for every match.</p>
+  <p>
+    <a href="https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases"><img src="https://img.shields.io/badge/Windows-10%20%2F%2011-ffd2a1?style=flat&logo=windows&logoColor=1c1814" alt="Windows 10 and 11"></a>
+    <a href="docs/DEVELOPMENT.md"><img src="https://img.shields.io/badge/Python-3.13-c8b7a6?style=flat&logo=python&logoColor=1c1814" alt="Python 3.13 packaged runtime"></a>
+    <a href="docs/CHANGES.md"><img src="https://img.shields.io/badge/Status-public%20beta-62ddb0?style=flat" alt="Public beta"></a>
+    <a href="https://github.com/NEVARLeVrai/fortnite-visual-chest-counter/actions/workflows/tests.yml"><img src="https://github.com/NEVARLeVrai/fortnite-visual-chest-counter/actions/workflows/tests.yml/badge.svg?branch=ui%2Fchest-tracker-dashboard" alt="Automated tests"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-f0bd70?style=flat" alt="MIT license"></a>
+    <a href="docs/guides/matches-and-discord.md"><img src="https://img.shields.io/badge/Discord-group%20stats-5865f2?style=flat&logo=discord&logoColor=white" alt="Discord group statistics"></a>
+    <a href="docs/guides/obs-overlay.md"><img src="https://img.shields.io/badge/OBS-overlay-c8b7a6?style=flat&logo=obsstudio&logoColor=1c1814" alt="OBS overlay support"></a>
+  </p>
+  <p><a href="#get-started"><b>Get started</b></a> · <a href="#features">Features</a> · <a href="#previews">Previews</a> · <a href="docs/guides/matches-and-discord.md">Discord setup</a> · <a href="docs/index.md">Documentation</a></p>
+</div>
 
-A Windows app that counts Fortnite chest openings, saves match stats and estimates your Pirate Token odds. Count locally, show your stats on stream or compare results with friends through Discord.
+A portable Windows app that reads Fortnite's chest-opening pop-ups from gameplay video. Use a screen, livestream, OBS feed, capture card or recording, then show the results on screen and share them with your group.
 
-PH
-
-[Get started](#get-started) · [Features](#features) · [Capture setups](#capture-setups) · [Documentation](docs/index.md)
+Current app version **v0.2.3 public beta**. The features below describe the current development branch. Published upstream packages have their own [release notes](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases).
 
 ## Get started
 
-1. Download a Windows ZIP from the [upstream releases](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases), or build this branch using the [development guide](docs/DEVELOPMENT.md). The features below describe this branch.
-2. Extract the whole ZIP and launch **Fortnite Visual Chest Counter.exe**. The ZIP includes the runtime. On this branch the app starts in the Windows system tray. Open it from its tray icon.
-3. In **Dashboard → Capture settings**, choose one source. The default is **Screen 1 HDR → SDR**. For an SDR monitor, choose its regular **Screen** entry. Use fullscreen gameplay in 16:9 with the HUD visible.
-4. In **Settings → Fortnite language**, select the language of your game. English is the default. French, Brazilian Portuguese and a combined English/Portuguese option are available.
-5. Click **Start counting** for manual capture. **Match automation** is enabled by default and can start the next local Battle Royale match and save it when you return to the lobby.
+1. Get a portable build, or follow the [development guide](docs/DEVELOPMENT.md) to run this branch. Extract the whole ZIP and launch **Fortnite Visual Chest Counter.exe**. Portable builds include Python and the video tools.
+2. Open the app from its **Windows system tray** icon. In **Dashboard → Capture settings**, choose one capture source. The default is **Screen 1 HDR → SDR**. Use the regular Screen entry for an SDR monitor.
+3. In **Settings → Fortnite language**, select the HUD language. English, French and Brazilian Portuguese are supported, with a combined English/Portuguese option.
+4. Keep the gameplay fullscreen in 16:9 with the HUD visible. Click **Start counting**, or let **Match automation** reset and start the next local Battle Royale match at warmup.
+5. Choose **Auto** for the mode or select Solo, Duo, Trio or Squad manually. Set the Pirate Token boost to match the rate you want to estimate.
+
+The tray menu opens the window or quits the app. Closing the window can keep counting in the tray. These behaviours are configurable in Settings.
 
 ## Features
 
-### Live chest counter
+### Your counter, live
 
-- **Certain** shows confirmed openings. **Approx** shows additional estimated openings. **Total** adds them together. For example, 42 confirmed and 9 estimated gives a total of 51.
-- **Recent openings** shows detections as they happen. The chest-type breakdown distinguishes normal, Rare and Sprite chests when there is enough evidence. Ambiguous openings can still count with an unknown type.
-- **Activity** shows detector decisions and **Live preview** shows the image being analysed. Choose 5, 10 or 15 analysed frames per second in Settings.
-- **Profiles** keep separate counts, chest types and capture settings. One profile and one source count at a time. Use **Edit** to correct the counts and **Reset** to clear the live counter.
-- **Analyse a recording** counts a video file separately from the live counter.
+**Certain** is the number of confirmed openings. **Approx** contains additional estimated openings. **Total** adds them together. For example, 42 confirmed and 9 estimated gives a total of 51.
 
-### Match tracking and Pirate Token odds
+- Detect normal, Rare and Sprite chests, with an unknown type when the pop-up cannot be classified reliably.
+- Follow recent openings, detector decisions and a live preview. Select 5, 10 or 15 analysed frames per second.
+- Keep separate counts, capture settings and chest-type breakdowns with profiles. Edit the confirmed and estimated counts or reset the current match.
+- Analyse a recorded video separately from the live counter.
+- Use one capture per app. Each teammate runs their own capture and shares their results through the group feed.
 
-- **Finish match** saves manually. With automation enabled, new warmup and lobby entries from the local Fortnite log drive reset, start and save.
-- Choose **Auto** to detect the Battle Royale playlist, or pick **Solo**, **Duo**, **Trio** or **Squad** manually. Auto mode can run with manual start and finish.
-- **Match history** lets you edit saved counts and delete checked matches. Deleting local history preserves results already shared with the group.
-- **Pirate Token chance** estimates the chance of at least one drop across the current Total. The model assumes independent rolls and uses a base rate of 1 in 137,500 per chest with the selected multiplier. For `n` chests and boosted probability `p` per chest, the estimate is `1 − (1 − p)^n`. [Fortnite Status](https://x.com/FortniteStatus/status/2119202610322227327) · [Independent calculator](https://piratetoken.quest/drop-rate/)
+### Match history and squad stats
 
-### Overlay and OBS
+- Save manually with **Finish match**, or use new warmup and lobby entries from Fortnite's local log to start and finish automatically.
+- Detect the Battle Royale mode from the log or choose it manually. Automatic mode detection also works with manual start and finish.
+- Edit saved counts, tick individual matches or select all for batch deletion.
+- See verified teammates, team chest totals and team odds alongside your personal result. Team membership comes from matching session fingerprints and received player submissions.
+- Share current match totals while playing. The app coalesces updates before sending them, retries delivery and treats the saved result as the final count.
 
-- The floating overlay shows an animated chest, configurable count layouts and wording, and optional token odds, chest types and saved match count. Preview it in the app and choose whether it appears when you share your screen.
-- OBS can read `obs_output\chest_counter.txt` through **Text (GDI+)** or receive direct updates over OBS WebSocket. The OBS and CLI **APPROX** figure includes **CERTAIN**. See the [overlay guide](docs/guides/obs-overlay.md).
+### Three views in the overlay
+
+| Scope | What it includes |
+|---|---|
+| **Personal** | Your current match, with confirmed, estimated and total openings. |
+| **Team** | Submitted openings from players in the same verified session. It appears when a teammate has contributed. |
+| **All matches** | Your saved matches and the current counter, with their match count and each matching shared session counted once. |
+
+The chest illustration changes with the detected type. Give each Personal, Team and All matches section its own heading and multiline template, including cumulative match count. Configure transparency and screen-share visibility, then preview the same overlay in the app. You can also display token odds, chest types and your saved match count.
+
+OBS can read `obs_output\chest_counter.txt` with **Text (GDI+)**, or receive direct updates through OBS WebSocket. The OBS and CLI **APPROX** total includes **CERTAIN**. See the [overlay guide](docs/guides/obs-overlay.md).
+
+### Pirate Token estimates
+
+The app estimates the probability of at least one drop using the submitted chest count and selected boost. For `n` chests at a per-chest probability `p`, the calculation is `1 − (1 − p)^n`. The base model uses 1 in 137,500 per chest.
+
+Cumulative odds keep each match's boost. For mixed rates, the calculation is `1 − ∏(1 − pᵢ)ⁿᵢ`. A solo match contributes your own openings. A verified shared match contributes its team openings once. Percentages are calculated from those rolls instead of added together. [Fortnite Status](https://x.com/FortniteStatus/status/2119202610322227327) · [Independent calculator](https://piratetoken.quest/drop-rate/)
 
 ### Group and Discord
 
-- Each player counts their own gameplay. Enable sharing and enter a player name and the shared webhook to submit matches. The **Host** runs the bot and publishes one leaderboard. **Guests** use its message link or ID to see the same standings.
-- The app groups contributions with the same verified Fortnite session fingerprint, even when players return to the lobby at different times. The board shows per-player totals, confidence counts, chest types and match counts where available. Team odds use the chests submitted so far.
-- Guests with sharing enabled follow the Host's published mode and multiplier. Turn sharing off for local-only matches and personal settings.
-- The Host can send rich match reports manually or automatically, reset selected players in the standings or delete the published message. Discord commands include `/chests`, `/leaderboard`, `/add` and `/reset`. See the [setup and permissions guide](docs/guides/matches-and-discord.md).
+One person runs the **Host** bot. Other players use **Guest**, their own name and the shared webhook. The Host publishes a board and shares the **sync ID** so the other apps can read the same data.
 
-### Windows settings and diagnostics
+- Show the ranking in the Dashboard and Group page, with totals, confidence, chest types and saved match counts where available.
+- Choose the public leaderboard's destination from the online bot's available Discord channels. Publish it from the app or from a Discord command.
+- Send match summaries manually or automatically after saving. Start or stop the bot and choose whether it starts with the app.
+- Give the bot and webhook separate names and avatars. The bot can rotate its Discord presence between live team totals, token odds and saved group stats.
+- Reset selected players in the standings or remove the published board. Local match history is managed separately.
+- Turn off **Share matches with my group** to keep new matches local and restore personal mode and boost controls.
 
-- Start in the tray, keep counting when the window closes and remember its position. **Reset all** restores defaults for the Settings page and preserves counts, profiles, history, overlay and Discord setup.
-- Save session logs and popup snapshots, or record diagnostic footage. Press **Ctrl+Alt+M** to mark a missed opening and use **Review captures** to replay it.
-- **Help & diagnostics** can run and copy a report, open the logs folder and clean generated logs and captures when counting is stopped.
-- Packaged builds support optional update checks and a configurable download limit. See [how updates work](docs/maintenance/UPDATER.md).
+| Command | Action |
+|---|---|
+| `/chests` | Show shared totals, or a player's stats. |
+| `/leaderboard` | Show the full current ranking. |
+| `/leaderboard publish:true` | Publish or move the auto-updating board to the current channel. Requires Manage Server. |
+| `/add` | Correct a player's total. Requires Manage Server. |
+| `/reset` | Reset a player's standing. Requires Manage Server. |
+
+The webhook receives submissions in its feed channel. The public bot leaderboard can live in another channel. See [setup, permissions and sharing](docs/guides/matches-and-discord.md).
+
+### Windows tools and diagnostics
+
+- Start in the tray, keep counting when the window closes and remember window position.
+- Restore the Settings page's defaults with **Reset all**.
+- Record logs, popup snapshots and diagnostic clips. Press **Ctrl+Alt+M** to mark a missed chest and replay it with **Review captures**.
+- Run and copy a diagnostic report or clean generated logs and captures when counting is stopped.
+- Check for packaged updates and configure the download limit. See [the updater guide](docs/maintenance/UPDATER.md).
+
+## Previews
+
+The screenshots show the application with sample data.
+
+<p align="center"><a href="docs/previews/dashboard.png"><img src="docs/previews/dashboard.png" alt="Dashboard with personal, team and all-match stats" width="1080"></a></p>
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/previews/group.png"><img src="docs/previews/group.png" alt="Group match history, shared standings and Discord controls" width="540"></a></td>
+    <td width="50%"><a href="docs/previews/overlay-settings.png"><img src="docs/previews/overlay-settings.png" alt="Overlay appearance and custom wording controls" width="540"></a></td>
+  </tr>
+  <tr><td align="center">Match history and Group</td><td align="center">Overlay settings</td></tr>
+</table>
+
+<p align="center"><a href="docs/previews/overlay.png"><img src="docs/previews/overlay.png" alt="Floating overlay with the current chest type and three statistic scopes" width="600"></a></p>
 
 ## Capture setups
 
-| Gameplay source | Setup guide |
+| Gameplay source | Guide |
 |---|---|
-| Your game, a video or a stream on a monitor | [Screen capture, including HDR](docs/guides/screen-capture.md) |
+| A game, stream or video on a monitor | [Screen capture, including HDR](docs/guides/screen-capture.md) |
 | Twitch or YouTube live URL | [Livestream capture](docs/guides/livestream-url.md) |
-| OBS and Fortnite on the same PC | [OBS Virtual Camera](docs/guides/obs-single-pc.md) |
+| OBS and Fortnite on one PC | [OBS Virtual Camera](docs/guides/obs-single-pc.md) |
 | Two PCs on the same network | [OBS over SRT](docs/guides/obs-dual-pc-srt.md) |
-| OBS feed when Virtual Camera is already in use | [OBS projector](docs/guides/obs-projector.md) |
-| Console or second PC through a capture device | [Capture card](docs/guides/capture-card.md) |
+| OBS when Virtual Camera is already in use | [OBS projector](docs/guides/obs-projector.md) |
+| A console or second PC through a capture device | [Capture card](docs/guides/capture-card.md) |
 | A saved gameplay file | [Recorded video](docs/guides/recorded-video.md) |
 
 ## Compatibility and data
 
-Detection depends on the visible chest pop-up. HUD size, compression, occlusion and fast consecutive openings can affect the count. Chest-type detection has been tested on English and French footage. Unsupported playlists or matches already underway may require manual tracking. See [troubleshooting](docs/guides/troubleshooting.md) and the [validation notes](docs/CHANGES.md).
+HUD size, compression, occlusion and fast consecutive openings can affect the count. Chest-type detection has been exercised on English and French footage. Unsupported playlists and matches already underway may require manual tracking. See [troubleshooting](docs/guides/troubleshooting.md) and [validation notes](docs/CHANGES.md).
 
-Counting reads video frames. Optional match features read the local Fortnite log. Optional Discord sharing sends match statistics and a session fingerprint. The app is independent and has no Epic Games approval.
+Counting reads video frames. Optional match features read the local Fortnite log. Discord sharing sends player stats and a session fingerprint. Diagnostics are saved locally when enabled. The project is independent and has no Epic Games approval.
 
-## Development and license
+## Development
 
-Run the GUI from an editable Python installation or use `debug-chest-counter.bat` from a configured checkout. The [development guide](docs/DEVELOPMENT.md) covers the Windows launcher, tests and packaging. The [documentation index](docs/index.md) links to research, release notes and maintenance guides.
+Use an editable Python installation or `debug-chest-counter.bat` from a configured checkout. The [development guide](docs/DEVELOPMENT.md) covers tests and Windows packaging. The [documentation index](docs/index.md) links to guides, research, releases and maintenance notes.
 
-[MIT License](LICENSE). See [bundled dependency notices](packaging/LICENSE-NOTICE.txt). Fortnite is a trademark of Epic Games, Inc.
+The project uses Codex-assisted development, including GPT-6.1 Sol at medium reasoning effort. Detector changes should be checked against independent gameplay recordings. Discord integration tests use simulated responses; a live Host/Guest check is part of release validation.
+
+## Acknowledgements and license
+
+[Fortnite Visual Chest Counter](https://github.com/GabrielGzS/fortnite-visual-chest-counter) by Gabriel Gomez provides the foundation. The animated chest is adapted from [Chest Tracker](https://github.com/Xxoris190/chest-tracker), with its MIT attribution retained. The presentation takes cues from Chest Tracker and N-Zik's README.
+
+**[MIT License](LICENSE)** · **[Acknowledgements](docs/ACKNOWLEDGEMENTS.md)** · **[Distribution notices](packaging/LICENSE-NOTICE.txt)**
+
+Google Sans uses the SIL Open Font License 1.1, and Material Icons use Apache-2.0. The portable runtime retains the Python, Qt, FFmpeg, NumPy, SciPy and Discord dependency notices. Fortnite is a trademark of Epic Games, Inc.

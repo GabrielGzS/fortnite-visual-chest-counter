@@ -377,3 +377,384 @@ def test_qt_guest_startup_and_role_switch(tmp_path, monkeypatch):
     finally:
         reopened.close()
         qt.processEvents()
+
+def test_leaderboard_command_reuses_rich_embed_and_checks_publish_permission(tmp_path, monkeypatch):
+    from fortnite_chest_counter import discord_scoreboard
+
+    async def verify():
+        store = discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db")
+        players = [discord_group.Player("Rin", 8, certain=5, confirmed_total=8, matches=2,
+                                        chest_types={"rare": 3})]
+        team = discord_group.TeamSummary(1, 1, 8, 17188, "0.005818%")
+        monkeypatch.setattr(store, "board", lambda: (players, team))
+        client = discord.Client(intents=discord.Intents.none())
+        tree = discord.app_commands.CommandTree(client)
+        calls = []
+        published = []
+
+        async def send(*args, **kwargs):
+            calls.append((args, kwargs))
+
+        async def defer(**kwargs):
+            calls.append(("defer", kwargs))
+
+        async def publish(channel_id):
+            published.append(channel_id)
+            return "https://discord.com/channels/123/456/789"
+
+        guild = discord.Object(123)
+        discord_bot.register_commands(tree, guild, store, lambda: True, publish)
+        command = tree.get_command("leaderboard", guild=guild)
+        interaction = SimpleNamespace(
+            guild_id=123, channel_id=456, permissions=discord.Permissions.none(),
+            app_permissions=discord.Permissions.all(),
+            response=SimpleNamespace(defer=defer, send_message=send, is_done=lambda: False),
+            followup=SimpleNamespace(send=send),
+        )
+        await command.callback(interaction)
+        expected = discord_scoreboard.make_embed(discord_scoreboard.rows(players), team)
+        actual = calls[-1][1]["embed"].to_dict()
+        assert actual["title"] == expected["title"]
+        assert actual["fields"] == expected["fields"]
+        assert actual["description"] == expected["description"]
+        assert calls[0] == ("defer", {"thinking": True, "ephemeral": False})
+
+        calls.clear()
+        await command.callback(interaction, publish=True)
+        assert published == []
+        assert "Manage Server" in calls[0][0][0]
+        assert calls[0][1]["ephemeral"]
+
+        calls.clear()
+        interaction.permissions = discord.Permissions.all()
+        await command.callback(interaction, publish=True)
+        assert published == [456]
+        assert calls[0] == ("defer", {"thinking": True, "ephemeral": True})
+        assert calls[-1][1]["ephemeral"]
+        await client.close()
+
+    asyncio.run(verify())
+
+
+def test_published_board_moves_updates_resumes_and_deletes(tmp_path, monkeypatch):
+    async def verify():
+        store = discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db")
+        players = [discord_group.Player("Rin", 8, certain=5, confirmed_total=8, matches=2)]
+        monkeypatch.setattr(store, "board", lambda: (players, discord_group.TeamSummary()))
+        guild = SimpleNamespace(id=123, me=object())
+        messages = {}
+        edits = []
+        sent = []
+        deleted = []
+
+        class Message:
+            def __init__(self, channel, ident):
+                self.channel = channel
+                self.id = ident
+
+            async def edit(self, **kwargs):
+                if self.id not in messages:
+                    raise discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Missing")
+                edits.append(self.id)
+                messages[self.id] = kwargs["embed"].to_dict()
+                return self
+
+            async def delete(self):
+                if self.channel.deny_delete:
+                    raise discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "Denied")
+                if self.id not in messages:
+                    raise discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Missing")
+                deleted.append(self.id)
+                del messages[self.id]
+
+        class Channel:
+            def __init__(self, ident, name):
+                self.id, self.name, self.guild = ident, name, guild
+                self.deny_delete = False
+                self.permissions = discord.Permissions.all()
+
+            def permissions_for(self, member):
+                assert member is guild.me
+                return self.permissions
+
+            def get_partial_message(self, ident):
+                return Message(self, ident)
+
+            async def send(self, **kwargs):
+                ident = 1000 + len(sent)
+                sent.append((self.id, ident))
+                assert kwargs["allowed_mentions"].to_dict()["parse"] == []
+                messages[ident] = kwargs["embed"].to_dict()
+                return Message(self, ident)
+
+        first, second = Channel(234, "first"), Channel(345, "second")
+        guild.text_channels = [first, second]
+        channels = {channel.id: channel for channel in guild.text_channels}
+        monkeypatch.setattr(discord_bot.discord, "TextChannel", Channel)
+        bot = discord_bot.GuildBot(CONFIG, store, lambda *_: None, WEBHOOK)
+        bot._connection.application_id = 456
+        bot.feed_channel = first
+        monkeypatch.setattr(bot, "get_channel", channels.get)
+        monkeypatch.setattr(bot, "get_guild", lambda ident: guild if ident == guild.id else None)
+        assert bot.available_channels() == (("234", "#first"), ("345", "#second"))
+
+        assert await bot.publish_board() == ""
+        assert sent == []
+        assert await bot.publish_board(first.id, settings=("Duo", 1.5)) == "https://discord.com/channels/123/234/1000"
+        assert store.published_board(456, 123) == ("234", "1000")
+        assert bot.published_channel == "234"
+        await bot.publish_board(first.id)
+        assert len(sent) == 1 and edits == [1000]
+        await bot.publish_board()
+        assert edits == [1000]
+
+        players[0] = discord_group.Player("Rin", 12, certain=9, confirmed_total=12, matches=3)
+        await bot.refresh_board.coro(bot)
+        assert edits == [1000]
+        bot._feed_ready = True
+        await bot.refresh_board.coro(bot)
+        assert edits == [1000, 1000]
+        assert messages[1000]["fields"][0]["value"].startswith("Total: 12")
+        await bot.publish_board(second.id)
+        assert sent[-1] == (345, 1001)
+        assert deleted == [1000]
+        assert store.published_board(456, 123) == ("345", "1001")
+        assert bot.published_channel == "345"
+
+        restarted = discord_bot.GuildBot(CONFIG, store, lambda *_: None, WEBHOOK)
+        restarted._connection.application_id = 456
+        restarted.feed_channel = first
+        monkeypatch.setattr(restarted, "get_channel", channels.get)
+        monkeypatch.setattr(restarted, "get_guild", lambda *_: guild)
+        await restarted.publish_board()
+        assert sent == [(234, 1000), (345, 1001)]
+        assert edits[-1] == 1001
+        assert restarted.published_channel == "345"
+
+        second.deny_delete = True
+        with pytest.raises(discord.Forbidden):
+            await restarted.delete_board()
+        assert store.published_board(456, 123) == ("345", "1001")
+        second.deny_delete = False
+        await restarted.delete_board()
+        assert store.published_board(456, 123) is None
+        assert restarted.published_channel == ""
+        assert deleted == [1000, 1001]
+        await bot.close()
+        await restarted.close()
+
+    asyncio.run(verify())
+
+
+def test_edited_live_message_bypasses_history_cursor_and_authenticates_webhook(tmp_path):
+    async def verify():
+        store = discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db")
+        bot = discord_bot.GuildBot(CONFIG, store, lambda *_: None, WEBHOOK)
+        channel_id = 345
+        fingerprint = "a" * 64
+        calls = []
+        author = WEBHOOK.id
+        import time
+        stamp = time.time()
+
+        async def fetch_message(ident):
+            calls.append(ident)
+            return SimpleNamespace(id=ident, channel=SimpleNamespace(id=channel_id),
+                                   webhook_id=int(author), content=content)
+
+        bot.feed_channel = SimpleNamespace(id=channel_id, fetch_message=fetch_message)
+        store.advance_cursor(channel_id, 9999)
+        content = '||FCCL1 ' + json.dumps([fingerprint, "Rin", 1, 2, 3, 1.0, stamp]) + '||'
+        payload = SimpleNamespace(channel_id=channel_id, message_id=100, data={"content": content})
+        await bot.on_raw_message_edit(payload)
+        session, = store.sessions()
+        assert session.total == 3 and session.certain == 2
+        assert store.cursor(channel_id) == 9999
+        content = '||FCCL1 ' + json.dumps([fingerprint, "Rin", 2, 3, 5, 1.0, stamp + 1]) + '||'
+        payload.data = {"content": content}
+        await bot.on_raw_message_edit(payload)
+        assert store.sessions()[0].total == 5
+        assert store.cursor(channel_id) == 9999
+        content = '||FCCL1 ' + json.dumps([fingerprint, "Rin", 3, 4, 7, 1.0, stamp + 2]) + '||'
+        await bot._refresh_live_messages()
+        assert store.sessions()[0].total == 7
+        assert store.cursor(channel_id) == 9999
+        author = "987654321012345678"
+        content = '||FCCL1 ' + json.dumps([fingerprint, "Rin", 4, 5, 99, 1.0, stamp + 3]) + '||'
+        payload.data = {"content": content}
+        await bot.on_raw_message_edit(payload)
+        assert store.sessions()[0].total == 7
+        payload.data = {"content": "unrelated webhook message"}
+        await bot.on_raw_message_edit(payload)
+        assert calls == [100, 100, 100, 100]
+        payload.channel_id = 999
+        await bot.on_raw_message_edit(payload)
+        assert calls == [100, 100, 100, 100]
+        await bot.close()
+
+    asyncio.run(verify())
+
+
+def test_bot_presence_uses_fresh_shared_session_and_throttles_updates(tmp_path, monkeypatch):
+    monkeypatch.setattr(discord_bot.paths, "APP_DIR", tmp_path)
+
+    async def verify():
+        store = discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db")
+        bot = discord_bot.GuildBot(CONFIG, store, lambda *_: None, WEBHOOK)
+        bot._connection.user = SimpleNamespace(id=456)
+        clock = [1000.0, 100.0]
+        monkeypatch.setattr(discord_bot.time, "time", lambda: clock[0])
+        monkeypatch.setattr(discord_bot.time, "monotonic", lambda: clock[1])
+        current = []
+        saved = []
+        monkeypatch.setattr(store, "sessions", lambda: tuple(current))
+        monkeypatch.setattr(store, "board", lambda: (saved, discord_group.TeamSummary(1) if saved else discord_group.TeamSummary()))
+        calls = []
+
+        async def change_presence(**kwargs):
+            calls.append((kwargs["status"], kwargs["activity"].type, kwargs["activity"].name))
+
+        monkeypatch.setattr(bot, "change_presence", change_presence)
+        await bot.update_presence()
+        assert calls == [(discord.Status.online, discord.ActivityType.watching, "the group leaderboard")]
+        current.append(discord_group.TeamSession("a" * 64, (
+            discord_group.SessionPlayer("Rin", 4, 8, 1.0, updated_at=1000.0),
+            discord_group.SessionPlayer("Sam", 3, 6, 1.0, updated_at=1000.0),
+        )))
+        clock[1] = 120.0
+        await bot.update_presence()
+        assert len(calls) == 1
+        saved.append(discord_group.Player("Rin", 14, matches=1))
+        clock[1] = 130.0
+        await bot.update_presence()
+        assert calls[-1][2] == "2 players · 14 chests"
+
+        clock[1] = 160.0
+        await bot.update_presence()
+        assert calls[-1][2] == "Team token chance · 0.010181%"
+        clock[1] = 190.0
+        await bot.update_presence()
+        assert calls[-1][2] == "Group · 14 chests · 1 matches"
+        current[0] = discord_group.TeamSession("a" * 64, (
+            discord_group.SessionPlayer("Rin", 4, 8, 1.0, True, updated_at=1000.0),
+            discord_group.SessionPlayer("Sam", 3, 6, 1.0, True, updated_at=1000.0),
+        ))
+        clock[1] = 220.0
+        await bot.update_presence()
+        assert calls[-1][2] == "Group · 14 chests · 1 matches"
+
+        clock[0], clock[1] = 1201.0, 250.0
+        current[0] = discord_group.TeamSession("a" * 64, (
+            discord_group.SessionPlayer("Rin", 4, 8, 1.0, updated_at=1000.0),
+            discord_group.SessionPlayer("Sam", 3, 6, 1.0, updated_at=1000.0),
+        ))
+        await bot.update_presence()
+        assert len(calls) == 4
+        await bot.close()
+
+    asyncio.run(verify())
+
+
+def test_apply_bot_branding_is_explicit_and_uses_packaged_icon(tmp_path):
+    async def verify():
+        bot = discord_bot.GuildBot(CONFIG, discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db"),
+                                   lambda *_: None, WEBHOOK)
+        calls = []
+
+        async def edit(**kwargs):
+            calls.append(kwargs)
+
+        user = SimpleNamespace(id=456, name="Previous bot name", edit=edit)
+        bot._connection.user = user
+        assert calls == []
+        assert await bot.apply_branding() == "Bot name and avatar updated."
+        assert calls[0]["username"] == "Chest Counter"
+        assert calls[0]["avatar"].startswith(b"\x89PNG\r\n\x1a\n")
+        user.name = "Chest Counter"
+        await bot.apply_branding()
+        assert set(calls[1]) == {"avatar"}
+        await bot.close()
+
+    asyncio.run(verify())
+
+
+def test_custom_bot_branding_validates_before_discord_request(tmp_path):
+    async def verify():
+        bot = discord_bot.GuildBot(CONFIG, discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db"),
+                                   lambda *_: None, WEBHOOK)
+        calls = []
+
+        async def edit(**kwargs):
+            calls.append(kwargs)
+
+        bot._connection.user = SimpleNamespace(id=456, name="Old bot", edit=edit)
+        avatar = tmp_path / "custom.png"
+        avatar.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+        await bot.apply_branding("My Squad", str(avatar))
+        assert calls[0] == {"username": "My Squad", "avatar": avatar.read_bytes()}
+        for name in ("A", "x" * 33, "Bad\nName", "bad@name"):
+            with pytest.raises(ValueError, match="bot name"):
+                await bot.apply_branding(name, str(avatar))
+        with pytest.raises(ValueError, match="existing image"):
+            await bot.apply_branding("My Squad", str(tmp_path / "missing.png"))
+        wrong = tmp_path / "wrong.png"
+        wrong.write_text("not an image")
+        with pytest.raises(ValueError, match="PNG or JPEG image"):
+            await bot.apply_branding("My Squad", str(wrong))
+        huge = tmp_path / "huge.jpg"
+        huge.write_bytes(b"\xff\xd8\xff" + b"x" * (2 * 1024 * 1024))
+        with pytest.raises(ValueError, match="smaller than 2 MB"):
+            await bot.apply_branding("My Squad", str(huge))
+        assert len(calls) == 1
+        await bot.close()
+
+    asyncio.run(verify())
+
+
+def test_custom_presence_templates_activity_rotation_and_disable(tmp_path, monkeypatch):
+    async def verify():
+        store = discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db")
+        bot = discord_bot.GuildBot(CONFIG, store, lambda *_: None, WEBHOOK)
+        bot._connection.user = SimpleNamespace(id=456)
+        clock = [100.0]
+        config = {"discord_presence_enabled": True, "discord_presence_rotate": False,
+                  "discord_presence_interval": 10, "discord_presence_activity": "playing",
+                  "discord_presence_team_text": "{players} players / {total} opened / {chance}"}
+        monkeypatch.setattr(discord_bot.settings, "load_config", lambda *_: ({"app": config}, "", []))
+        monkeypatch.setattr(discord_bot.time, "time", lambda: 1000.0)
+        monkeypatch.setattr(discord_bot.time, "monotonic", lambda: clock[0])
+        session = discord_group.TeamSession("a" * 64, (
+            discord_group.SessionPlayer("Rin", 2, 3, 1.0, updated_at=1000.0),
+            discord_group.SessionPlayer("Sam", 2, 4, 1.0, updated_at=1000.0),
+        ))
+        monkeypatch.setattr(store, "sessions", lambda: (session,))
+        monkeypatch.setattr(store, "board", lambda: ([], discord_group.TeamSummary()))
+        calls = []
+
+        async def change_presence(**kwargs):
+            calls.append(kwargs)
+
+        monkeypatch.setattr(bot, "change_presence", change_presence)
+        await bot.update_presence()
+        assert calls[0]["activity"].type == discord.ActivityType.playing
+        assert calls[0]["activity"].name == "2 players / 7 opened / 0.005091%"
+        clock[0] = 129.0
+        config["discord_presence_activity"] = "listening"
+        await bot.update_presence()
+        assert len(calls) == 1
+        clock[0] = 130.0
+        await bot.update_presence()
+        assert calls[1]["activity"].type == discord.ActivityType.listening
+        assert calls[1]["activity"].name == calls[0]["activity"].name
+        clock[0] = 160.0
+        config["discord_presence_team_text"] = "x" * 200 + "{unknown}"
+        await bot.update_presence()
+        assert calls[-1]["activity"].name == "x" * 128
+        config["discord_presence_enabled"] = False
+        await bot.update_presence()
+        assert calls[-1]["activity"] is None
+        await bot.update_presence()
+        assert len(calls) == 4
+        await bot.close()
+
+    asyncio.run(verify())

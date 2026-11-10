@@ -340,6 +340,8 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             C.update_config_file(A.config_file(), "app", {"screen_overlay_shared": False})
             C.update_config_file(A.config_file(), "display", {
                 "both_layout": "stacked", "screen_show_matches": False, "screen_show_types": False,
+                "screen_team_text": "", "screen_cumulative_text": "",
+                "screen_personal_template": "", "screen_team_enabled": False, "screen_cumulative_enabled": False,
             })
             win = A.MainWindow()
             win.timer.stop()
@@ -360,7 +362,7 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             assert win.overlay.share_screen_overlay.isEnabled()
             assert not win.overlay.share_screen_overlay.isChecked()
             win.overlay.share_screen_overlay.setChecked(True)
-            assert overlay.caption.text().splitlines() == [
+            assert overlay.plain_text.splitlines() == [
                 "CERTAIN OPENED CHESTS: 5", "APPROX. OPENED CHESTS: 5", "Total: 10",
                 "Pirate Token · 0.007272%",
             ]
@@ -371,7 +373,7 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             win._set(0, 0, "reset")
             win.dashboard.token_mode.setCurrentText("Duo")
             assert win.dashboard.token_odds.text() == "0.000000%"
-            assert "0.000000%" in overlay.caption.text()
+            assert "0.000000%" in overlay.plain_text
             win.overlay.mode_buttons["certain"].setChecked(True)
             win.overlay.token_text.setText("Odds: #")
             win.overlay.total_text.setText("Opened #")
@@ -379,25 +381,25 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             win.primary_types = {"unclassified": {"certain": 0, "approx": 3}}
             win.refresh_types()
             win.overlay.apply()
-            assert overlay.caption.text().splitlines() == [
+            assert overlay.plain_text.splitlines() == [
                 "CERTAIN OPENED CHESTS: 0 • Opened 0", "Odds: 0.000000%",
                 "Chest types: not classified 3",
             ]
-            assert win.overlay.preview.caption.text() == overlay.caption.text()
-            assert win.overlay.mode_examples["certain"].text() == overlay.caption.text()
+            assert win.overlay.preview.plain_text == overlay.plain_text
+            assert win.overlay.mode_examples["certain"].text() == "CERTAIN OPENED CHESTS: 0"
             assert not overlay.caption.wordWrap()
             assert overlay.caption.width() >= max(overlay.caption.fontMetrics().horizontalAdvance(line)
-                                                  for line in overlay.caption.text().splitlines())
+                                                  for line in overlay.plain_text.splitlines())
             win.overlay.total_text.setText("Opened " * 180 + "#")
             win.overlay.apply()
             assert overlay.caption.wordWrap()
             assert overlay.caption.width() <= overlay.caption.maximumWidth()
             win.overlay.total_text.setText("Opened #")
-            assert win.dashboard.viewers.text() == overlay.caption.text()
+            assert win.dashboard.viewers.text() == overlay.plain_text
             win.overlay.show_token.setChecked(False)
             win.overlay.apply()
-            assert "Odds:" not in overlay.caption.text()
-            assert "Opened 0" in overlay.caption.text()
+            assert "Odds:" not in overlay.plain_text
+            assert "Opened 0" in overlay.plain_text
             win.overlay.show_screen_overlay.setChecked(False)
             assert overlay.isHidden()
             assert not win.overlay.share_screen_overlay.isEnabled()

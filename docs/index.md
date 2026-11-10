@@ -2,6 +2,7 @@
 
 | Topic | Guide |
 |---|---|
+| Acknowledgements and licenses | [Credits and component notices](ACKNOWLEDGEMENTS.md) |
 | Screenshots | [Preview placeholders](previews/index.md) |
 | Install and start counting | [Project README](../README.md) |
 | Choose a video source | [Capture setup guides](guides/index.md), [input options](reference/INPUT_OPTIONS.md) |
