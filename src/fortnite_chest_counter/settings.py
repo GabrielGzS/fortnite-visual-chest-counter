@@ -21,7 +21,7 @@ DEFAULT_CONFIG_PATH = Path("config.toml")
 DEFAULTS = {
     "detector": {
         "process_fps": 15,                      # detector cadence; 15 is what the detectors were developed at
-        "languages": ["en", "pt"],              # chest-word templates to use
+        "languages": ["en"],              # chest-word templates to use
         "certain_min_tier": "HIGH",             # "HIGH": CERTAIN+HIGH popups are certain; "CERTAIN": only CERTAIN
         "count_supported_medium_as_approx": True,       # MEDIUM popup + prompt + chest-like object
         "count_interaction_object_as_approx": True,     # prompt + chest-like object without a popup
@@ -29,17 +29,17 @@ DEFAULTS = {
     },
     "display": {
         "show": "both",                         # what obs_output/chest_counter.txt shows: both | certain | approx
-        "both_layout": "stacked",               # show = "both": "stacked" (two lines) or "inline" (one line = combined_status_format)
+        "both_layout": "inline",               # show = "both": "stacked" (two lines) or "inline" (one line = combined_status_format)
         "certain_text": "CERTAIN OPENED CHESTS: {count}",
         "approx_text": "APPROX. OPENED CHESTS: {count}",
-        "combined_status_format": "{certain} certain • ~{approximate} estimated",
+        "combined_status_format": "{certain} certain • ~{approx} estimated",
         "use_thousands_separator": True,
         "screen_token_text": "Pirate Token · #",
         "screen_show_token": True,
         "screen_show_total": True,              # legacy setting retained for older config files
         "screen_total_text": "Total: #",
-        "screen_show_types": False,
-        "screen_show_matches": False,
+        "screen_show_types": True,
+        "screen_show_matches": True,
         # v0.1.0 names, still understood: a config that sets only these gets "<label>: {count}" as its text.
         "certain_label": "CERTAIN OPENED CHESTS",
         "approximate_label": "APPROX. OPENED CHESTS",
@@ -56,7 +56,7 @@ DEFAULTS = {
     "logging": {
         "enabled": True,
         "log_candidates": True,                 # also log events that were NOT counted
-        "save_snapshots": False,                # save a small PNG of the popup area for every popup event (for reporting misses)
+        "save_snapshots": True,                # save a small PNG of the popup area for every popup event (for reporting misses)
         "dir": "logs",
     },
     "capture": {
@@ -69,7 +69,7 @@ DEFAULTS = {
         "dir": "captures",
     },
     "live": {
-        "source": "stream",                     # stream | desktop | desktop-hdr | obs-camera | device | window | file
+        "source": "desktop-hdr",                     # stream | desktop | desktop-hdr | obs-camera | device | window | file
         "device": "OBS Virtual Camera",         # DirectShow device name for --source device
         "monitor": 1,                           # monitor number for --source desktop
         "window": "",                           # window title for --source window (an OBS "Windowed Projector (Source)")
@@ -86,26 +86,27 @@ DEFAULTS = {
         "source_uuid": "",                      # its OBS id, so a rename in OBS is followed (set by the app)
     },
     "app": {
-        "screen_overlay_enabled": False,
-        "screen_overlay_shared": False,
-        "token_mode": "Solo",
+        "screen_overlay_enabled": True,
+        "screen_overlay_shared": True,
+        "token_mode": "Auto",
         "token_boost": "Normal ×1",
         "live_preview": False,
-        "show_activity": True,
+        "show_activity": False,
         "group_player": "",
         "group_scoreboard_id": "",
-        "group_share_matches": True,
+        "group_share_matches": False,
+        "group_role": "host",
         "remember_window": True,                # the desktop app reopens with the size, position and maximised state it closed with
-        "close_to_tray": False,
+        "close_to_tray": True,
         "start_in_tray": False,
-        "auto_match_lifecycle": False,
-        "auto_discord_summary": False,
+        "auto_match_lifecycle": True,
+        "auto_discord_summary": True,
         "auto_start_discord_sender": True,
     },
     "update": {
         "check_automatically": True,            # look for a new version shortly after the app opens (nothing is downloaded by itself)
         "download_bandwidth": "adaptive",       # adaptive | unlimited | custom
-        "custom_limit_kb_per_second": 2000,     # used when download_bandwidth = "custom"
+        "custom_limit_kb_per_second": 1000,     # used when download_bandwidth = "custom"
     },
 }
 
@@ -141,7 +142,7 @@ LANGUAGE_CHOICES = (
 
 
 # The app's "Pictures analysed per second" choice -> [detector] process_fps (config.toml still accepts any 5-30).
-# Measured (docs/RELEASE_NOTES_v0.2.1.md): on the two labelled test recordings (22 chests) 15 found 21, 10 the same 21 plus
+# Measured (docs/releases/RELEASE_NOTES_v0.2.1.md): on the two labelled test recordings (22 chests) 15 found 21, 10 the same 21 plus
 # 2 extra estimated counts, 5 found 18. Counter CPU on the development PC: 15 ~45 %, 10 ~44 %, 5 ~25 % of one core.
 FPS_PRESETS = (
     (15, "Recommended", "What the counter was built and tested with. On our test PC the counter used about half of one "
@@ -194,6 +195,8 @@ def _check(section, key, value):
     if (section == "live" and key in ("window", "url")
             or section == "app" and key in ("group_player", "group_scoreboard_id")):
         return (isinstance(value, str), "must be text in quotes")
+    if section == "app" and key == "group_role":
+        return (value in ("", "host", "guest"), 'must be "host" or "guest"')
     if section == "live" and key == "stream_quality":
         return (value in STREAM_QUALITIES, f"must be one of {list(STREAM_QUALITIES)}")
     if section == "live" and key == "stream_stability":

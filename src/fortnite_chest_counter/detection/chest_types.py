@@ -1,5 +1,5 @@
 """
-Chest type from the pop-up line (v0.2.2, docs/INVESTIGATION_2026-11-08.md): "CHEST", "RARE CHEST" or "SPRITE CHEST".
+Chest type from the pop-up line (v0.2.2, docs/reference/INVESTIGATION_2026-11-08.md): "CHEST", "RARE CHEST" or "SPRITE CHEST".
 
 Classification never creates or removes a count: it only labels a chest the counter already counted. What is read:
 

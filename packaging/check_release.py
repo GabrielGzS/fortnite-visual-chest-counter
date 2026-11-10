@@ -1,5 +1,5 @@
 """
-The last check before a release can be published.   (Maintainer only: never shipped. See docs/UPDATE_SIGNING.md.)
+The last check before a release can be published.   (Maintainer only: never shipped. See docs/maintenance/UPDATE_SIGNING.md.)
 
     python packaging/check_release.py --out <the folder holding the release zip> [--version X.Y.Z] [--inputs <the build inputs folder>]
 
@@ -171,7 +171,7 @@ def problems(out_dir, version=__version__, expected_keys=None, notes_folder=None
         return [f"{version} is not a release version"]
     zip_path, manifest_path, signature_path = out / zip_name(version), out / MANIFEST_NAME, out / SIGNATURE_NAME
     missing = [f"{path.name} is missing" for path in (zip_path, manifest_path, signature_path) if not path.is_file()]
-    notes = Path(notes_folder if notes_folder is not None else ROOT / "docs") / f"RELEASE_NOTES_v{version}.md"
+    notes = Path(notes_folder if notes_folder is not None else ROOT / "docs" / "releases") / f"RELEASE_NOTES_v{version}.md"
     if not notes.is_file() or not notes.read_text(encoding="utf-8").strip():
         missing.append(f"{notes.name} is missing or empty")
     if any("is missing" in entry and "RELEASE_NOTES" not in entry for entry in missing):

@@ -34,4 +34,4 @@ runtime\python\python.exe -m fortnite_chest_counter video "C:\path\to\recording.
 `--start` / `--until` limit the analysis to that part of the video (in seconds). Run the commands in the app's folder.
 
 Not the same as **Review captures** (Settings), which replays the app's own diagnostic recordings to improve accuracy:
-see [CAPTURE.md](../CAPTURE.md).
+see [CAPTURE.md](diagnostic-capture.md).

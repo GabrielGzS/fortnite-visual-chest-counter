@@ -13,6 +13,6 @@ Text source can show on stream). Most people need one of the first two guides - 
 | Console or gaming PC + capture card + streaming PC | [Capture card](capture-card.md) | *Less tested:* counter side yes; not yet with a physical card |
 | Capture card **owned by OBS** and **Virtual Camera used by another program** | [OBS projector window](obs-projector.md) | *Less tested:* window capture yes (stand-in window); not yet with a real OBS projector |
 
-Then: [show the numbers on stream](obs-overlay.md) · [troubleshooting](troubleshooting.md).
+Then see [overlay and OBS](obs-overlay.md), [matches and Discord](matches-and-discord.md) or [troubleshooting](troubleshooting.md).
 
-Start with the [README](../../README.md) for what the app does, the two numbers and the download.
+Start with the [README](../../README.md) for installation and the chest counter definitions.

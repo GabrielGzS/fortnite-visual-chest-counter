@@ -58,7 +58,10 @@ def register_commands(tree, guild, totals, ready):
         except ValueError as exc:
             await error(interaction, str(exc))
             return
-        details = [f"**{discord.utils.escape_markdown(row.name)}** · {row.total:,} chests · {row.matches:,} matches"]
+        details = [f"**{discord.utils.escape_markdown(row.name)}** · {row.total:,} chests · {row.matches:,} submissions"]
+        if player is None:
+            team = await asyncio.to_thread(totals.team_summary)
+            details.append(f"Team matches: {team.matches:,}")
         if row.certain is not None:
             details.append(f"Recorded breakdown: {row.certain:,} certain · {row.confirmed_total - row.certain:,} estimated")
         if row.chest_types:

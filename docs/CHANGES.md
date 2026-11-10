@@ -1,0 +1,49 @@
+# Change and validation notes
+
+This page describes the local desktop work. Versioned release notes describe published releases.
+
+## Changes
+
+- Add French HUD detection and multi-frame classification for normal, Rare and Sprite chests. Deduplicate
+  overlapping readings and retain an unknown type for ambiguous openings.
+- Keep one capture per app. Improve HDR-to-SDR handling and preview delivery, keep the original SDR colour path,
+  and cap live preview at 5 FPS independently of the detector's 5/10/15 FPS settings.
+- Separate confirmed openings, estimated-only openings and Total in the Dashboard. Use Total and the manual
+  multiplier for the Pirate Token estimate.
+- Use a Material 3-inspired Qt interface with Google Sans, a left navigation rail, connected actions, themed
+  dialogs and animated chest variants. Configure overlay wording, chest types, drop chance, saved match count and
+  screen-share visibility.
+- Add local match history, batch deletion, local log-based start and finish, and automatic mode detection with
+  a manual selector.
+- Put sharing and bot setup together in Group. Add Host and Guest roles, one published leaderboard, Discord
+  match reports and team matching by verified session fingerprint.
+- Add tray options, diagnostic cleanup and a Settings reset. Keep a console debug batch file and a buildable
+  Windows development launcher.
+
+## Defaults
+
+The portable defaults mirror the verified setup in `config.example.toml`. Match automation and Auto mode are enabled,
+the app starts and closes to the tray, and the on-screen overlay is visible in screen sharing. Group sharing remains
+off. Automatic match reports also require a configured bot and enabled sharing.
+
+## Validation
+
+- Detector development replayed 11 diagnostic recordings comprising 20,455 analysed frames. A rare-chest replay
+  recovered four Rare openings and one Sprite opening. A separate replay counted a normal opening once after
+  deduplication. A normal French X2 pop-up first seen with its multiplier already present can still count as one.
+- Two local Fortnite logs from the same pair of Duo matches yielded two matching session fingerprints and detected
+  Duo on both PCs. Automated tests exercised local history, mode selection, Discord publication and settings sync
+  using simulated Discord responses.
+- Before release, repeat tests with an installed Windows build, HDR and SDR capture, Discord screen sharing and
+  a live Host/Guest setup. Live performance and Discord delivery need separate verification.
+
+The initial work used Codex with GPT-6.1 Sol at medium reasoning effort. Maintainers should independently replay
+their own recordings before merging detector changes.
+
+## References
+
+- [Material Design 3](https://m3.material.io/)
+- [Chest Tracker](https://github.com/Xxoris190/chest-tracker)
+- [Google Sans](https://github.com/googlefonts/googlesans)
+- [Material Icons](https://github.com/google/material-design-icons)
+- [Independent Pirate Token calculator](https://piratetoken.quest/drop-rate/)

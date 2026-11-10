@@ -1,6 +1,6 @@
 r"""
 Packaged updater validation, ONE scenario per run. Manual and demanding: never part of the normal tests.
-See "Checking with a real package" in docs/UPDATER.md.
+See "Checking with a real package" in docs/maintenance/UPDATER.md.
 
     Once, on a PC with this repository (keeps a test private key, so it must be outside the repository):
         python tests/update_e2e.py make-kit --base <a folder built by build_release.py> --out C:\fcc-kit

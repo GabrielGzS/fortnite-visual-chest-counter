@@ -27,9 +27,9 @@ Setup-specific problems: [dual-PC SRT](obs-dual-pc-srt.md#troubleshooting) · [c
 | Symptom | Fix |
 |---|---|
 | Number never changes | Turn on **Live preview**: 16:9, full picture, HUD visible? Does the chest pop-up ("CHEST" / "BAÚ") appear in `ChestDetectorFeed`? Is **Settings -> Fortnite language** right for your game? |
-| Many chests only in APPROX | Normal for compressed or larger-HUD video. Better picture quality (higher bitrate, clean feed) helps; APPROX is the estimated total. |
-| Missed or wrong chests | Dashboard -> **Diagnostic recording** -> "Only around my marks", then press **Ctrl+Alt+M** right after each miss. Share that session's `captures\` folder in an issue ([details](../CAPTURE.md)). |
-| Count should start from an earlier number | Dashboard -> **Edit counts...**: APPROX = the chests already opened, CERTAIN = 0. **Reset...** sets both to 0. Both work while counting. |
+| Many chests only in APPROX | Normal for compressed or larger-HUD video. Better picture quality (higher bitrate, clean feed) helps; Dashboard Approx contains estimated-only openings. The OBS APPROX figure includes confirmed openings. |
+| Missed or wrong chests | Dashboard -> **Diagnostic recording** -> "Only around my marks", then press **Ctrl+Alt+M** right after each miss. Share that session's `captures\` folder in an issue ([details](diagnostic-capture.md)). |
+| Count should start from an earlier number | Dashboard -> **Edit counts...**: Enter the chests already opened as estimated openings and leave confirmed openings at 0. **Reset...** sets both to 0. Both work while counting. |
 
 ## The number on stream is wrong or not updating
 

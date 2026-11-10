@@ -1,5 +1,8 @@
 # Count what is on a screen (no OBS needed)
 
+The default source is **Screen 1 HDR → SDR**. For a standard SDR monitor, select the regular **Screen** entry
+in **Dashboard → Capture settings**.
+
 The app can read a monitor directly: a livestream or video playing **fullscreen**, or Fortnite itself. Nothing else to
 set up.
 

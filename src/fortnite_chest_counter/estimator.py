@@ -84,7 +84,7 @@ ROBUST_SIGMA = 0.6
 ROBUST_HIGH_MIN = 0.88
 ROBUST_SEARCH_PX = 8          # the blurred match is searched within this many px of the exact match
 
-# Scale-aware pop-ups (docs/INVESTIGATION_2026-11-07.md). Some streams draw the HUD ~1.2x larger, so the pop-up word is
+# Scale-aware pop-ups (docs/reference/INVESTIGATION_2026-11-07.md). Some streams draw the HUD ~1.2x larger, so the pop-up word is
 # ~33 px wide instead of 27 px: the exact match (one fixed size) stays near 0.25 and nearly every chest is missed, while a
 # blurred match of the picture made smaller (x0.8) scores 0.82-0.92. This is a second channel BESIDE the exact path:
 #   - it runs only when the pop-up box has >= SCALED_PREFILTER_PX lavender pixels (production computes that mask anyway)
@@ -107,7 +107,7 @@ SCALED_PREFILTER_PX = 60
 SCALED_WAIT = 2.0
 SCALED_LOCK_MIN = 0.84
 
-# Smaller HUD (docs/INVESTIGATION_2026-11-08.md). Thiefs' stream draws the HUD at ~0.8x: the chest word is 22 px wide, the
+# Smaller HUD (docs/reference/INVESTIGATION_2026-11-08.md). Thiefs' stream draws the HUD at ~0.8x: the chest word is 22 px wide, the
 # exact match stays at 0.21-0.32 and every chest was missed. Enlarging the picture was rejected: a Portuguese combat
 # pop-up reached 0.806 at x1.25 against 0.81-0.83 for the real chests, and it cost ~34 ms per frame. This channel matches
 # a CHEST word cut at its NATIVE small size (templates/chest/en/chest_small.npy, 22 x 7 px, from that stream):

@@ -1,3 +1,4 @@
+from hashlib import sha256
 import os
 import sys
 from pathlib import Path
@@ -14,6 +15,14 @@ START = (b"[2026.11.10-20.04.47:107][363]LogBattleRoyaleGamePhaseLogic: HandleGa
          b"OldPhase = EAthenaGamePhase::Setup. NewPhase = EAthenaGamePhase::Warmup\r\n")
 FRONTEND = (b"[2026.11.10-20.05.02:589][955]LogWorld: Bringing World /Game/Maps/Frontend.Frontend up for play "
             b"(max tick rate 360) at 2026.11.10-21.05.02\r\n")
+
+
+SESSION_A = b"0123456789abcdef0123456789abcdef"
+SESSION_B = b"fedcba9876543210fedcba9876543210"
+
+
+def session_line(ident, stamp=b"2026.11.10-20.04.47:106", frame=b"363"):
+    return b"[" + stamp + b"][" + frame + b']LogCsvProfiler: Display: Metadata set : sessionid="' + ident + b'"\r\n'
 
 
 def append(path, data):
@@ -126,7 +135,10 @@ def exit_worker(win, code=0, acknowledged=True):
 
 def online_bot(win, config):
     from types import SimpleNamespace
+    from fortnite_chest_counter.gui import app as gui
 
+    win.set_group_role("host")
+    gui.C.update_config_file(gui.config_file(), "app", {"group_share_matches": True})
     win.discord.runner = SimpleNamespace(status=("online", ""), config=config, report_config=config, stop=lambda **_: None)
 
 
@@ -140,6 +152,7 @@ def test_qt_drains_before_saving_and_before_next_start(app, monkeypatch, send_en
         summaries.append(content)
         delivered.set()
 
+    win.set_match_automation(False)
     online_bot(win, object())
     monkeypatch.setattr(gui.discord_summary, "send", send)
     seed(gui, win, (5, 10))
@@ -147,7 +160,7 @@ def test_qt_drains_before_saving_and_before_next_start(app, monkeypatch, send_en
     win.poll_match_log()
     assert win.counts == (5, 10)
     win.settings_page.auto_match.setChecked(True)
-    win.discord.auto_report.setChecked(send_enabled)
+    win.discord.save_report_mode(send_enabled)
     win.settings_page.save()
     win.poll_match_log()
     assert win.counts == (5, 10)
@@ -330,7 +343,7 @@ def test_qt_saved_match_recovers_group_outbox_after_enqueue_failure(app, monkeyp
     group = gui.discord_group
     webhook = group.Webhook("123456789012345678", "fixture-webhook-token")
     monkeypatch.setattr(group, "load_webhook", lambda: webhook)
-    gui.C.update_config_file(gui.config_file(), "app", {"group_player": "Rin"})
+    gui.C.update_config_file(gui.config_file(), "app", {"group_player": "Rin", "group_share_matches": True})
     seed(gui, win, (5, 9))
     delivered = Event()
     sent = []
@@ -368,3 +381,218 @@ def test_qt_solo_match_stays_local_with_group_configured(app, monkeypatch):
     win.finish_match()
     saved, = gui.match_history.read_history(win.match_history_path())
     assert (saved.player, saved.total, saved.group_webhook_id) == ("Rin", 4, "")
+
+
+
+def test_session_requires_a_nearby_exact_warmup_across_chunks(tmp_path, monkeypatch):
+    path = tmp_path / "FortniteGame.log"
+    tail = match_lifecycle.LogTail(path)
+    first = session_line(SESSION_A.upper()) + b"other event\n" * 9
+    monkeypatch.setattr(tail, "READ_SIZE", len(first))
+    append(path, first + START)
+    assert tail.poll() == (False, [])
+    assert tail.poll() == (False, [("start", sha256(SESSION_A).hexdigest())])
+
+    monkeypatch.setattr(tail, "READ_SIZE", match_lifecycle.LogTail.READ_SIZE)
+    append(path, session_line(SESSION_B, frame=b"362") + START)
+    append(path, session_line(SESSION_B, stamp=b"2026.11.10-20.04.47:050") + START)
+    append(path, session_line(SESSION_B) + b"\n" * 32 + START)
+    append(path, session_line(SESSION_B) + FRONTEND + START)
+    assert tail.poll() == (False, ["start", "start", "start", "finish", "start"])
+
+    append(path, session_line(SESSION_B))
+    assert tail.poll() == (False, [])
+    path.rename(path.with_suffix(".old"))
+    path.write_bytes(START + session_line(SESSION_B) + START)
+    assert tail.poll() == (True, ["start", ("start", sha256(SESSION_B).hexdigest())])
+
+
+def test_qt_only_binds_latest_started_session_and_keeps_it_through_drain(app):
+    gui, win, log = app
+    win.set_match_automation(True)
+    win._source_scan = object()
+    append(log, session_line(SESSION_A) + START)
+    win.poll_match_log()
+    assert win.worker.starts == 0
+    win._source_scan = None
+    append(log, FRONTEND + session_line(SESSION_B) + START)
+    win.poll_match_log()
+    assert win.worker.starts == 1
+    seed(gui, win, (1, 2))
+    append(log, FRONTEND + session_line(SESSION_A) + START)
+    win.poll_match_log()
+    seed(gui, win, (2, 3))
+    exit_worker(win)
+    saved, = gui.match_history.read_history(win.match_history_path())
+    assert (saved.total, saved.session_fingerprint) == (3, sha256(SESSION_B).hexdigest())
+
+    win.poll_match_log()
+    assert win.worker.starts == 2
+    seed(gui, win, (3, 5))
+    append(log, START + FRONTEND)
+    win.poll_match_log()
+    exit_worker(win)
+    saved, manual = gui.match_history.read_history(win.match_history_path())
+    assert (manual.total, manual.session_fingerprint) == (5, "")
+
+
+def test_qt_rotated_active_session_only_saves_personal_counts(app):
+    gui, win, log = app
+    win.set_match_automation(True)
+    append(log, session_line(SESSION_A) + START)
+    win.poll_match_log()
+    seed(gui, win, (3, 5))
+    log.rename(log.with_suffix(".old"))
+    log.write_bytes(FRONTEND)
+    win.poll_match_log()
+    assert win._match_tail is None
+    win.stop_counting()
+    exit_worker(win)
+    win.finish_match()
+    saved, = gui.match_history.read_history(win.match_history_path())
+    assert (saved.total, saved.session_fingerprint) == (5, "")
+
+
+
+def test_qt_republishes_a_team_update_when_ranking_is_unchanged(app, monkeypatch):
+    from types import SimpleNamespace
+    from PySide6.QtTest import QTest
+
+    gui, win, _ = app
+    group = gui.discord_group
+    webhook = group.Webhook("123456789012345678", "fixture-webhook-token")
+    ident = "234567890123456789"
+    ranking = [group.Player("Sam", 30, matches=2)]
+    team = group.TeamSummary(1, 1, 10, 13750)
+    message = {"id": ident, "channel_id": "345678901234567890", "webhook_id": webhook.id,
+               "embeds": [{"footer": {"text": gui.discord_scoreboard._MARKER}}]}
+    edits = []
+
+    def request(_, suffix, method, payload=None):
+        if method == "PATCH":
+            message.update(payload)
+            edits.append(payload)
+        return message
+
+    def wait_for_board():
+        for _ in range(100):
+            if not win.group._scoreboard_pending:
+                return
+            QTest.qWait(10)
+        pytest.fail("The shared board did not finish updating")
+
+    monkeypatch.setattr(group.GroupStore, "board", lambda _: (ranking, team))
+    monkeypatch.setattr(gui.discord_scoreboard, "_request", request)
+    win.set_group_role("host")
+    win.discord.runner = SimpleNamespace(status=("online", ""), webhook=webhook, stop=lambda **_: None)
+    win.group._webhook = webhook
+    win.group._scoreboard_id = ident
+    win.group.sync_scoreboard()
+    wait_for_board()
+    assert len(edits) == 1
+    assert win.group.team.text() == team.text()
+
+    team = group.TeamSummary(1, 2, 14, 7639)
+    win.group._next_scoreboard_refresh = 0
+    win.group.sync_scoreboard()
+    wait_for_board()
+    assert len(edits) == 2
+    assert edits[0]["embeds"][0]["fields"] == edits[1]["embeds"][0]["fields"]
+    assert win.group.team.text() == team.text()
+
+    win.group.role.setCurrentIndex(win.group.role.findData("guest"))
+    wait_for_board()
+    assert len(edits) == 2
+    assert win.group.team.text() == team.text()
+    assert win.group.ranks.topLevelItem(0).text(1) == "Sam"
+
+def test_qt_select_all_and_delete_match_history(app):
+    gui, win, _ = app
+    for counts in [(1, 2), (3, 5)]:
+        seed(gui, win, counts)
+        assert win.save_current_match()
+    group = win.group
+    group.load()
+    assert group.history.topLevelItemCount() == 2
+    assert not group.delete.isEnabled()
+    group.select_matches.click()
+    assert len(group.checked_items(group.history)) == 2
+    assert group.delete.isEnabled()
+    group.delete.click()
+    assert group.history.topLevelItemCount() == 0
+    assert not group.select_matches.isChecked()
+    assert not group.delete.isEnabled()
+    assert gui.match_history.read_history(win.match_history_path()) == []
+
+def test_qt_guest_follows_published_settings_and_restores_personal_choices(app):
+    gui, win, _ = app
+    mode, boost = win.dashboard.token_mode, win.dashboard.token_boost
+    win.set_group_role("guest")
+    win.group.share_matches.setChecked(False)
+    mode.setCurrentText("Solo")
+    boost.setCurrentIndex(boost.findData(1.0))
+    webhook = gui.discord_group.Webhook("123456789012345678", "fake-token")
+    ident = "234567890123456789"
+    win.group._webhook = webhook
+    win.group._scoreboard_id = ident
+    win.group.share_matches.setChecked(True)
+    win.group._scoreboard_result((webhook, ident, False, (), None, ("Duo", 1.5), None, ""))
+    assert (mode.currentText(), boost.currentData()) == ("Duo", 1.5)
+    assert not mode.isEnabled() and not boost.isEnabled()
+    win.group.share_matches.setChecked(False)
+    assert (mode.currentText(), boost.currentData()) == ("Solo", 1.0)
+    assert mode.isEnabled() and boost.isEnabled()
+
+@pytest.mark.parametrize(("playlist", "mode"), [
+    (b"Playlist_DefaultSolo", "Solo"),
+    (b"Playlist_NoBuildBR_Duo", "Duo"),
+    (b"Playlist_DefaultTrio", "Trio"),
+    (b"Playlist_DefaultSquad", "Squad"),
+    (b"Playlist_FrontEnd", None),
+])
+def test_match_playlist_from_same_warmup(tmp_path, playlist, mode):
+    log = tmp_path / "FortniteGame.log"
+    tail = match_lifecycle.LogTail(log)
+    metadata = (b'[2026.11.10-20.04.47:106][363]LogCsvProfiler: Display: Metadata set : playlistid="'
+                + playlist + b'"\n')
+    log.write_bytes(metadata + START)
+    assert tail.poll() == (False, [("start", "", mode)] if mode else ["start"])
+
+
+def test_qt_auto_playlist_does_not_start_capture_and_allows_manual_override(app):
+    gui, win, log = app
+    box = win.dashboard.token_mode
+    win.set_match_automation(False)
+    box.setCurrentIndex(box.findData("Auto"))
+    log.write_bytes(b'[2026.11.10-20.04.47:106][363]LogCsvProfiler: Display: Metadata set : '
+                    b'playlistid="Playlist_NoBuildBR_Duo"\n' + START + FRONTEND)
+    win.poll_match_log()
+    assert win.current_game_mode() == "Duo"
+    assert win.worker.starts == 0
+    assert gui.load_cfg()[0]["app"]["token_mode"] == "Auto"
+    box.setCurrentText("Squad")
+    assert win.current_game_mode() == "Squad"
+    assert gui.load_cfg()[0]["app"]["token_mode"] == "Squad"
+
+def test_qt_reset_all_settings_keeps_other_preferences_and_counts(app, monkeypatch):
+    gui, win, _ = app
+    page = win.settings_page
+    path = gui.config_file()
+    gui.C.update_config_file(path, "detector", {"process_fps": 5})
+    gui.C.update_config_file(path, "app", {"group_player": "Alex", "token_mode": "Duo"})
+    seed(gui, win, (2, 5))
+    page.load()
+    from PySide6.QtWidgets import QPushButton
+
+    reset = next(button for button in page.findChildren(QPushButton) if button.text() == "Reset all")
+    monkeypatch.setattr(gui, "ask", lambda *args: False)
+    reset.click()
+    assert gui.load_cfg()[0]["detector"]["process_fps"] == 5
+    monkeypatch.setattr(gui, "ask", lambda *args: True)
+    reset.click()
+    cfg = gui.load_cfg()[0]
+    assert cfg["detector"]["process_fps"] == gui.settings.DEFAULTS["detector"]["process_fps"]
+    assert cfg["app"]["group_player"] == "Alex"
+    assert cfg["app"]["token_mode"] == "Duo"
+    assert win.counts == (2, 5)
+    assert page.saved.text() == "Defaults restored."

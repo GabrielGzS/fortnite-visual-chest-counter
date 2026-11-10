@@ -21,6 +21,7 @@ class Match:
     player: str = ""
     chest_types: dict[str, int] = field(default_factory=dict)
     group_webhook_id: str = ""
+    session_fingerprint: str = ""
 
     @property
     def total(self):
@@ -102,12 +103,16 @@ def edit_match(path, snapshot, certain, total, token_chance):
 
 
 def delete_match(path, snapshot):
+    return bool(delete_matches(path, {snapshot}))
+
+
+def delete_matches(path, snapshots):
     rows = read_history(path)
-    remaining = [row for row in rows if row.snapshot != snapshot]
-    if len(remaining) == len(rows):
-        return False
-    _write_history(path, remaining)
-    return True
+    remaining = [row for row in rows if row.snapshot not in snapshots]
+    removed = len(rows) - len(remaining)
+    if removed:
+        _write_history(path, remaining)
+    return removed
 
 
 def _write_history(path, rows):

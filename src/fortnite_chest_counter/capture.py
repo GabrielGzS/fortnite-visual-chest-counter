@@ -40,7 +40,7 @@ MODES = ("off", "marks", "events", "session")
 SEGMENT_SECONDS = 10
 QUEUE_FRAMES = 30                          # ~2 s of 720p frames (~80 MB) between the counter and the encoder
 MIN_FREE_BYTES = 2 * 1024 ** 3             # do not start below 2 GB free; stop recording below 1 GB
-# Measured (docs/CAPTURE.md): the 7-px pop-up text is so small that any lossy format moves its match score a little.
+# Measured (docs/guides/diagnostic-capture.md): the 7-px pop-up text is so small that any lossy format moves its match score a little.
 #   standard  intra-only full-colour MJPEG, best quality: ~10 GB/hour; replay = live for most decisions, borderline ones
 #             (within ~0.03 of a tier threshold) can differ
 #   lossless  FFV1, exact RGB: ~22 GB/hour; the replay sees exactly what the detector saw

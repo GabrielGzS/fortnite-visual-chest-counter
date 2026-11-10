@@ -42,25 +42,15 @@
 <p>A small app for players and streamers. It recognises the chest-opening pop-ups in Fortnite gameplay video and keeps
 a running count of the <b>chests opened</b> &mdash; from a Twitch or YouTube livestream link, anything shown on a screen,
 your own stream's OBS feed (one PC or two), a capture card or a recorded video. If you want the numbers on stream, it writes
-them into a text file that a normal OBS text source shows (you choose the font, size and colours in OBS). It does not touch Fortnite, the game files or your account:
-it only looks at the video picture, like a viewer would, and never shows anything that is not already on screen
-(see <a href="#fairplay">Fair play and compatibility</a>).</p>
+them into a text file that a normal OBS text source shows (you choose the font, size and colours in OBS). Chest counting uses gameplay video. Optional match automation and mode detection read Fortnite's local log.
+See <a href="#fairplay">fair play and compatibility</a>.</p>
 
 <div class="big">
-  <div class="card">
-    <h3>CERTAIN OPENED CHESTS</h3>
-    Chests the counter is <b>strongly confident</b> about. A safe, conservative number.
-  </div>
-  <div class="card">
-    <h3>APPROX. OPENED CHESTS</h3>
-    The <b>estimated TOTAL</b> of opened chests, <b>including the certain ones</b>. It also adds chests where the
-    evidence was a bit weaker.
-  </div>
+  <div class="card"><h3>CERTAIN</h3>Confirmed openings.</div>
+  <div class="card"><h3>APPROX</h3>Additional estimated openings.</div>
+  <div class="card"><h3>TOTAL</h3>The sum of Certain and Approx.</div>
 </div>
-
-<div class="note"><b>Important - the two numbers are NOT added together.</b><br>
-<code>CERTAIN: 12</code> and <code>APPROX: 47</code> means &ldquo;about <b>47</b> chests in total, and <b>12</b> of those I am very sure about&rdquo;.
-It does <i>not</i> mean 59. APPROX is always the same as or higher than CERTAIN.</div>
+<div class="note">The OBS text and CLI use the legacy APPROX total, which includes confirmed openings.</div>
 
 <p><b>This is a public beta.</b> APPROX is an <i>estimate</i>, not a perfect count. In our recorded test streams it matched the real
 number closely, but computer vision is never 100%. See <a href="#limits">Known limitations</a>.</p>
@@ -282,10 +272,9 @@ APPROX numbers (APPROX includes CERTAIN). This <b>never changes your live counte
 The video should be clean 16:9 gameplay with the HUD visible, in English, Brazilian Portuguese, or French.</p>
 
 <h2 id="start">Already opened chests? Set a starting count</h2>
-<p>On the Dashboard click <b>Edit counts&hellip;</b>, enter how many chests you have already opened (for example <code>150</code>) as
-<b>Chests opened (APPROX)</b>, leave <b>Confirmed chests (CERTAIN)</b> at 0 and click <b>Save</b>.</p>
-<p>APPROX starts at your number and new chests are added on top. CERTAIN starts at 0, because the counter did not see the earlier chests.
-The same window corrects a wrong count. It works while counting: the counter picks up the new numbers within a second.</p>
+<p>On the Dashboard click <b>Edit</b>. Enter any chests opened before starting under <b>Approx</b>
+and leave confirmed openings at 0. <b>Total</b> is the sum of confirmed and estimated openings.
+The OBS text and CLI use the legacy APPROX figure, which includes confirmed openings.</p>
 
 <h2 id="profiles">Profiles: separate counts per person</h2>
 <p>Count several streamers (or yourself and others) without mixing their numbers: the <b>Profile</b> row on the Dashboard has
@@ -295,28 +284,32 @@ is stopped. OBS always shows the selected profile, so the OBS text source never 
 the <b>Default</b> profile. A deleted profile&rsquo;s counts are kept as a backup in <code>state\profiles\deleted\</code>.</p>
 
 <h2 id="types">Chest types</h2>
-<p>The line under the two numbers splits the APPROX total by what the pop-up says: <b>Chest</b>, <b>Rare chest</b>,
+<p>The chest-type breakdown splits the total by what the pop-up says: <b>Chest</b>, <b>Rare chest</b>,
 <b>Sprite chest</b>, or <b>Unknown type</b> when the line could not be read reliably (a chest is never guessed to be a normal
 one). It is a label only: CERTAIN and APPROX are counted exactly as before, and OBS still shows only the totals. Chests
 counted before v0.2.2, or set with <b>Edit counts&hellip;</b>, are listed as <i>not classified</i>. Chest types are read for
-English pop-ups.</p>
+English and French pop-ups.</p>
 
 <h2 id="reset">Reset the counter (e.g. at the start of a stream)</h2>
 <p>On the Dashboard click <b>Reset&hellip;</b> and confirm. Both numbers (and the chest-type split) of the selected profile go to 0, also while counting. Closing and reopening the app does
 <b>not</b> reset anything; your totals continue.</p>
 
-<h2 id="discord">Shared Group and Discord</h2>
-<p>Each teammate runs one capture on their own PC. In <b>Group</b>, save your player name and the shared Discord webhook.
-Each newly saved match contributes to the group. A failed delivery stays queued for retry.</p>
-<p>On the bot host, save the bot token and Application ID on the <b>Discord</b> page, then select <b>Start bot</b>.
-The webhook determines the server and collection channel. Grant <b>View Channel</b> and <b>Read Message History</b>
-there, then enable <b>Message Content Intent</b> in the Discord Developer Portal. Grant <b>Send Messages</b> for reports
-and <b>Embed Links</b> for rich reports.</p>
-<p>Use <code>/chests</code> or <code>/leaderboard</code> across the server. <code>/add</code> and <code>/reset</code>
-require <b>Manage Server</b>. To share the same ranking with other apps, publish one leaderboard from Group and share
-its message ID.</p>
+<h2 id="discord">Matches, Group and Discord</h2>
+<p>Choose <b>Auto</b> in the Dashboard mode selector to read the playlist from Fortnite's local log, or choose a mode
+manually. The Pirate Token multiplier is manual. Use <b>Finish match</b> to save to the local history. With
+<b>Settings &rarr; Match automation</b> enabled, Battle Royale warmup starts a fresh count and the lobby return saves it.</p>
+<p>In <b>Group</b>, save a player name and the shared webhook on each PC. Enable <b>Share matches with my group</b>
+to submit results. The Host configures and starts the bot, publishes one leaderboard and shares the message ID
+with Guests. A Guest can read the last published settings even when the bot is offline.</p>
+<p>The bot needs <b>View Channel</b> and <b>Read Message History</b> in the webhook channel and
+<b>Message Content Intent</b> in the Developer Portal. Add <b>Send Messages</b> and <b>Embed Links</b> for reports.
+Use <code>/chests</code> and <code>/leaderboard</code> in the server. <code>/add</code> and <code>/reset</code>
+require <b>Manage Server</b>.</p>
 
 <h2 id="settings">Settings (optional)</h2>
+<p>By default the app starts in the Windows system tray. Open it from its tray icon. The default capture is Screen 1
+with HDR-to-SDR conversion and English HUD recognition at 15 analysed frames per second. Match automation and
+Auto mode are enabled. Group sharing is off.</p>
 <p><b>Most people never need to change anything.</b> The <b>Settings</b> page has the Fortnite language (English, Portuguese (Brazil), Both, or French;
 pick the one your game is set to), the session logs and the optional <a href="#capture">diagnostic recording</a>. Changes are used the next time
 you click Start counting. <b>Remember window size and position</b> (on by default) reopens the app the way you closed it,
@@ -384,9 +377,8 @@ If chests stop being counted after a Fortnite update, please report it on the pr
 <h2 id="fairplay">Fair play and compatibility</h2>
 <p>The counter is built for statistics and stream presentation: it counts chest openings that are <b>already visible on
 screen</b>. It gives no competitive information &mdash; it does not locate hidden chests, reveal enemies, aim, move or play for
-you. It has no connection to Fortnite: it only reads video frames (a livestream, a screen capture, OBS Virtual Camera, a
-capture device or a video file), and its one keyboard shortcut (Ctrl+Alt+M) is a standard Windows hotkey that sends nothing
-to the game.</p>
+you. Chest detection reads video frames. Optional match features read the local Fortnite log.
+Ctrl+Alt+M marks a missed chest using a Windows hotkey.</p>
 <p>Epic Games&rsquo; rules prohibit tools that use real-time gameplay information to gain a competitive advantage. This app is
 designed for counting, not for competitive assistance &mdash; but Epic does not certify individual third-party applications,
 and this one has not been reviewed or approved by Epic. The most conservative ways to use it: <b>count recorded video</b>
@@ -398,9 +390,8 @@ anti-cheat behaviour can change at any time. A two-PC setup is not a compliance 
 away from the game. Tournament or event rules can be stricter &mdash; check them if you compete.</p>
 
 <h2>Privacy and safety</h2>
-<p>The app sends nothing anywhere. It connects to the internet only to fetch a public livestream you paste (Livestream URL),
-the way a video player does; it reads video frames from the source you pick and writes text files and logs in its own folder. The live preview is shown only in the app on your screen; it is
-never saved or sent. It does not inject into, read memory from or modify Fortnite.</p>
+<p>Network features include livestream capture, update checks and optional Discord sharing. Diagnostics are
+saved locally when enabled. Group sharing sends match statistics to the configured Discord webhook.</p>
 
 <h2>Credits &amp; licenses</h2>
 <p>Fortnite Visual Chest Counter is free, open-source software (MIT License, see <code>LICENSE.txt</code>). It bundles FFmpeg (LGPL v3, unmodified), Qt for Python / Qt (LGPL v3, unmodified), Python, NumPy and SciPy under their own licenses: see <code>LICENSE-NOTICE.txt</code>, <code>runtime\licenses\</code> and <code>runtime\ffmpeg\FFMPEG-NOTICE.txt</code>.

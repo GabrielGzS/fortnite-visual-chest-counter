@@ -11,7 +11,7 @@
 # The app's Settings page sets this for you.
 # Use only the language your Fortnite is set to, e.g.  languages = ["en"]  (the other word is not needed and only
 # adds a small risk of false alarms; on our English test videos it made no difference).
-languages = ["en", "pt"]
+languages = ["en"]
 
 # How many pictures per second are analysed (5-30). The app's Settings page offers 15 (Recommended - what the detector
 # was built and tested with), 10 (Balanced) and 5 (Performance). Fewer pictures can miss chests: on our test recordings
@@ -50,8 +50,8 @@ medium_counts_alone_languages = ["en", "fr"]  # languages whose medium-confidenc
 #   show = "both" and both_layout = "stacked"    -> certain_text on the first line, approx_text on the second
 #   show = "both" and both_layout = "inline"     -> one line: combined_status_format
 show = "both"
-both_layout = "stacked"
-screen_show_matches = false
+both_layout = "inline"
+screen_show_matches = true
 
 # Your own wording. {count} is where the number goes. You may also use {certain} and {approx} anywhere.
 # Any text, symbols and emoji are fine (whether emoji display depends on the font you pick in OBS).
@@ -64,10 +64,11 @@ certain_text = "CERTAIN OPENED CHESTS: {count}"
 approx_text = "APPROX. OPENED CHESTS: {count}"
 
 # The one-line text (show = "both" + both_layout = "inline"). Placeholders: {certain} and {approx}
-combined_status_format = "{certain} certain • ~{approximate} estimated"
+combined_status_format = "{certain} certain • ~{approx} estimated"
 
 # true -> 1,232      false -> 1232
 use_thousands_separator = true
+screen_show_types = true
 
 [console]
 # The black counter window (not what viewers see).
@@ -92,7 +93,7 @@ enabled = true
 log_candidates = true
 # Save a small picture of the pop-up area for every pop-up the counter considered (counted or not) into
 # logs/snapshots/. Turn on if you want to report missed or wrong chests: the pictures show exactly what it saw.
-save_snapshots = false
+save_snapshots = true
 dir = "logs"
 
 [capture]
@@ -118,11 +119,12 @@ dir = "captures"
 #                  pause to buffer; the app reconnects by itself and keeps the counts
 #   "desktop"    = capture a monitor (set "monitor" below): play the stream or the game fullscreen on it - a small player
 #                  inside a web page is too small to read
+#   "desktop-hdr" = capture a monitor with HDR-to-SDR conversion
 #   "obs-camera" = OBS Virtual Camera (your own stream's OBS scene; single PC, or a second PC fed over SRT)
 #   "device"     = a capture card opened directly (set "device" below) - less tested: not yet with a physical card
 #   "window"     = an OBS "Windowed Projector (Source)" window (when OBS owns the capture card and the Virtual Camera is
 #                  used by another app; set "window" below) - less tested: not yet with a real OBS projector
-source = "stream"
+source = "desktop-hdr"
 # Only for source = "device": the exact device name (the app's Video source list sets it for you).
 device = "OBS Virtual Camera"
 # Only for source = "desktop": which monitor (1 = the first).
@@ -154,14 +156,19 @@ source_uuid = ""
 # The desktop app reopens with the size, position and maximised state it was closed with (saved in state/window.json).
 # false = always open at the default size. If the saved place is no longer on any screen, the window is moved back.
 remember_window = true
-close_to_tray = false
+close_to_tray = true
 start_in_tray = false
-auto_match_lifecycle = false
+auto_match_lifecycle = true
 group_player = ""
 group_scoreboard_id = ""
-group_share_matches = true
-auto_discord_summary = false
+group_share_matches = false
+auto_discord_summary = true
 auto_start_discord_sender = true
+token_mode = "Auto"
+screen_overlay_enabled = true
+screen_overlay_shared = true
+show_activity = false
+group_role = "host"
 
 [update]
 # Look for a new version shortly after the app opens. Nothing is downloaded or installed unless you choose to.
@@ -171,4 +178,4 @@ check_automatically = true
 # "unlimited" = never limited.   "custom" = always limited to custom_limit_kb_per_second.
 download_bandwidth = "adaptive"
 # Only for download_bandwidth = "custom": kilobytes per second, from 50 to 1000000.
-custom_limit_kb_per_second = 2000
+custom_limit_kb_per_second = 1000

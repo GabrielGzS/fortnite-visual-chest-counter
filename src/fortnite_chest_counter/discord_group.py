@@ -4,6 +4,7 @@ from collections import Counter
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 import json
+import math
 from pathlib import Path
 import re
 import sqlite3
@@ -22,6 +23,9 @@ _TARGET = "Fortnite Visual Chest Counter/Group Webhook"
 _WEBHOOK = re.compile(r"https://discord\.com/api/(?:v10/)?webhooks/([1-9][0-9]{14,21})/([\w.-]{16,300})", re.ASCII)
 _EVENT_ID = re.compile(r"[a-f0-9]{32}")
 _PREFIX = "||FCC1 "
+_SESSION_PREFIX = "FCC session v1 "
+_FINGERPRINT = re.compile(r"[a-f0-9]{64}")
+PIRATE_TOKEN_RATE = 137_500
 _FLUSH_LOCK = threading.Lock()
 GROUP_TYPE_LABELS = {**LABELS, "unclassified": "Not classified"}
 _SCHEMA = """
@@ -42,6 +46,10 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE TABLE IF NOT EXISTS event_details (
     webhook TEXT NOT NULL, event TEXT NOT NULL, certain INTEGER, chest_types TEXT NOT NULL,
+    PRIMARY KEY(webhook, event)
+);
+CREATE TABLE IF NOT EXISTS event_sessions (
+    webhook TEXT NOT NULL, event TEXT NOT NULL, fingerprint TEXT NOT NULL, boost REAL NOT NULL,
     PRIMARY KEY(webhook, event)
 );
 """
@@ -114,6 +122,25 @@ def _combine(name, players, adjustment=0):
                   recorded, adjustment, confirmed_total, matches)
 
 
+@dataclass(frozen=True)
+class TeamSummary:
+    matches: int = 0
+    players: int = 0
+    chests: int = 0
+    one_in: int | None = None
+    chance_percent: str | None = None
+
+    def text(self):
+        total = f"Team matches: {self.matches:,}"
+        if not self.matches:
+            return total
+        chance = self.chance_percent or (f"about 1 in {self.one_in:,}" if self.one_in is not None else "zero")
+        if self.chance_percent and self.one_in is not None:
+            chance += f" (about 1 in {self.one_in:,})"
+        return (f"{total}\nLatest received team match: {self.chests:,} chests · "
+                f"{self.players:,} submitted players\nEstimated Pirate Token chance from submitted chests: {chance}")
+
+
 class GroupStore:
     def __init__(self, webhook_id, path=None):
         self.webhook_id = webhook_id
@@ -147,9 +174,51 @@ class GroupStore:
                                                           matches=1))
         return {key: _combine(name, groups.get(key, ()), amount) for key, (name, amount) in identities.items()}
 
+    def _leaderboard(self, db):
+        players = (player for player in self._players(db).values() if player.matches or player.adjustment)
+        return sorted(players, key=lambda player: (-player.total, player.name.casefold()))
+
     def leaderboard(self):
         with self.connection() as db:
-            return sorted(self._players(db).values(), key=lambda player: (-player.total, player.name.casefold()))
+            return self._leaderboard(db)
+
+    def _team_summary(self, db):
+        rows = db.execute("""
+            WITH first_submissions AS (
+                SELECT s.fingerprint, MIN(m.rowid) AS received
+                FROM contributions AS m
+                JOIN event_sessions AS s ON s.webhook = m.webhook AND s.event = m.event
+                WHERE m.webhook = ?
+                GROUP BY s.fingerprint, m.player
+            )
+            SELECT f.fingerprint, m.count, s.boost
+            FROM first_submissions AS f
+            JOIN contributions AS m ON m.rowid = f.received
+            JOIN event_sessions AS s ON s.webhook = m.webhook AND s.event = m.event
+            ORDER BY f.received
+        """, (self.webhook_id,))
+        sessions = {}
+        latest = None
+        for latest, count, boost in rows:
+            sessions.setdefault(latest, []).append((count, boost))
+        if latest is None:
+            return TeamSummary()
+        submitted = sessions[latest]
+        chests = sum(count for count, _ in submitted)
+        log_no_drop = math.fsum(count * math.log1p(-boost / PIRATE_TOKEN_RATE)
+                                for count, boost in submitted)
+        chance = -math.expm1(log_no_drop) if log_no_drop else 0.0
+        return TeamSummary(len(sessions), len(submitted), chests, round(1 / chance) if chance else None,
+                           f"{chance:.6%}")
+
+    def team_summary(self):
+        with self.connection() as db:
+            return self._team_summary(db)
+
+    def board(self):
+        with self.connection() as db:
+            db.execute("BEGIN")
+            return self._leaderboard(db), self._team_summary(db)
 
     def count(self, name):
         player = self.stats(name)
@@ -174,7 +243,7 @@ class GroupStore:
             key = player.name.casefold()
             if amount is None:
                 reset_row, = db.execute(
-                    "SELECT MAX(rowid) FROM contributions WHERE webhook=? AND player=?", (self.webhook_id, key)
+                    "SELECT COALESCE(MAX(rowid), 0) FROM contributions WHERE webhook=? AND player=?", (self.webhook_id, key)
                 ).fetchone()
                 db.execute("INSERT OR REPLACE INTO corrections VALUES (?, ?, 0, ?)", (self.webhook_id, key, reset_row))
                 return player.name, 0
@@ -185,6 +254,16 @@ class GroupStore:
                 ON CONFLICT(webhook, player) DO UPDATE SET amount = amount + excluded.amount
             """, (self.webhook_id, key, amount))
             return player.name, player.total + amount
+
+    def reset_players(self, names):
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for name in names:
+                player = self._player(db, name)
+                key = player.name.casefold()
+                row, = db.execute("SELECT COALESCE(MAX(rowid), 0) FROM contributions WHERE webhook=? AND player=?",
+                                  (self.webhook_id, key)).fetchone()
+                db.execute("INSERT OR REPLACE INTO corrections VALUES (?, ?, 0, ?)", (self.webhook_id, key, row))
 
     def cursor(self, channel):
         with self.connection() as db:
@@ -221,9 +300,15 @@ class GroupStore:
                 if inserted:
                     db.execute("INSERT OR REPLACE INTO event_details VALUES (?, ?, ?, ?)",
                                (self.webhook_id, event, certain, json.dumps(chest_types)))
+                    self._save_session(db, event, _message_session(message))
             db.execute("INSERT OR REPLACE INTO cursors VALUES (?, ?, ?)",
                        (self.webhook_id, channel, str(message.id)))
             return inserted
+
+    def _save_session(self, db, event, session):
+        if session:
+            db.execute("INSERT OR IGNORE INTO event_sessions VALUES (?, ?, ?, ?)",
+                       (self.webhook_id, event, *session))
 
     def queue(self, match, player):
         if not 0 <= match.total <= 1_000_000_000:
@@ -237,17 +322,21 @@ class GroupStore:
             if result.rowcount:
                 db.execute("INSERT INTO event_details VALUES (?, ?, ?, ?)",
                            (self.webhook_id, event, certain, json.dumps(chest_types)))
+                session = _validate_session(getattr(match, "session_fingerprint", ""), getattr(match, "boost", None))
+                self._save_session(db, event, session)
             return bool(result.rowcount)
 
     def flush(self, webhook):
         with _FLUSH_LOCK, self.connection() as db:
             rows = db.execute("""
-                SELECT o.event, o.name, o.count, d.certain, d.chest_types
+                SELECT o.event, o.name, o.count, d.certain, d.chest_types, s.fingerprint, s.boost
                 FROM outbox AS o LEFT JOIN event_details AS d ON d.webhook = o.webhook AND d.event = o.event
+                LEFT JOIN event_sessions AS s ON s.webhook = o.webhook AND s.event = o.event
                 WHERE o.webhook=? AND o.sent=0 ORDER BY o.rowid
             """, (self.webhook_id,)).fetchall()
-            for event, name, count, certain, chest_types in rows:
-                _publish(webhook, event, name, count, certain, json.loads(chest_types or "{}"))
+            for event, name, count, certain, chest_types, fingerprint, boost in rows:
+                session = (fingerprint, boost) if fingerprint else ()
+                _publish(webhook, event, name, count, certain, json.loads(chest_types or "{}"), *session)
                 db.execute("UPDATE outbox SET sent=1 WHERE webhook=? AND event=?", (self.webhook_id, event))
                 db.commit()
             return len(rows)
@@ -282,13 +371,39 @@ def _validate_breakdown(count, certain, chest_types):
     return certain, chest_types
 
 
-def _publish(webhook, event, name, count, certain, chest_types):
+def _validate_session(fingerprint, boost):
+    if (isinstance(fingerprint, str) and _FINGERPRINT.fullmatch(fingerprint)
+            and type(boost) in (int, float) and boost in (1, 1.5, 2)):
+        return fingerprint, boost
+    return None
+
+
+def _message_session(message):
+    embeds = getattr(message, "embeds", ())
+    if len(embeds) != 1:
+        return None
+    footer = getattr(getattr(embeds[0], "footer", None), "text", None)
+    if not isinstance(footer, str) or not footer.startswith(_SESSION_PREFIX):
+        return None
+    try:
+        fingerprint, boost = json.loads(footer[len(_SESSION_PREFIX):])
+        return _validate_session(fingerprint, boost)
+    except (TypeError, ValueError):
+        return None
+
+
+def _publish(webhook, event, name, count, certain, chest_types, fingerprint=None, boost=None):
     payload = json.dumps([event, name, count, certain, chest_types], ensure_ascii=True,
                          separators=(",", ":")).replace("|", "\\u007c")
+    embed = {"title": "Group chest contribution", "author": {"name": name},
+             "description": f"{count:,} chests", "color": 0x5865F2}
+    session = _validate_session(fingerprint, boost)
+    if session:
+        # Leave the contribution content readable by earlier versions.
+        embed["footer"] = {"text": _SESSION_PREFIX + json.dumps(session, separators=(",", ":"))}
     body = json.dumps({
         "content": f"{_PREFIX}{payload}||",
-        "embeds": [{"title": "Group chest contribution", "author": {"name": name},
-                    "description": f"{count:,} chests", "color": 0x5865F2}],
+        "embeds": [embed],
         "allowed_mentions": {"parse": []},
     }).encode("utf-8")
     request = Request(f"{webhook.url}?wait=true", data=body,

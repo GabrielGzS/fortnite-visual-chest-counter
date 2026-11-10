@@ -1,5 +1,5 @@
 """
-The Ed25519 public keys this copy of the app trusts to sign updates: raw 32-byte keys, as hex. See docs/UPDATE_SIGNING.md.
+The Ed25519 public keys this copy of the app trusts to sign updates: raw 32-byte keys, as hex. See docs/maintenance/UPDATE_SIGNING.md.
 
 Public keys are not secret. The matching private keys never enter this repository or a release.
 

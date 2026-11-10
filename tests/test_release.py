@@ -307,7 +307,8 @@ def test_snapshots_are_saved_only_when_enabled_and_never_logged_as_pixels():
         assert len(pngs) == 1 and pngs[0].read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
         line = s.log.path.read_text(encoding="utf-8")
         assert "_snapshot" not in line and pngs[0].name in line
-        off = chest_counter.CounterSession(tmp_config(tmp))                    # default: off
+        cfg["logging"]["save_snapshots"] = False
+        off = chest_counter.CounterSession(cfg)
         off.apply([dict(event(False, True), _snapshot=np.zeros((2, 2, 3), np.uint8))], 3.0, quiet=True)
         assert len(list((Path(tmp) / "logs" / "snapshots").rglob("*.png"))) == 1
 
@@ -415,7 +416,7 @@ def test_state_with_approx_below_certain_is_repaired():
 def test_default_config_is_valid_and_complete():
     cfg, origin, warnings = settings.load_config(Path(tempfile.gettempdir()) / "nope-not-here" / "x.toml")
     assert cfg == DEFAULTS and origin == "built-in defaults"
-    assert cfg["detector"]["languages"] == ["en", "pt"] and cfg["detector"]["process_fps"] == 15
+    assert cfg["detector"]["languages"] == ["en"] and cfg["detector"]["process_fps"] == 15
 
 
 def test_example_config_loads_without_warnings_and_equals_defaults():
@@ -634,13 +635,13 @@ def _obs_files(tmp, display_overrides, certain=20, approx=231):
     return {p.name: p.read_text(encoding="utf-8") for p in Path(tmp).glob("*.txt")}
 
 
-def test_default_overlay_files_are_unchanged_from_v010_plus_one_new_file():
+def test_default_overlay_keeps_legacy_files_and_uses_one_line():
     with tempfile.TemporaryDirectory() as tmp:
         files = _obs_files(tmp, {}, 1232, 1247)
     assert files["certain_chests.txt"] == "CERTAIN OPENED CHESTS: 1,232\n"
     assert files["approximate_chests.txt"] == "APPROX. OPENED CHESTS: 1,247\n"
     assert files["chest_status.txt"] == "1,232 certain • ~1,247 estimated\n"
-    assert files["chest_counter.txt"] == "CERTAIN OPENED CHESTS: 1,232\nAPPROX. OPENED CHESTS: 1,247\n"
+    assert files["chest_counter.txt"] == "1,232 certain • ~1,247 estimated\n"
     assert set(files) == {"certain_chests.txt", "approximate_chests.txt", "chest_status.txt", "chest_counter.txt", "last_chest.txt"}
 
 
@@ -648,7 +649,7 @@ def test_show_modes_for_the_single_overlay_file():
     with tempfile.TemporaryDirectory() as tmp:
         assert _obs_files(tmp, {"show": "approx"})["chest_counter.txt"] == "APPROX. OPENED CHESTS: 231\n"
         assert _obs_files(tmp, {"show": "certain"})["chest_counter.txt"] == "CERTAIN OPENED CHESTS: 20\n"
-        assert _obs_files(tmp, {"show": "both"})["chest_counter.txt"].count("\n") == 2
+        assert _obs_files(tmp, {"show": "both", "both_layout": "stacked"})["chest_counter.txt"].count("\n") == 2
 
 
 def test_custom_wording_placeholders_unicode_braces_and_new_lines():
@@ -987,7 +988,7 @@ def test_running_counter_picks_up_overlay_changes():
 def test_show_command_says_what_viewers_see_and_which_file():
     with tempfile.TemporaryDirectory() as tmp:
         code, text = run_main(["show"] + args_for(tmp))
-        assert code == 0 and "Viewers see (both numbers on two lines)" in text and "chest_counter.txt" in text
+        assert code == 0 and "Viewers see (both numbers on one line)" in text and "chest_counter.txt" in text
 
 
 # ------------------------------------------------------------------ 9. four display modes, one OBS file (v0.1.1 refresh)
@@ -1008,8 +1009,8 @@ def test_four_display_modes_all_render_to_chest_counter_txt():
 def test_existing_configs_keep_their_look():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "config.toml"
-        for text, expected in (('[display]\nshow = "both"\n', "CERTAIN OPENED CHESTS: 20\nAPPROX. OPENED CHESTS: 231\n"),
-                               ('[display]\ncertain_label = "CONFIRMED"\n', "CONFIRMED: 20\nAPPROX. OPENED CHESTS: 231\n"),
+        for text, expected in (('[display]\nshow = "both"\nboth_layout = "stacked"\n', "CERTAIN OPENED CHESTS: 20\nAPPROX. OPENED CHESTS: 231\n"),
+                               ('[display]\ncertain_label = "CONFIRMED"\nboth_layout = "stacked"\n', "CONFIRMED: 20\nAPPROX. OPENED CHESTS: 231\n"),
                                ('[display]\nshow = "approx"\napprox_text = "Hunt: {count}"\n', "Hunt: 231\n")):
             path.write_text(text, encoding="utf-8")
             cfg, _, warnings = settings.load_config(path)

@@ -113,7 +113,7 @@ def test_session_announces_counts_and_overlay():
     assert out[0]["type"] == "event" and out[0]["certain"] == 1 and out[0]["approx"] == 1
     counts = [m for m in out if m["type"] == "counts"]
     assert counts[-1] == {"type": "counts", "certain": 1, "approx": 1, "certain_text": "1", "approx_text": "1",
-                          "overlay": "CERTAIN OPENED CHESTS: 1\nAPPROX. OPENED CHESTS: 1"}
+                          "overlay": "1 certain • ~1 estimated"}
     types = [m for m in out if m["type"] == "types"]                  # v0.2.2: the chest-type split follows the counts
     assert out[-1]["type"] == "types" and types[-1]["breakdown"]["unknown"] == {"certain": 1, "approx": 1}
     assert types[-1]["breakdown"]["unclassified"] == {"certain": 0, "approx": 0}
@@ -250,7 +250,7 @@ def test_set_counts_and_reset_from_the_app():
         assert (session.state["certain"], session.state["approximate"]) == (3, 150)
         assert C.load_state(cfg["state"]["path"])["approximate"] == 150
         assert (Path(tmp) / "obs_output" / "chest_counter.txt").read_text(encoding="utf-8") == \
-            "CERTAIN OPENED CHESTS: 3\nAPPROX. OPENED CHESTS: 150\n"
+            "3 certain • ~150 estimated\n"
         for bad in ((5, 4), (-1, 3), (0, C.MAX_STARTING_COUNT + 1)):
             try:
                 C.set_counts(cfg, *bad)
@@ -305,7 +305,7 @@ def test_language_choices_map_to_the_detector_setting_and_back():
     for i, (_, langs) in enumerate(settings.LANGUAGE_CHOICES):
         assert settings.language_choice(langs) == i
     assert settings.language_choice(["pt", "en"]) == 2                 # order does not matter
-    assert settings.language_choice(settings.DEFAULTS["detector"]["languages"]) == 2   # default unchanged: both
+    assert settings.language_choice(settings.DEFAULTS["detector"]["languages"]) == 0   # English
 
 
 def test_language_choice_is_saved_and_existing_configs_keep_their_language():
@@ -337,6 +337,10 @@ def test_token_odds_use_total_and_separate_estimated_chests():
         paths.APP_DIR = Path(tmp)
         win = None
         try:
+            C.update_config_file(A.config_file(), "app", {"screen_overlay_shared": False})
+            C.update_config_file(A.config_file(), "display", {
+                "both_layout": "stacked", "screen_show_matches": False, "screen_show_types": False,
+            })
             win = A.MainWindow()
             win.timer.stop()
             win.set_counts(5, 10)

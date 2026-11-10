@@ -54,7 +54,7 @@ RECORDING_CHOICES = (("Off", "off"), ("Only around my marks  (smallest)", "marks
 RECORDING_TEXT = {"marks": "only around your marks", "events": "around chest decisions and your marks",
                   "session": "the whole session"}
 REPO_URL = "https://github.com/GabrielGzS/fortnite-visual-chest-counter"
-PIRATE_TOKEN_RATE = 137_500
+PIRATE_TOKEN_RATE = discord_group.PIRATE_TOKEN_RATE
 UPDATE_HEALTH_DELAY_MS = 2000                                  # the window must have been running this long before it counts as started
 AUTO_CHECK_DELAY_MS = 6000                                     # after the window is up, so a check never competes with starting
 INSTALL_STOP_DEADLINE_MS = 45000                               # longer than the worker's own 30 seconds to stop
@@ -1167,8 +1167,9 @@ class Dashboard(QWidget):
         stage_content.addWidget(odds_title, 0, Qt.AlignHCenter)
         token_row = QHBoxLayout()
         self.token_mode = MaterialComboBox()
-        self.token_mode.addItems(["Solo", "Duo", "Trio", "Squad"])
-        self.token_mode.setToolTip("Current game mode. Odds use the same total in every mode.")
+        self.token_mode.addItems(discord_scoreboard.MODES)
+        self.token_mode.addItem("Auto · waiting", "Auto")
+        self.token_mode.setToolTip("Choose a mode manually or use Auto to read the latest Battle Royale mode from Fortnite’s local log.")
         self.token_boost = MaterialComboBox()
         for caption, multiplier in (("Normal ×1", 1.0), ("Boost ×1.5", 1.5), ("Boost ×2", 2.0)):
             self.token_boost.addItem(caption, multiplier)
@@ -2092,12 +2093,19 @@ class SettingsPage(QWidget):
         row = QHBoxLayout()
         self.saved = label("", "hint")
         row.addWidget(self.saved, 1)
-        row.addWidget(button("Save", "primary", on_click=self.save))
+        row.addLayout(connected_buttons(
+            button("Reset all", on_click=self.reset_all),
+            button("Save", "primary", on_click=self.save),
+        ))
         layout.addLayout(row)
         layout.addStretch(1)
 
     def load(self):
         cfg, _ = load_cfg()
+        self._load_values(cfg)
+        self.auto_match.setChecked(self.win._match_tail is not None)
+
+    def _load_values(self, cfg):
         self.language.setCurrentIndex(settings.language_choice(cfg["detector"]["languages"]))
         fps = cfg["detector"]["process_fps"]
         self.fps.blockSignals(True)
@@ -2118,7 +2126,7 @@ class SettingsPage(QWidget):
         self.remember_window.setChecked(cfg["app"]["remember_window"])
         self.close_to_tray.setChecked(cfg["app"]["close_to_tray"])
         self.start_in_tray.setChecked(cfg["app"]["start_in_tray"])
-        self.auto_match.setChecked(self.win._match_tail is not None)
+        self.auto_match.setChecked(cfg["app"]["auto_match_lifecycle"])
         update = cfg["update"]
         self.update_auto.setChecked(update["check_automatically"])
         self.update_bandwidth.setCurrentIndex(max(self.update_bandwidth.findData(update["download_bandwidth"]), 0))
@@ -2150,7 +2158,14 @@ class SettingsPage(QWidget):
         self.fps_hint.setText(settings.FPS_PRESETS[index][2] if index is not None else
                               "A value set in config.toml. 15 per second is what the counter was tested with.")
 
-    def save(self):
+    def reset_all(self):
+        if not ask(self, "Reset all settings?", "Restore the default values for this Settings page? "
+                   "Counts, match history, profiles, overlay and Discord setup are kept.", "Reset settings"):
+            return
+        self._load_values(settings.DEFAULTS)
+        self.save(message="Defaults restored.")
+
+    def save(self, *, message="Saved."):
         langs = self.language.currentData()
         try:
             C.update_config_file(config_file(), "detector", {"languages": langs, "process_fps": self.fps.currentData()})
@@ -2169,7 +2184,7 @@ class SettingsPage(QWidget):
         except (C.UserError, OSError) as error:
             show_error(self, str(error))
             return
-        self.saved.setText("Saved." + (" Stop and start counting to use the new settings."
+        self.saved.setText(message + (" Stop and start counting to use the new settings."
                                        if self.win.worker.running() else ""))
         self.win.set_match_automation(self.auto_match.isChecked())
         self.win.configure_tray(self.close_to_tray.isChecked() or self.start_in_tray.isChecked())
@@ -2193,6 +2208,8 @@ class SettingsPage(QWidget):
 
 class GroupPage(QWidget):
     scoreboard_result = Signal(object)
+    scoreboard_removed = Signal(object)
+    players_reset = Signal(object)
 
     """Local match history and the shared Discord leaderboard."""
 
@@ -2202,14 +2219,25 @@ class GroupPage(QWidget):
         self.matches = []
         self._webhook = None
         self._ranks_key = None
+        self._team_summary = None
+        self._host_match_settings = None
         self._scoreboard_id = ""
         self._scoreboard_pending = False
         self._published = None
         self._next_scoreboard_refresh = 0.0
         self.scoreboard_result.connect(self._scoreboard_result)
-        layout = page_layout(self, "Group", "Save your matches and contribute to one shared Discord leaderboard.")
+        self.scoreboard_removed.connect(self._scoreboard_removed)
+        self.players_reset.connect(self._players_reset)
+        layout = self.group_layout = page_layout(self, "Group", "Save your matches and contribute to one shared Discord leaderboard.")
         setup, setup_layout = card("Player setup", "Use your own player name and the webhook shared by your group.")
         form = QGridLayout()
+        self.role = MaterialComboBox()
+        self.role.addItem("Host", "host")
+        self.role.addItem("Guest", "guest")
+        self.role.setCurrentIndex(self.role.findData(win.group_role))
+        self.role.currentIndexChanged.connect(self.save_role)
+        form.addWidget(label("Group role"), 3, 0)
+        form.addWidget(self.role, 3, 1)
         self.player = QLineEdit()
         self.player.setMaxLength(80)
         self.webhook = QLineEdit()
@@ -2235,14 +2263,15 @@ class GroupPage(QWidget):
         self.player_status = label("", "hint", wrap=True)
         setup_layout.addWidget(self.player_status)
         layout.addWidget(setup)
-        history, history_layout = card("Match history", "Stop counting, then finish the match to save your totals. "
+        history, history_layout = card("Match history", "Finish the match from Dashboard to save your totals. "
                                       "Use Reset on the Dashboard before starting the next match.")
         row = QHBoxLayout()
-        row.addWidget(button("Finish match...", "primary", on_click=win.finish_match))
         self.edit = button("Edit...", on_click=self.edit_match)
-        self.delete = button("Delete...", on_click=self.delete_match)
+        self.delete = button("Delete selected...", on_click=self.delete_match)
+        self.select_matches = QCheckBox("Select all matches")
         for action in (self.edit, self.delete):
             action.setEnabled(False)
+        row.addWidget(self.select_matches)
         row.addLayout(connected_buttons(self.edit, self.delete))
         row.addStretch(1)
         history_layout.addLayout(row)
@@ -2250,6 +2279,8 @@ class GroupPage(QWidget):
         history_layout.addWidget(self.stats)
         self.history = self._table(("Finished", "Player", "Mode", "Certain", "Approx", "Total", "Token chance"))
         self.history.currentItemChanged.connect(self._selection_changed)
+        self.history.itemChanged.connect(lambda *_: self.update_checked_actions())
+        self.select_matches.clicked.connect(lambda checked: self.check_all(self.history, checked))
         history_layout.addWidget(self.history)
         self.feedback = label("", "hint", wrap=True)
         history_layout.addWidget(self.feedback)
@@ -2259,13 +2290,53 @@ class GroupPage(QWidget):
         controls = QHBoxLayout()
         self.publish_board = button("Publish leaderboard", on_click=lambda: self.sync_scoreboard(publish=True))
         self.copy_board = button("Copy message ID", on_click=self.copy_scoreboard_id)
-        controls.addLayout(connected_buttons(self.publish_board, self.copy_board))
+        self.delete_board = button("Delete message...", on_click=self.delete_scoreboard)
+        controls.addLayout(connected_buttons(self.publish_board, self.copy_board, self.delete_board))
         controls.addStretch(1)
         ranks_layout.addLayout(controls)
+        self.team = label("", "hint", wrap=True)
+        ranks_layout.addWidget(self.team)
+        self.rank_actions = QWidget()
+        rank_controls = QHBoxLayout(self.rank_actions)
+        rank_controls.setContentsMargins(0, 0, 0, 0)
+        self.select_players = QCheckBox("Select all players")
+        self.reset_players = button("Reset selected players...", on_click=self.reset_selected_players)
+        rank_controls.addWidget(self.select_players)
+        rank_controls.addWidget(self.reset_players)
+        rank_controls.addStretch(1)
+        ranks_layout.addWidget(self.rank_actions)
         self.ranks = self._table(("Rank", "Player", "Total", "Matches", "Certain", "Approx", "Chest types"))
+        self.ranks.itemChanged.connect(lambda *_: self.update_checked_actions())
+        self.select_players.clicked.connect(lambda checked: self.check_all(self.ranks, checked))
         ranks_layout.addWidget(self.ranks)
         layout.addWidget(ranks)
         layout.addStretch(1)
+
+    def attach_discord(self, discord):
+        self.bot_section, layout = card()
+        header = QHBoxLayout()
+        self.bot_settings = button("Bot Discord", "toggle")
+        self.bot_settings.setCheckable(True)
+        self.bot_settings.toggled.connect(discord.setVisible)
+        self.bot_settings.toggled.connect(lambda open_: discord.load() if open_ else None)
+        header.addWidget(self.bot_settings)
+        header.addStretch(1)
+        header.addWidget(discord.sender_status)
+        header.addWidget(discord.sender_toggle)
+        layout.addLayout(header)
+        layout.addWidget(discord)
+        discord.hide()
+        self.group_layout.insertWidget(self.group_layout.count() - 1, self.bot_section)
+        self.set_bot_section_role(self.win.group_role)
+
+    def set_bot_section_role(self, role):
+        if role != "host":
+            self.bot_settings.setChecked(False)
+        self.bot_section.setVisible(role == "host")
+        self.delete_board.setVisible(role == "host")
+        self.rank_actions.setVisible(role == "host")
+        if self._ranks_key is not None:
+            self.render_ranks(self._ranks_key[0], self._team_summary)
 
     @staticmethod
     def _table(headers):
@@ -2280,7 +2351,10 @@ class GroupPage(QWidget):
     def load(self):
         self.feedback.clear()
         self.history.clear()
+        self.select_matches.setChecked(False)
+        self.update_checked_actions()
         self.load_player_setup()
+        self.apply_match_settings()
         self.sync_scoreboard()
         try:
             self.matches = match_history.read_history(self.win.match_history_path())
@@ -2301,6 +2375,7 @@ class GroupPage(QWidget):
             row = QTreeWidgetItem((match.finished_at, match.player or "—", match.mode, fmt(match.certain),
                                    fmt(match.estimated), fmt(match.total), match.token_chance))
             row.setData(0, Qt.UserRole, index)
+            row.setCheckState(0, Qt.Unchecked)
             self.history.addTopLevelItem(row)
         self.history.setCurrentItem(self.history.topLevelItem(0))
     def load_player_setup(self):
@@ -2309,6 +2384,9 @@ class GroupPage(QWidget):
         self.share_matches.blockSignals(True)
         self.share_matches.setChecked(cfg["group_share_matches"])
         self.share_matches.blockSignals(False)
+        self.role.blockSignals(True)
+        self.role.setCurrentIndex(self.role.findData(self.win.group_role))
+        self.role.blockSignals(False)
         self._scoreboard_id = cfg["group_scoreboard_id"]
         self.scoreboard.setText(self._scoreboard_id)
         self.webhook.clear()
@@ -2319,6 +2397,20 @@ class GroupPage(QWidget):
             self.player_status.setText(str(error))
         self.webhook.setPlaceholderText("••••••••  (saved)" if self._webhook else "Discord webhook URL")
 
+    def save_role(self, _):
+        role = self.role.currentData()
+        try:
+            C.update_config_file(config_file(), "app", {"group_role": role})
+        except (C.UserError, OSError) as error:
+            self.role.blockSignals(True)
+            self.role.setCurrentIndex(self.role.findData(self.win.group_role))
+            self.role.blockSignals(False)
+            self.player_status.setText(f"Could not save the Group role. {error}")
+            return
+        self.win.set_group_role(role)
+        self._next_scoreboard_refresh = 0
+        self.sync_scoreboard()
+
     def save_share_matches(self, enabled):
         try:
             C.update_config_file(config_file(), "app", {"group_share_matches": enabled})
@@ -2328,8 +2420,39 @@ class GroupPage(QWidget):
             self.share_matches.blockSignals(False)
             self.player_status.setText(f"Could not save the sharing setting. {error}")
             return
+        self.apply_match_settings()
         self.player_status.setText("New matches will count for the group." if enabled else
                                    "New matches stay in your local history.")
+
+    def apply_match_settings(self):
+        dashboard = self.win.dashboard
+        mode, boost = dashboard.token_mode, dashboard.token_boost
+        follow = self.win.group_role == "guest" and self.share_matches.isChecked()
+        mode.setEnabled(not follow)
+        boost.setEnabled(not follow)
+        mode.setToolTip("Choose a mode manually or use Auto to read the latest Battle Royale mode from Fortnite’s local log.")
+        boost.setToolTip("Apply this multiplier to every chest in the estimate.")
+        if follow and self._host_match_settings is not None:
+            host_mode, host_boost = self._host_match_settings
+            values = (mode.findText(host_mode), boost.findData(host_boost))
+            mode.setToolTip("Game mode from the Host's published leaderboard.")
+            boost.setToolTip("Pirate Token multiplier from the Host's published leaderboard.")
+        elif follow:
+            mode.setToolTip("Waiting for Host settings. Turn off Group sharing to edit.")
+            boost.setToolTip(mode.toolTip())
+            values = None
+        else:
+            values = None
+        if values is None:
+            cfg = load_cfg()[0]["app"]
+            values = (mode.findData("Auto") if cfg["token_mode"] == "Auto" else mode.findText(cfg["token_mode"]),
+                      boost.findText(cfg["token_boost"]))
+        for box, index in zip((mode, boost), values):
+            blocked = box.blockSignals(True)
+            box.setCurrentIndex(max(0, index))
+            box.blockSignals(blocked)
+        dashboard.update_token_odds()
+        self.win.update_mode_tracking()
 
     def save_player_setup(self):
         previous = self._webhook, self._scoreboard_id
@@ -2349,6 +2472,8 @@ class GroupPage(QWidget):
             return
         self.load_player_setup()
         if previous != (self._webhook, self._scoreboard_id):
+            self._host_match_settings = None
+            self.apply_match_settings()
             self.render_ranks(())
         self.player_status.setText("Player setup saved." if self._webhook else "Player saved. Add the shared webhook to contribute.")
         self._next_scoreboard_refresh = 0
@@ -2367,6 +2492,8 @@ class GroupPage(QWidget):
             self.player_status.setText(str(error))
             return
         self.load_player_setup()
+        self._host_match_settings = None
+        self.apply_match_settings()
         self.render_ranks(())
         self.player_status.setText("Webhook removed.")
 
@@ -2377,15 +2504,20 @@ class GroupPage(QWidget):
 
     def _is_board_host(self):
         runner = self.win.discord.runner
-        return (self._webhook is not None and runner is not None and runner.status[0] == "online"
+        return (self.win.group_role == "host" and self._webhook is not None and runner is not None
+                and runner.status[0] == "online"
                 and getattr(runner, "webhook", None) == self._webhook)
 
     def sync_scoreboard(self, publish=False):
         webhook = self._webhook
         ident = self._scoreboard_id
         host = self._is_board_host()
+        self.publish_board.setVisible(self.win.group_role == "host")
         self.publish_board.setEnabled(host and not self._scoreboard_pending)
         self.copy_board.setEnabled(bool(ident))
+        self.update_checked_actions()
+        self.delete_board.setEnabled(bool(webhook and ident and self.win.group_role == "host"
+                                         and not self._scoreboard_pending))
         if webhook is None:
             self.render_ranks(())
             return
@@ -2398,35 +2530,86 @@ class GroupPage(QWidget):
         self._next_scoreboard_refresh = time.monotonic() + 10
         self._scoreboard_pending = True
         previous = self._published
+        dashboard = self.win.dashboard
+        game_mode = self.win.current_game_mode()
+        host_settings = (game_mode, dashboard.token_boost.currentData()) if game_mode in discord_scoreboard.MODES else None
 
         def sync():
             try:
                 created = None
                 if host:
-                    ranking = discord_scoreboard.rows(discord_group.GroupStore(webhook.id).leaderboard())
-                    if publish or (ident and previous != (webhook.id, ident, ranking)):
-                        created, _ = discord_scoreboard.publish(webhook, ident, ranking)
+                    settings = host_settings
+                    players, team = discord_group.GroupStore(webhook.id).board()
+                    ranking = discord_scoreboard.rows(players)
+                    if (self._is_board_host() and webhook == self._webhook and ident == self._scoreboard_id and
+                            (publish or (ident and previous != (webhook.id, ident, ranking, team, settings)))):
+                        created, _ = discord_scoreboard.publish(webhook, ident, ranking, team, settings=settings)
                 else:
-                    ranking = discord_scoreboard.fetch(webhook, ident)
-                result = (webhook, ident, ranking, created, "")
+                    ranking, team, settings = discord_scoreboard.fetch(webhook, ident, with_settings=True)
+                result = (webhook, ident, host, ranking, team, settings, created, "")
             except (OSError, ValueError, sqlite3.Error) as error:
-                result = (webhook, ident, (), None, str(error))
+                result = (webhook, ident, host, (), None, None, None, str(error))
             self.scoreboard_result.emit(result)
 
         threading.Thread(target=sync, daemon=True, name="group-scoreboard").start()
 
+    def delete_scoreboard(self):
+        webhook, ident = self._webhook, self._scoreboard_id
+        if self.win.group_role != "host" or not webhook or not ident or self._scoreboard_pending:
+            return
+        if not ask(self, "Delete the leaderboard message?", "Remove the published message from Discord? "
+                   "Saved matches and shared standings are kept.", "Delete message", danger=True):
+            return
+        if (self.win.group_role != "host" or self._scoreboard_pending
+                or (webhook, ident) != (self._webhook, self._scoreboard_id)):
+            return
+        self._scoreboard_pending = True
+        self.publish_board.setEnabled(False)
+        self.delete_board.setEnabled(False)
+
+        def remove():
+            try:
+                discord_scoreboard.delete(webhook, ident)
+                error = ""
+            except (OSError, ValueError) as failure:
+                error = str(failure)
+            self.scoreboard_removed.emit((webhook, ident, error))
+
+        threading.Thread(target=remove, daemon=True, name="group-scoreboard-delete").start()
+
+    def _scoreboard_removed(self, result):
+        webhook, ident, error = result
+        self._scoreboard_pending = False
+        if (webhook, ident) != (self._webhook, self._scoreboard_id):
+            return
+        if error:
+            self.player_status.setText(error)
+            return
+        self._published = None
+        self._scoreboard_id = ""
+        self.scoreboard.clear()
+        try:
+            C.update_config_file(config_file(), "app", {"group_scoreboard_id": ""})
+        except (C.UserError, OSError) as failure:
+            self.player_status.setText(f"Message deleted. Save player setup to clear the old ID. {failure}")
+        else:
+            self.player_status.setText("Leaderboard message deleted.")
+        self.sync_scoreboard()
+
     def _scoreboard_result(self, result):
-        webhook, ident, ranking, published, error = result
+        webhook, ident, host, ranking, team, settings, published, error = result
         self._scoreboard_pending = False
         if webhook != self._webhook or ident != self._scoreboard_id:
             self._next_scoreboard_refresh = 0
+            return
+        if host and self.win.group_role != "host" and not published:
             return
         if error:
             self.player_status.setText(error)
             self.publish_board.setEnabled(self._is_board_host())
             return
         if published:
-            self._published = (webhook.id, published, ranking)
+            self._published = (webhook.id, published, ranking, team, settings)
             if not ident:
                 self._scoreboard_id = published
                 self.scoreboard.setText(published)
@@ -2437,25 +2620,88 @@ class GroupPage(QWidget):
                 else:
                     self.player_status.setText("Leaderboard published. Share its message ID with your group.")
             self.copy_board.setEnabled(True)
-        self.render_ranks(ranking)
+        if not host and self.win.group_role == "guest" and settings != self._host_match_settings:
+            self._host_match_settings = settings
+            self.apply_match_settings()
+        self.render_ranks(ranking, team)
 
-    def render_ranks(self, ranking):
-        if ranking == self._ranks_key:
+    def render_ranks(self, ranking, team=None):
+        self._team_summary = team
+        self.team.setText(team.text() if team is not None else "Team match summary unavailable.")
+        host = self.win.group_role == "host"
+        key = (ranking, host)
+        if key == self._ranks_key:
             return
-        self._ranks_key = ranking
+        checked = {row.text(1) for row in self.checked_items(self.ranks)} if ranking and host else set()
+        self._ranks_key = key
         self.ranks.clear()
         for position, player in enumerate(ranking, 1):
             types = " · ".join(f"{discord_group.GROUP_TYPE_LABELS.get(kind, kind)} {fmt(count)}"
                                for kind, count in player.chest_types.items()) or "—"
-            self.ranks.addTopLevelItem(QTreeWidgetItem((str(position), player.name, fmt(player.total),
+            item = QTreeWidgetItem((str(position), player.name, fmt(player.total),
                                                        "—" if player.matches is None else fmt(player.matches),
                                                        "—" if player.certain is None else fmt(player.certain),
-                                                       "—" if player.estimated is None else fmt(player.estimated), types)))
+                                                       "—" if player.estimated is None else fmt(player.estimated), types))
+            if host:
+                item.setCheckState(0, Qt.Checked if player.name in checked else Qt.Unchecked)
+            self.ranks.addTopLevelItem(item)
+        self.update_checked_actions()
         self.win.dashboard.set_leaders(ranking)
 
+    @staticmethod
+    def checked_items(table):
+        return [table.topLevelItem(i) for i in range(table.topLevelItemCount())
+                if table.topLevelItem(i).checkState(0) == Qt.Checked]
+
+    def check_all(self, table, checked):
+        table.blockSignals(True)
+        for i in range(table.topLevelItemCount()):
+            table.topLevelItem(i).setCheckState(0, Qt.Checked if checked else Qt.Unchecked)
+        table.blockSignals(False)
+        self.update_checked_actions()
+
+    def update_checked_actions(self):
+        matches = len(self.checked_items(self.history))
+        players = len(self.checked_items(self.ranks))
+        self.select_matches.setChecked(0 < matches == self.history.topLevelItemCount())
+        self.select_players.setChecked(0 < players == self.ranks.topLevelItemCount())
+        self.delete.setEnabled(matches > 0)
+        self.reset_players.setEnabled(players > 0 and self._is_board_host() and not self._scoreboard_pending)
+
     def _selection_changed(self, item, previous):
-        for action in (self.edit, self.delete):
-            action.setEnabled(item is not None)
+        self.edit.setEnabled(item is not None)
+
+    def reset_selected_players(self):
+        names = [item.text(1) for item in self.checked_items(self.ranks)]
+        webhook = self._webhook
+        if not names or not self._is_board_host() or self._scoreboard_pending:
+            return
+        if not ask(self, "Reset selected players?", f"Reset {len(names)} selected players in the shared standings? "
+                   "Their saved matches and team match records are kept.", "Reset players", danger=True):
+            return
+        if not self._is_board_host() or webhook != self._webhook or self._scoreboard_pending:
+            return
+        self._scoreboard_pending = True
+        self.reset_players.setEnabled(False)
+
+        def reset():
+            try:
+                discord_group.GroupStore(webhook.id).reset_players(names)
+                error = ""
+            except (OSError, ValueError, sqlite3.Error) as failure:
+                error = str(failure)
+            self.players_reset.emit((webhook, error))
+
+        threading.Thread(target=reset, daemon=True, name="group-reset-players").start()
+
+    def _players_reset(self, result):
+        webhook, error = result
+        self._scoreboard_pending = False
+        if webhook != self._webhook:
+            return
+        self.player_status.setText(error or "Selected players reset.")
+        self._next_scoreboard_refresh = 0
+        self.sync_scoreboard()
 
     def edit_match(self):
         current = self.history.currentItem()
@@ -2478,21 +2724,20 @@ class GroupPage(QWidget):
             self.feedback.setText("Match updated.")
 
     def delete_match(self):
-        current = self.history.currentItem()
-        if current is None:
+        snapshots = {self.matches[item.data(0, Qt.UserRole)].snapshot for item in self.checked_items(self.history)}
+        if not snapshots:
             return
-        match = self.matches[current.data(0, Qt.UserRole)]
-        if not ask(self, "Delete saved match?", "Remove this match from history and the local leaderboard?",
-                   "Delete", danger=True):
+        if not ask(self, "Delete selected matches?", f"Delete {len(snapshots)} selected matches from this PC? "
+                   "Already shared contributions remain in the leaderboard.", "Delete matches", danger=True):
             return
         try:
-            removed = match_history.delete_match(self.win.match_history_path(), match.snapshot)
+            removed = match_history.delete_matches(self.win.match_history_path(), snapshots)
         except (OSError, ValueError) as error:
-            show_error(self, f"Could not delete the match. {error}")
+            show_error(self, f"Could not delete the selected matches. {error}")
             return
         self.load()
         if removed:
-            self.feedback.setText("Match deleted.")
+            self.feedback.setText(f"{removed} matches deleted.")
 
 class DiscordPage(QWidget):
     send_result = Signal(str)
@@ -2508,7 +2753,8 @@ class DiscordPage(QWidget):
         self._configured = False
         self.send_result.connect(self._sent)
         self.bot_changed.connect(self.refresh_sender_status, Qt.QueuedConnection)
-        layout = page_layout(self, "Discord", "Send a saved match summary to a channel using your bot.")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         setup, setup_layout = card("Bot setup", "Run the Discord bot for Group commands and match reports.")
         links = connected_buttons(
             button("Discord Developer Portal", on_click=lambda: QDesktopServices.openUrl(
@@ -2539,23 +2785,15 @@ class DiscordPage(QWidget):
         setup_layout.addLayout(form)
         setup_layout.addWidget(label("The channel ID and token are stored in Windows Credential Manager.",
                                      "hint", wrap=True))
-        row = connected_buttons(button("Save setup", on_click=self.save_setup),
-                                button("Forget setup", on_click=self.forget_setup))
+        row = connected_buttons(button("Save bot setup", on_click=self.save_setup),
+                                button("Forget bot setup", on_click=self.forget_setup))
         row.addStretch(1)
         setup_layout.addLayout(row)
-        sender_row = QHBoxLayout()
-        title = layout.itemAt(0).widget()
-        layout.removeWidget(title)
-        sender_row.addWidget(title)
-        sender_row.addStretch(1)
         self.sender_status = label("", "pill")
         self.sender_toggle = button("", on_click=self.toggle_sender)
         self.auto_start = QCheckBox("Start bot with the app")
         self.auto_start.setChecked(load_cfg()[0]["app"]["auto_start_discord_sender"])
         self.auto_start.toggled.connect(self.save_sender_start)
-        sender_row.addWidget(self.sender_status)
-        sender_row.addWidget(self.sender_toggle)
-        layout.insertLayout(0, sender_row)
         setup_layout.addWidget(self.auto_start)
         self.setup_status = label("", "hint", wrap=True)
         setup_layout.addWidget(self.setup_status)
@@ -2578,7 +2816,6 @@ class DiscordPage(QWidget):
         self.status = label("", "hint", wrap=True)
         summary_layout.addWidget(self.status)
         layout.addWidget(summary)
-        layout.addStretch(1)
         self.refresh_sender_status()
 
     def load(self):
@@ -2656,6 +2893,8 @@ class DiscordPage(QWidget):
             self.start_bot()
 
     def start_bot(self):
+        if self.win.group_role != "host":
+            return
         if self.runner and self.runner.status[0] in ("connecting", "online", "stopping"):
             return
         try:
@@ -2797,10 +3036,9 @@ class HelpPage(QWidget):
                                               "program files. It contains no account or personal data.")
         row = QHBoxLayout()
         self.run = button("Run diagnostics", "primary", on_click=self._run)
-        row.addWidget(self.run)
         self.copy = button("Copy report", on_click=self._copy)
         self.copy.setEnabled(False)
-        row.addWidget(self.copy)
+        row.addLayout(connected_buttons(self.run, self.copy))
         row.addLayout(connected_buttons(
             button("Open logs folder", on_click=win.open_logs),
             button("Clean logs and captures...", on_click=win.clean_diagnostics),
@@ -2818,11 +3056,11 @@ class HelpPage(QWidget):
         box, box_layout = card("About")
         box_layout.addWidget(label(f"{APP_NAME} v{__version__} ({RELEASE_CHANNEL}). {TAGLINE}.", wrap=True))
         box_layout.addWidget(label("Free and open source (MIT licence). Independent and unofficial: not affiliated with, "
-                                   "endorsed by or approved by Epic Games. It only analyses the video picture: it never "
+                                   "endorsed by or approved by Epic Games. Chest counts come from video. Optional match tracking reads the local Fortnite log. The app never "
                                    "connects to or changes the game and shows nothing that is not already on screen. "
                                    "Fair play and compatibility: see the full guide.", "hint", wrap=True))
         row = QHBoxLayout()
-        row.addWidget(button("Project page", "link", on_click=lambda: QDesktopServices.openUrl(QUrl(REPO_URL))))
+        row.addWidget(button("Project page", on_click=lambda: QDesktopServices.openUrl(QUrl(REPO_URL))))
         row.addStretch(1)
         box_layout.addLayout(row)
         layout.addWidget(box)
@@ -3057,8 +3295,12 @@ class MainWindow(QMainWindow):
         self._workers_pending = set()
         self._pending_resets = set()
         self._match_tail = None
+        self._mode_tail = None
+        self._detected_mode = None
         self._match_events = deque()
         self._match_active = False
+        self._match_fingerprint = ""
+        self._pending_match_fingerprint = ""
         self._match_action = None
         self._match_stop_acks = set()
         self._worker_failed = False
@@ -3116,9 +3358,16 @@ class MainWindow(QMainWindow):
         self.overlay = OverlayPage(self)
         self.settings_page = SettingsPage(self)
         self.help = HelpPage(self)
+        self.group_role = load_cfg()[0]["app"]["group_role"]
+        if not self.group_role:
+            try:
+                self.group_role = "host" if discord_summary.load() is not None else "guest"
+            except (OSError, ValueError):
+                self.group_role = "guest"
         self.group = GroupPage(self)
         self.discord = DiscordPage(self)
-        for page in (self.dashboard, self.overlay, self.settings_page, self.help, self.group, self.discord):
+        self.group.attach_discord(self.discord)
+        for page in (self.dashboard, self.overlay, self.settings_page, self.help, self.group):
             self.pages.addWidget(page)
         outer.addWidget(self._navigation_rail())
         content = QVBoxLayout()
@@ -3141,6 +3390,7 @@ class MainWindow(QMainWindow):
         self.apply_obs_settings()
         self.overlay.load()
         self.set_match_automation(load_cfg()[0]["app"]["auto_match_lifecycle"])
+        self.update_mode_tracking()
         self.settings_page.load()
         rec = self.dashboard.rec_mode
         rec.setCurrentIndex(max(rec.findData(load_cfg()[0]["capture"]["mode"]), 0))
@@ -3165,12 +3415,46 @@ class MainWindow(QMainWindow):
     def load_home_options(self):
         cfg = load_cfg()[0]["app"]
         dashboard = self.dashboard
-        for box, key in ((dashboard.token_mode, "token_mode"), (dashboard.token_boost, "token_boost")):
-            box.setCurrentIndex(max(0, box.findText(cfg[key])))
-            box.currentTextChanged.connect(lambda value, key=key: self.save_app_option(key, value))
+        mode, boost = dashboard.token_mode, dashboard.token_boost
+        mode.setCurrentIndex(max(0, mode.findData("Auto") if cfg["token_mode"] == "Auto"
+                                 else mode.findText(cfg["token_mode"])))
+        mode.currentIndexChanged.connect(self.save_game_mode)
+        boost.setCurrentIndex(max(0, boost.findText(cfg["token_boost"])))
+        boost.currentTextChanged.connect(lambda value: self.save_app_option("token_boost", value))
         for button, key in ((dashboard.show_log, "show_activity"), (dashboard.show_preview, "live_preview")):
             button.setChecked(cfg[key])
             button.toggled.connect(lambda value, key=key: self.save_app_option(key, value))
+
+    def save_game_mode(self, _):
+        box = self.dashboard.token_mode
+        self.save_app_option("token_mode", box.currentData() or box.currentText())
+        self.update_mode_tracking()
+
+    def current_game_mode(self):
+        box = self.dashboard.token_mode
+        return (self._detected_mode or "Unknown") if box.currentData() == "Auto" else box.currentText()
+
+    def set_detected_mode(self, mode):
+        self._detected_mode = mode
+        box = self.dashboard.token_mode
+        index = box.findData("Auto")
+        box.setItemText(index, f"Auto · {mode}" if mode else "Auto · waiting")
+
+    def update_mode_tracking(self):
+        if self._match_tail is not None:
+            self._mode_tail = None
+            return
+        if self.dashboard.token_mode.currentData() != "Auto":
+            self._mode_tail = None
+            self.set_detected_mode(None)
+            self.match_timer.stop()
+        elif self._mode_tail is None:
+            try:
+                self._mode_tail = match_lifecycle.LogTail(match_lifecycle.local_log_path())
+            except OSError:
+                self.set_detected_mode(None)
+                return
+            self.match_timer.start(250)
 
     # ---- layout
     def _navigation_rail(self):
@@ -3182,7 +3466,7 @@ class MainWindow(QMainWindow):
         column.setSpacing(4)
         self.destinations = QButtonGroup(rail)
         destinations = ((0, "dashboard", "Dashboard"), (1, "overlay", "Overlay"), (4, "group", "Group"),
-                        (5, "discord", "Discord"), (2, "settings", "Settings"), (3, "help", "Help"))
+                        (2, "settings", "Settings"), (3, "help", "Help"))
         for index, icon, name in destinations:
             destination = NavigationDestination(icon, name)
             self.destinations.addButton(destination, index)
@@ -3198,6 +3482,15 @@ class MainWindow(QMainWindow):
             destination.setChecked(True)
             self._page_changed(index)
 
+    def set_group_role(self, role):
+        self.group_role = role
+        self.group.set_bot_section_role(role)
+        self.group.apply_match_settings()
+        if role == "guest":
+            self.discord.stop_bot()
+        elif self.discord.auto_start.isChecked() and not self._install_pending and self.updates.state != UM.INSTALLING:
+            self.discord.start_bot()
+
     def _page_changed(self, index):
         self.pages.setCurrentIndex(index)
         self.preview_visibility_changed()
@@ -3207,8 +3500,8 @@ class MainWindow(QMainWindow):
             self.settings_page.load()
         elif self.pages.currentWidget() is self.group:
             self.group.load()
-        elif self.pages.currentWidget() is self.discord:
-            self.discord.load()
+            if self.group_role == "host":
+                self.discord.load()
 
     # ---- sources
     def refresh_sources(self):
@@ -3445,17 +3738,23 @@ class MainWindow(QMainWindow):
             return
         self._match_events.clear()
         self._match_active = False
+        self._match_fingerprint = ""
+        self._pending_match_fingerprint = ""
         self._match_action = None
         self._match_stop_acks.clear()
         if not enabled:
             self.match_timer.stop()
             self._match_tail = None
+            self.set_detected_mode(None)
+            self.update_mode_tracking()
             return
         try:
             self._match_tail = match_lifecycle.LogTail(match_lifecycle.local_log_path())
         except OSError:
             self.match_automation_failed("Could not open the local Fortnite log.")
             return
+        self._mode_tail = None
+        self.set_detected_mode(None)
         self.match_timer.start(250)
 
     def match_automation_failed(self, message):
@@ -3470,31 +3769,54 @@ class MainWindow(QMainWindow):
         self.add_log({"type": "warn", "text": message})
 
     def poll_match_log(self):
-        if (self._match_tail is None or self._match_action == "finish" or self.quit_when_stopped
+        if (self._match_action == "finish" or self.quit_when_stopped
                 or self._install_pending or self.updates.state == UM.INSTALLING):
             return
-        if not self._match_events:
-            try:
-                restarted, events = self._match_tail.poll()
-            except OSError:
+        tail = self._match_tail or self._mode_tail
+        if tail is None:
+            return
+        try:
+            restarted, events = tail.poll()
+        except OSError:
+            if self._match_tail is not None:
                 self.match_automation_failed("Could not read the local Fortnite log.")
-                return
+            else:
+                self.set_detected_mode(None)
+            return
+        if self._match_tail is None:
             if restarted:
-                if self._match_active:
-                    self.match_automation_failed("Fortnite's log restarted during a match. Finish the match manually.")
-                    return
-                self._match_action = None
-            self._match_events.extend(events)
+                self.set_detected_mode(None)
+            for event in events:
+                if event != "finish":
+                    self.set_detected_mode(event[2] if isinstance(event, tuple) and len(event) == 3 else None)
+            return
+        if restarted:
+            self.set_detected_mode(None)
+            if self._match_active:
+                self.match_automation_failed("Fortnite's log restarted during a match. Finish the match manually.")
+                return
+            self._match_events.clear()
+            self._match_action = None
+            self._pending_match_fingerprint = ""
+        self._match_events.extend(events)
         while self._match_events:
             event = self._match_events.popleft()
+            marker, fingerprint = event[:2] if isinstance(event, tuple) else (event, "")
+            detected_mode = event[2] if isinstance(event, tuple) and len(event) == 3 else None
             if not self._match_active:
                 # A start followed by a lobby in unread data never gets a reset.
-                self._match_action = "start" if event == "start" else None
-            elif event == "finish":
+                self._match_action = "start" if marker == "start" else None
+                self._pending_match_fingerprint = fingerprint
+                if marker == "start":
+                    self.set_detected_mode(detected_mode)
+            elif marker == "finish":
                 self._match_action = "finish"
                 self._match_stop_acks.clear()
                 self.stop_counting()
                 return
+            elif fingerprint != self._match_fingerprint:
+                # The counter has crossed a match boundary without a verified finish.
+                self._match_fingerprint = ""
         if (self._match_action == "start" and self._match_tail.caught_up
                 and self._source_scan is None and self.dashboard.source.currentData()
                 and QApplication.activeModalWidget() is None):
@@ -3506,6 +3828,7 @@ class MainWindow(QMainWindow):
     def complete_match_action(self):
         action, self._match_action = self._match_action, None
         if action == "start":
+            fingerprint, self._pending_match_fingerprint = self._pending_match_fingerprint, ""
             if self.quit_when_stopped or self._install_pending:
                 return
             try:
@@ -3518,10 +3841,13 @@ class MainWindow(QMainWindow):
                 self.match_automation_failed("Could not start the configured source.")
                 return
             self._match_active = True
+            source = self.dashboard.source.currentData() or {}
+            self._match_fingerprint = fingerprint if source.get("source") in ("desktop", "desktop-hdr") else ""
         elif action == "finish":
             self._match_active = False
+            fingerprint, self._match_fingerprint = self._match_fingerprint, ""
             try:
-                saved = self.save_current_match()
+                saved = self.save_current_match(session_fingerprint=fingerprint)
             except (C.UserError, OSError, ValueError) as error:
                 self.match_automation_failed(f"Could not save the match. {error}")
                 return
@@ -3652,6 +3978,8 @@ class MainWindow(QMainWindow):
             show_error(self, f"The counter could not start ({error}). Extract the whole zip again and keep every file "
                              "and folder together.")
             return
+        if before_start is None:
+            self._match_fingerprint = ""
         self._workers_pending.add("primary")
         whose = f" (profile {cfg['profile']['name']})" if self.dashboard.profile.count() > 1 else ""
         self.add_log({"type": "info", "text": f"Starting{whose}: {self.dashboard.source.currentText().split('   ')[0]} ..."})
@@ -3731,7 +4059,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(AUTO_CHECK_DELAY_MS, self.auto_check)
         except Exception as error:                     # updates must never stop the app from opening
             self.add_log({"type": "warn", "text": f"Could not check the last update ({type(error).__name__}: {error})."})
-        if not installing and self.discord.auto_start.isChecked():
+        if not installing and self.group_role == "host" and self.discord.auto_start.isChecked():
             self.discord.start_bot()
         if not installing:
             self.discord.retry_group_outbox()
@@ -4198,7 +4526,7 @@ class MainWindow(QMainWindow):
         self.group.feedback.setText("Match saved. Use Reset on the Dashboard before the next match." if saved else
                                     "These counts have already been saved.")
 
-    def save_current_match(self):
+    def save_current_match(self, *, session_fingerprint=""):
         cfg, _ = load_cfg()
         if not cfg["state"]["persist"]:
             raise C.UserError("Enable saving counter state before recording matches.")
@@ -4218,6 +4546,8 @@ class MainWindow(QMainWindow):
             profile = profiles.apply(cfg)
             identity = f"{profile['id']}@{profile['created_at'] or ''}"
             snapshot, certain, total = match_history.read_snapshot(identity, state_paths)
+            if webhook and self.group_role == "guest" and self.group._host_match_settings is None:
+                session_fingerprint = ""
             boost = self.dashboard.token_boost.currentData()
             types = read_types(primary) or {}
             breakdown = {kind: row["approx"] for kind, row in types.items()
@@ -4228,10 +4558,11 @@ class MainWindow(QMainWindow):
             if sum(breakdown.values()) > total:
                 breakdown = {}
             match = match_history.Match(snapshot, datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
-                                        identity, profile["name"], self.dashboard.token_mode.currentText(),
+                                        identity, profile["name"], self.current_game_mode(),
                                         certain, total - certain, token_odds_text(total, boost), boost,
                                         player=player, chest_types=breakdown,
-                                        group_webhook_id=webhook.id if webhook else "")
+                                        group_webhook_id=webhook.id if webhook else "",
+                                        session_fingerprint=session_fingerprint)
             saved = match_history.save_match(self.match_history_path(), match)
         if saved:
             self.dashboard.set_recent_matches(match_history.read_history(self.match_history_path()))
@@ -4246,6 +4577,8 @@ class MainWindow(QMainWindow):
         return saved
 
     def deliver_saved_match(self, match):
+        if self.group_role != "host":
+            return
         runner = self.discord.runner
         if runner is None or runner.status[0] not in ("online", "connecting") or runner.report_config is None:
             return
@@ -4274,6 +4607,7 @@ class MainWindow(QMainWindow):
         except (C.UserError, OSError) as error:
             show_error(self, str(error))
             return
+        self._match_fingerprint = ""
         self.set_counts(session.state["certain"], session.state["approximate"], flash=True)
         if action == "reset":
             self.dashboard.clear_recent(source=1)

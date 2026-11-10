@@ -1,5 +1,5 @@
 """
-EXPERIMENT - not used by the app or the counter. Adaptive, scale-aware pop-up recognition (docs/INVESTIGATION_2026-11-07.md).
+EXPERIMENT - not used by the app or the counter. Adaptive, scale-aware pop-up recognition (docs/reference/INVESTIGATION_2026-11-07.md).
 
 Production finds a chest pop-up only when the EXACT binary match of a word template reaches 0.75 at one fixed size. On
 streams whose HUD is drawn ~1.2x larger that never happens, although a blurred match at the right scale clearly does.
@@ -213,7 +213,7 @@ SOURCES = {
     "s033211": ("capture", CAP / "20261107_033211", None),
     "s034505": ("capture", CAP / "20261107_034505", None),
 }
-# Pop-ups verified by eye from crops (docs/INVESTIGATION_2026-11-07.md); recording seconds. 033211: completeness unknown.
+# Pop-ups verified by eye from crops (docs/reference/INVESTIGATION_2026-11-07.md); recording seconds. 033211: completeness unknown.
 SESSION_TRUTH = {"s032230": [0.3, 53.5, 58.8, 94.7], "s033211": [188.7, 507.8, 619.0, 689.7], "s034505": [30.5, 115.3, 132.9]}
 
 

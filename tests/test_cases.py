@@ -1,5 +1,5 @@
 """
-Real-world detection cases (tests/cases/cases.json, docs/INVESTIGATION_2026-11-08.md) as permanent regression tests.
+Real-world detection cases (tests/cases/cases.json, docs/reference/INVESTIGATION_2026-11-08.md) as permanent regression tests.
 
 Each case's pop-up box masks (tests/fixtures/popups/<case>.npz, made by research/cases.py fixtures from the user's
 diagnostic captures) are replayed through the real ChestEstimator. The pop-up channels work on that mask only, so the

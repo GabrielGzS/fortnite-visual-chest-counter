@@ -1,8 +1,8 @@
 # Development notes
 
-End users: read the top-level [README.md](../README.md) and the setup guides in [guides/](guides/README.md). This file is
-for contributors.
-The original research log (how the detector was built and validated) is in [DETECTOR_NOTES.md](DETECTOR_NOTES.md).
+End users: read the top-level [README.md](../README.md) and the setup guides in [guides/](guides/index.md). This file is
+for contributors. See [change and validation notes](CHANGES.md) for the local desktop work.
+The original research log (how the detector was built and validated) is in [DETECTOR_NOTES.md](reference/DETECTOR_NOTES.md).
 
 ## Local Windows executable
 
@@ -31,6 +31,9 @@ src/fortnite_chest_counter/
   input/            video_sources.py: OBS Virtual Camera / capture device / desktop / file via ffmpeg
   gui/              the desktop app (v0.2.0, PySide6): app.py (window, pages, dialogs), worker.py (runs + observes the
                     counting worker), update_manager.py (update state, no widgets), theme.py, assets/ (icons, bundled font and their license notices)
+  match_lifecycle.py local log parsing for session fingerprints and Battle Royale mode
+  match_history.py  local saved matches and history edits
+  discord_*.py      group submissions, bot, reports and shared leaderboard
   preview.py        shared-memory picture for the app's optional live preview (no Qt)
   capture.py        optional diagnostic recording of the detector's input + decisions + marks ([capture], CAPTURE.md)
   review.py         `review` command: replay captures through the current detector, compare with live + labels
@@ -96,7 +99,7 @@ python research/regress.py compare --tag v0.1.0 --set ROBUST_PROMOTION=False    
 
 It diffs every event against the frozen snapshots in `tests/baselines/` (event lists of the original v0.1.0 detector) and exits 1
 on a regression (lost real chest, real chest downgraded, verified non-chest newly counted). Current expected results and the
-full experiment record: [ACCURACY_NOTES.md](ACCURACY_NOTES.md). **Compare event lists, not just totals. Never tune thresholds
+full experiment record: [ACCURACY_NOTES.md](reference/ACCURACY_NOTES.md). **Compare event lists, not just totals. Never tune thresholds
 during packaging or refactoring work.**
 
 ## Releasing
@@ -132,7 +135,7 @@ them); every command still works as `runtime\python\python.exe -m fortnite_chest
 * `runtime/ffmpeg/` - unmodified LGPL FFmpeg; the build reads its id from the binary and checks it against the source archive.
 * `runtime/PROVENANCE.txt` - versions, hashes and signers of all of the above, plus a count of signed / unsigned
   executable files. `SIGNATURES.txt` (next to the zip, not in it) lists the signature of every `.exe/.dll/.pyd`: the input
-  for code-signing / Smart App Control work (see [WINDOWS_TRUST.md](WINDOWS_TRUST.md)).
+  for code-signing / Smart App Control work (see [WINDOWS_TRUST.md](maintenance/WINDOWS_TRUST.md)).
 * Zip entries are sorted and use a fixed timestamp, so the same inputs give a byte-identical zip. `SHA256SUMS.txt` covers the
   zip and the FFmpeg source archive.
 
@@ -171,7 +174,7 @@ launchers (.bat/.cmd/.ps1/.vbs/.lnk) or any executable other than the launcher, 
   running worker adopts them via `sync_external_changes`; the Overlay page writes `config.toml`, which the worker's
   `DisplayConfigWatcher` applies within a second. `tests/test_app.py` proves the app's worker counts exactly the same events
   as the command line on a recording.
-* **Diagnostic capture** (`capture.py`, [CAPTURE.md](CAPTURE.md)): off by default; when on, the live loop queues each
+* **Diagnostic capture** (`capture.py`, [CAPTURE.md](guides/diagnostic-capture.md)): off by default; when on, the live loop queues each
   analysed frame (non-blocking, bounded) for a separate FFmpeg encoder writing 10-s segments; events mode deletes segments
   no decision or mark claims. Marks: app `mark` line on the worker's stdin (Mark moment / Ctrl+Alt+M via RegisterHotKey),
   console key M. `review` replays clips with a fresh estimator and compares (MATCH_SECONDS 0.6, as regress.py).
@@ -209,6 +212,6 @@ launchers (.bat/.cmd/.ps1/.vbs/.lnk) or any executable other than the launcher, 
 * **Licences:** the project is MIT (`LICENSE`). The build copies the Python (PSF), NumPy and SciPy (BSD, incl. their bundled
   OpenBLAS/LAPACK/gfortran notices) licence texts into `runtime/licenses/`. Attach the zip, its two signing files, `SHA256SUMS.txt` and
   `ffmpeg-source-<commit>.tar.gz` to the GitHub release (LGPL v3: the corresponding source is offered next to the binary).
-  `packaging/check_release.py` verifies all five and is the source of that list; see [UPDATE_SIGNING.md](UPDATE_SIGNING.md).
+  `packaging/check_release.py` verifies all five and is the source of that list; see [UPDATE_SIGNING.md](maintenance/UPDATE_SIGNING.md).
   The FFmpeg source for a build: `https://github.com/FFmpeg/FFmpeg/archive/<commit>.tar.gz`.
 * **Module names:** avoid naming a module `sources` (it clashed with packaging tools in the past).

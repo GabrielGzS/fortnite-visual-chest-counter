@@ -259,3 +259,121 @@ def test_qt_autostart_tray_hide_and_real_close(tmp_path, monkeypatch):
     finally:
         win.deleteLater()
         qt.processEvents()
+
+
+
+def test_team_summary_counts_first_submission_per_session_and_player(tmp_path, monkeypatch):
+    store = discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db")
+    channel = SimpleNamespace(id=int(CONFIG.channel))
+    requests = []
+
+    class Opener:
+        def open(self, request, timeout):
+            requests.append(json.loads(request.data))
+            return FakeResponse()
+
+    monkeypatch.setattr(discord_group, "build_opener", lambda *_: Opener())
+
+    def submit(snapshot, session, player, total, boost=1.0):
+        assert store.queue(SimpleNamespace(snapshot=snapshot, session_fingerprint=session, total=total, boost=boost), player)
+        assert store.flush(WEBHOOK) == 1
+        body = requests[-1]
+        message = SimpleNamespace(id=len(requests), channel=channel, webhook_id=int(WEBHOOK.id), content=body["content"],
+                                  embeds=[discord.Embed.from_dict(body["embeds"][0])])
+        assert store.ingest(message)
+        return message
+
+    first, second = "a" * 64, "b" * 64
+    submit("one", first, "Rin", 10)
+    solo_chance = 1 - (1 - 1 / 137_500) ** 10
+    assert store.team_summary() == discord_group.TeamSummary(1, 1, 10, 13750, f"{solo_chance:.6%}")
+    submit("two", first, "Sam", 4, 2.0)
+    chance = 1 - (1 - 1 / 137_500) ** 10 * (1 - 2 / 137_500) ** 4
+    shared = discord_group.TeamSummary(1, 2, 14, round(1 / chance), f"{chance:.6%}")
+    assert store.team_summary() == shared
+    submit("three", first, "rIN", 100, 1.5)
+    assert store.team_summary() == shared
+    assert store.stats("Rin").matches == 2
+    submit("four", "", "Rin", 200)
+    submit("five", "1" * 32, "Sam", 40)
+    assert store.team_summary() == shared
+    assert store.adjust("Sam", None) == ("Sam", 0)
+    assert store.team_summary() == shared
+
+    message = submit("six", second, "Sam", 0)
+    assert store.team_summary() == discord_group.TeamSummary(2, 1, 0, chance_percent="0.000000%")
+    message.id += 1
+    assert not store.ingest(message)
+    assert store.team_summary() == discord_group.TeamSummary(2, 1, 0, chance_percent="0.000000%")
+
+
+def test_qt_guest_startup_and_role_switch(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from fortnite_chest_counter.gui import app as gui
+
+    qt = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui.paths, "APP_DIR", tmp_path)
+    monkeypatch.setattr(gui.MainWindow, "refresh_sources", lambda *_: None)
+    monkeypatch.setattr(gui.MainWindow, "show_update_result", lambda *_: None)
+    monkeypatch.setattr(gui.update_install, "clear_orphaned_journal", lambda: None)
+    monkeypatch.setattr(gui.discord_summary, "load", lambda: None)
+    monkeypatch.setattr(gui.discord_group, "load_webhook", lambda: WEBHOOK)
+    monkeypatch.setattr(gui.discord_group, "flush", lambda *_: 0)
+    gui.C.update_config_file(gui.config_file(), "app", {"group_role": "guest"})
+    gui.C.update_config_file(gui.config_file(), "update", {"check_automatically": False})
+    calls = []
+
+    class Runner:
+        def __init__(self, config, webhook, changed):
+            self.webhook = webhook
+            self.status = ("stopped", "")
+
+        def start(self):
+            calls.append("start")
+            self.status = ("online", "Connected")
+
+        def stop(self, *, timeout=None):
+            if self.status[0] == "online":
+                calls.append("stop")
+            self.status = ("stopped", "")
+
+    monkeypatch.setattr(gui.discord_bot, "BotRunner", Runner)
+    win = gui.MainWindow()
+    win.timer.stop()
+    win.slow.stop()
+    try:
+        assert win.group.role.currentData() == "guest"
+        assert win.group.publish_board.isHidden()
+        assert win.group.bot_section.isHidden()
+        assert not win.group.share_matches.isChecked()
+        monkeypatch.setattr(gui.discord_summary, "load", lambda: CONFIG)
+        win.after_start()
+        win.discord.start_bot()
+        assert calls == []
+        win.group.role.setCurrentIndex(win.group.role.findData("host"))
+        assert calls == ["start"]
+        assert not win.group.publish_board.isHidden()
+        assert not win.group.bot_section.isHidden()
+        assert win.discord.isHidden()
+        assert gui.load_cfg()[0]["app"]["group_role"] == "host"
+        win.group.role.setCurrentIndex(win.group.role.findData("guest"))
+        assert calls == ["start", "stop"]
+        assert win.group.publish_board.isHidden()
+        assert win.group.bot_section.isHidden()
+        assert gui.load_cfg()[0]["app"]["group_role"] == "guest"
+        win.discord.start_bot()
+        assert calls == ["start", "stop"]
+    finally:
+        win.close()
+        qt.processEvents()
+
+    reopened = gui.MainWindow()
+    try:
+        assert reopened.group.role.currentData() == "guest"
+        assert reopened.group.publish_board.isHidden()
+        assert reopened.group.bot_section.isHidden()
+        reopened.after_start()
+        assert calls == ["start", "stop"]
+    finally:
+        reopened.close()
+        qt.processEvents()

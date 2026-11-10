@@ -3,6 +3,14 @@
 The counter writes its numbers to a text file; an OBS **Text** source shows that file on your stream. You style the text
 in OBS as you like. Same steps for every setup - on a dual-PC setup, do this in OBS on the streaming PC.
 
+## On-screen overlay
+
+Enable the on-screen overlay in **Overlay** and apply your changes. Enable the screen-share option if the overlay should
+be visible when sharing the monitor. The preview shows the wording, total and any enabled extras, including Pirate Token
+odds, chest types and saved match count.
+
+PH
+
 ## Add the Text source
 
 1. Open the scene your **viewers** see (not `ChestDetectorFeed`).
@@ -22,9 +30,11 @@ The app's **Overlay** page:
 - **What OBS shows:** both numbers on two lines, both on one line, the estimated total only, or confirmed chests only - each
   with an example using your current numbers.
 - **Wording:** `#` is where the number goes (`Chests opened: #`, `Chest Hunt: #/500`). For one line, `#C` = confirmed and
-  `#A` = estimated total. **Original wording** restores the defaults. Any text, symbols and emoji work (with an OBS font that
+  `#A` = estimated total. **Restore wording defaults** restores the defaults. Any text, symbols and emoji work (with an OBS font that
   has them).
-- **Preview** shows exactly what the file will contain; **Apply** updates OBS at once, even while counting.
+- The **on-screen preview** shows the floating overlay. **Apply** saves the settings and refreshes the OBS text.
+- The OBS text uses the legacy APPROX total, which includes confirmed openings. The on-screen overlay uses
+  the Dashboard split between confirmed and estimated-only openings.
 
 The app cannot hide a Text source you already added in OBS: if a number on stream looks wrong, that source probably reads
 another file.
