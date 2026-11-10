@@ -242,6 +242,33 @@ def test_french_rare_x2_counts_each_stable_opening_once():
         E.configure(defaults)
 
 
+def test_french_recovery_and_late_blurred_match_share_an_opening():
+    from unittest.mock import patch
+
+    from fortnite_chest_counter.detection import chest_types
+
+    defaults = settings.DEFAULTS["detector"]
+    E.configure(dict(defaults, languages=["fr"]))
+    try:
+        est = E.ChestEstimator()
+        roi = np.zeros((V.ROI_H, V.ROI_W, 3), dtype=np.uint8)
+        mask = np.ones(roi.shape[:2], dtype=np.float32)
+        with (patch.object(est, "_recover_french_line", side_effect=[
+                  (73, 187, chest_types.NORMAL), None, None, None]),
+              patch.object(est, "_scaled_best", side_effect=[
+                  (0.70, 73, 187, 1.0, "fr:COFFRE", False),
+                  (0.0, 0, 0, 1.0, None, False),
+                  (0.0, 0, 0, 1.0, None, False),
+                  (0.85, 73, 188, 0.9, "fr:COFFRE", False)])):
+            for t in (0.0, 0.1, 0.7, 1.44):
+                est._scaled_popup(t, roi, mask, False)
+        counted = [event for event in est.flush() if event["approx_counted"]]
+        assert len(counted) == 1
+        assert counted[0]["certain_counted"]
+    finally:
+        E.configure(defaults)
+
+
 def test_sharp_french_chest_can_be_confirmed_after_hud_rescaling():
     defaults = settings.DEFAULTS["detector"]
     E.configure(dict(defaults, languages=["fr"]))

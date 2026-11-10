@@ -523,9 +523,16 @@ class ChestEstimator:
         if recovered is not None:
             cy, cx, kind = recovered
             s, tid = 1.0, "fr:COFFRE"
+        near_french = []
+        if tid == "fr:COFFRE":
+            th, tw = self.french_template.shape
+            near_french = [p for p in self.pending_scaled if p["template"] == tid
+                           and t - p["onset"] <= SCALED_WAIT
+                           and abs(p["y"] - cy) <= th + 1 and abs(p["x"] - cx) <= tw]
         if self.scaled_onset.update(t, max(score, SCALED_TRIGGER) if recovered is not None else score, cy, cx):
             owned = self.french_group is not None and tid == "fr:COFFRE" and self.french_group.owns(cy, cx)
-            if not owned and not any(abs(o - t) <= SCALED_WAIT for o in self.exact_onsets) and \
+            same_french_line = any(p.get("confirmed") or recovered is not None for p in near_french)
+            if not (owned or same_french_line) and not any(abs(o - t) <= SCALED_WAIT for o in self.exact_onsets) and \
                     not any(abs(p["onset"] - t) <= POPUP_FINISH_DELAY for p in self.pending_popups):
                 self.pending_scaled.append({"onset": t, "blur": score, "scale": s, "y": cy, "x": cx, "template": tid})
                 if tid == "fr:COFFRE":
@@ -541,11 +548,8 @@ class ChestEstimator:
         if recovered is not None:
             # The first flash can shift horizontally before the word settles. Associate the reading
             # with just the closest pending opening on that XP line, within one word's width.
-            th, tw = self.french_template.shape
-            candidate = min((p for p in self.pending_scaled if p["template"] == "fr:COFFRE"
-                             and t <= p["onset"] + SCALED_WAIT
-                             and abs(p["y"] - cy) <= th + 1 and abs(p["x"] - cx) <= tw),
-                            key=lambda p: (abs(p["y"] - cy) + abs(p["x"] - cx), -p["onset"]), default=None)
+            candidate = min(near_french, key=lambda p: (abs(p["y"] - cy) + abs(p["x"] - cx), -p["onset"]),
+                            default=None)
             if candidate is not None:
                 candidate["confirmed"] = True
                 if kind != chest_types.UNKNOWN:
