@@ -51,6 +51,11 @@ def profile_state_path(base_state_path, profile_id):
     return Path(base_state_path).parent / "profiles" / f"{profile_id}.json"
 
 
+def history_folder(base_state_path, profile_id):
+    """A profile's match history. Named by id, so renaming the profile never moves it."""
+    return Path(base_state_path).parent / "history" / profile_id
+
+
 def _default_entry():
     return {"id": DEFAULT_ID, "name": DEFAULT_NAME, "created_at": None, "source": {}}
 
@@ -217,20 +222,44 @@ def rename(base_state_path, profile_id, name):
     return entry
 
 
+def _set_history_aside(base_state_path, profile_id):
+    """Done first, so a locked history stops the delete with nothing changed, and a new profile reusing this id starts empty."""
+    history = history_folder(base_state_path, profile_id)
+    if not history.exists():
+        return None
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    kept, n = history.parent / "deleted" / f"{profile_id}-{stamp}", 2
+    while kept.exists():
+        kept, n = history.parent / "deleted" / f"{profile_id}-{stamp}-{n}", n + 1
+    try:
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        history.replace(kept)
+    except OSError as error:
+        raise ProfileError(f"The profile's match history is in use and could not be moved ({error}). Nothing was deleted.") from error
+    return kept
+
+
 def delete(base_state_path, profile_id):
-    """Removes a profile (never the Default one). Its counter file is moved to state/profiles/deleted/, not erased.
-    Deleting the active profile makes Default active. -> where the counter file went, or None if it had none."""
+    """Removes a profile (never the Default one). Its counter file is moved to state/profiles/deleted/ and its match history
+    to state/history/deleted/, neither erased. Deleting the active profile makes Default active.
+    -> where the counter file went, or None if it had none."""
     if profile_id == DEFAULT_ID:
         raise ProfileError("The Default profile cannot be deleted (you can reset its counts instead).")
     reg = load(base_state_path)
     get(reg, profile_id)
     source = profile_state_path(base_state_path, profile_id)
+    kept = _set_history_aside(base_state_path, profile_id)
     moved = None
-    if source.exists():
-        folder = source.parent / "deleted"
-        folder.mkdir(parents=True, exist_ok=True)
-        moved = folder / f"{profile_id}-{time.strftime('%Y%m%d_%H%M%S')}.json"
-        source.replace(moved)
+    try:
+        if source.exists():
+            folder = source.parent / "deleted"
+            folder.mkdir(parents=True, exist_ok=True)
+            moved = folder / f"{profile_id}-{time.strftime('%Y%m%d_%H%M%S')}.json"
+            source.replace(moved)
+    except OSError:
+        if kept is not None:
+            kept.replace(history_folder(base_state_path, profile_id))
+        raise
     reg["profiles"] = [p for p in reg["profiles"] if p["id"] != profile_id]
     if reg["active"] == profile_id:
         reg["active"] = DEFAULT_ID
