@@ -128,7 +128,7 @@ LANGUAGE_CHOICES = (
     ("English", ["en"]),
     ("Portuguese (Brazil)", ["pt"]),
     ("Both (English + Portuguese (Brazil))", ["en", "pt"]),
-    ("Français", ["fr"]),
+    ("French", ["fr"]),
 )
 
 

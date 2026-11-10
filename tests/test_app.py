@@ -292,7 +292,7 @@ def test_child_process_flags_hide_consoles_only_when_asked_or_windowless():
 
 def test_language_choices_map_to_the_detector_setting_and_back():
     names = [name for name, _ in settings.LANGUAGE_CHOICES]
-    assert names == ["English", "Portuguese (Brazil)", "Both (English + Portuguese (Brazil))", "Français"]
+    assert names == ["English", "Portuguese (Brazil)", "Both (English + Portuguese (Brazil))", "French"]
     for i, (_, langs) in enumerate(settings.LANGUAGE_CHOICES):
         assert settings.language_choice(langs) == i
     assert settings.language_choice(["pt", "en"]) == 2                 # order does not matter

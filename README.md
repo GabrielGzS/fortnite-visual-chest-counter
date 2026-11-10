@@ -196,8 +196,8 @@ can, a diagnostic capture.
 
 - **APPROX is an estimate** and can be slightly high or low. CERTAIN is the conservative number.
 - **Language-specific:** chest detection reads the word in the pop-up: English (CHEST), Brazilian Portuguese (BAÚ), or
-  French (COFFRE). Chest **types** (normal / rare / sprite) are read for English pop-ups only and are
-  shown as "unknown type" when the line cannot be read reliably; types are a label, never a count.
+  French (COFFRE). The counter reads chest **types** (normal / rare / sprite) from English and French pop-ups.
+  It shows "unknown type" when it cannot classify the line reliably.
 - **HUD layout/scale:** assumes a 16:9 picture with the HUD in its usual place. For **English** pop-ups a HUD drawn larger
   (up to about 1.3x) or smaller (about 0.8x, tested on one stream) is recognised; those chests count in **APPROX only**,
   never CERTAIN. Other HUD sizes, a moved or hidden HUD, Portuguese pop-ups on a non-standard HUD, and 4:3 / vertical
@@ -290,7 +290,7 @@ All frames are processed in memory with a latest-frame policy (no growing queue)
 
 Python 3.11+, FFmpeg on PATH when running from source.
 
-On Windows, after setting up the local environment below, double-click **Lancer le compteur.cmd**. Select **Français**
+On Windows, after setting up the local environment below, double-click **Launch Chest Counter.cmd**. Select **French**
 in **Settings → Fortnite language** for the French HUD. The Dashboard shows **Certain**, **Approx** (estimated openings
 only), and **Total** across the selected video sources. The Pirate Shop Token estimate uses that total, a normal-match
 rate of one in 137,500 per chest, and the selected boost. See the
