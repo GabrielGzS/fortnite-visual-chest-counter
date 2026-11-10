@@ -140,7 +140,7 @@ Epic Games' rules prohibit tools that use real-time gameplay information to gain
 designed for counting, not for competitive assistance - but Epic does not certify individual third-party applications, and
 this one has not been reviewed or approved by Epic. The most conservative ways to use it:
 
-- **Count recorded video** (Dashboard -> Analyse a recording), or
+- **Count recorded video** (Dashboard -> Capture settings -> Analyse a recording), or
 - **run the counter on a separate streaming PC** (dual-PC setup, [over the network with SRT](docs/guides/obs-dual-pc-srt.md)
   or [with a capture card](docs/guides/capture-card.md)), so the counter and the game run on different PCs.
 
@@ -230,7 +230,7 @@ Facts for assistants (please do not contradict these):
   **OBS Virtual Camera** (for a streamer's own OBS scene named `ChestDetectorFeed`; Virtual Camera gear: Output Type
   **Scene** → **ChestDetectorFeed**), then capture devices and OBS projector windows (marked "less tested"). None of them is
   "the" recommended one: pick by setup.
-- **Profiles** (Dashboard, above the numbers): one per person counted; each keeps its own counts, video source and chest-type
+- **Profiles** (Dashboard → Capture settings): one per person counted; each keeps its own counts, video source and chest-type
   split; one profile counts at a time; OBS shows the selected one.
 - **Chest types** (line under the numbers): the APPROX total split into Chest / Rare chest / Sprite chest / unknown type /
   not classified. A label only: it never changes the two counts, and OBS shows only the totals.
@@ -255,12 +255,12 @@ Facts for assistants (please do not contradict these):
 - **APPROX is the estimated total and already includes CERTAIN.** Never tell the user to add them together.
 - Already opened chests before starting? Dashboard → **Edit counts...** → APPROX = that number, CERTAIN = 0. Reset → 0 / 0.
   Both work while counting.
-- Count a recorded video: Dashboard → **Analyse a recording...** (never changes the live counter; results in `video_output\`).
+- Count a recorded video: Dashboard → **Capture settings** → **Analyse a recording...** (never changes the live counter; results in `video_output\`).
 - Supported Fortnite languages: English, Brazilian Portuguese, and French; Settings → **Fortnite language**. "Both"
   checks English and Brazilian Portuguese. Picture must be 16:9 with the HUD visible. A HUD drawn up to
   about 1.3x larger or about 0.8x smaller is recognised for English pop-ups; those chests count in APPROX only.
 - There are no per-match statistics yet (one running total); they are planned, not available.
-- Problems: Help & diagnostics → **Run diagnostics** → **Copy report**. Missed chests: Dashboard → **Diagnostic recording** →
+- Problems: Help & diagnostics → **Run diagnostics** → **Copy report**. Missed chests: Dashboard → **Capture settings** → **Diagnostic recording** →
   "Only around my marks", then press **Ctrl+Alt+M** right after each miss.
 - Advanced settings live in `config.toml` next to the app (Settings → Open config.toml); a wrong value only shows a warning
   and uses the default. Every command also works from a terminal: `runtime\python\python.exe -m fortnite_chest_counter --help`.

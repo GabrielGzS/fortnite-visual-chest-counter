@@ -333,12 +333,12 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             win.set_counts(5, 10)
             assert win.dashboard.certain.value.text() == "5"
             assert win.dashboard.approx.value.text() == "5"
-            assert win.dashboard.total.value.text() == "10"
-            assert "0.007272% · 10 chests" in win.dashboard.token_odds.text()
+            assert win.dashboard.total.text() == "10"
+            assert win.dashboard.token_odds.text() == "0.007272%"
             win.dashboard.token_boost.setCurrentIndex(1)
-            assert "0.010909% · 10 chests · Boost ×1.5" in win.dashboard.token_odds.text()
+            assert win.dashboard.token_odds.text() == "0.010909%"
             win.dashboard.token_boost.setCurrentIndex(2)
-            assert "0.014545% · 10 chests · Boost ×2" in win.dashboard.token_odds.text()
+            assert win.dashboard.token_odds.text() == "0.014545%"
             win.dashboard.token_boost.setCurrentIndex(0)
             win.overlay.show_screen_overlay.setChecked(True)
             overlay = win.dashboard.screen_overlay
@@ -347,18 +347,18 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             assert win.overlay.share_screen_overlay.isEnabled()
             assert not win.overlay.share_screen_overlay.isChecked()
             win.overlay.share_screen_overlay.setChecked(True)
-            assert overlay.text().splitlines() == [
+            assert overlay.caption.text().splitlines() == [
                 "CERTAIN OPENED CHESTS: 5", "APPROX. OPENED CHESTS: 5 · Total: 10",
                 "Pirate Token · 0.007272%",
             ]
             win.dashboard.token_mode.setCurrentText("Squad")
-            assert "0.007272% · 10 chests" in win.dashboard.token_odds.text()
+            assert win.dashboard.token_odds.text() == "0.007272%"
             win.dashboard.token_mode.setCurrentText("Solo")
-            assert "0.007272% · 10 chests" in win.dashboard.token_odds.text()
+            assert win.dashboard.token_odds.text() == "0.007272%"
             win._set(0, 0, "reset")
             win.dashboard.token_mode.setCurrentText("Duo")
-            assert "0.000000% · 0 chests" in win.dashboard.token_odds.text()
-            assert "0.000000%" in overlay.text()
+            assert win.dashboard.token_odds.text() == "0.000000%"
+            assert "0.000000%" in overlay.caption.text()
             win.overlay.mode_buttons["certain"].setChecked(True)
             win.overlay.token_text.setText("Odds: #")
             win.overlay.total_text.setText("Opened #")
@@ -366,16 +366,16 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             win.primary_types = {"unclassified": {"certain": 0, "approx": 3}}
             win.refresh_types()
             win.overlay.apply()
-            assert overlay.text().splitlines() == [
+            assert overlay.caption.text().splitlines() == [
                 "CERTAIN OPENED CHESTS: 0 · Opened 0", "Odds: 0.000000%",
                 "Chest types: not classified 3",
             ]
-            assert win.overlay.preview.text() == overlay.text()
-            assert win.dashboard.viewers.text() == overlay.text().replace("\n", "   /   ")
+            assert win.overlay.preview.caption.text() == overlay.caption.text()
+            assert win.dashboard.viewers.text() == overlay.caption.text().replace("\n", "   /   ")
             win.overlay.show_token.setChecked(False)
             win.overlay.apply()
-            assert "Odds:" not in overlay.text()
-            assert "Opened 0" in overlay.text()
+            assert "Odds:" not in overlay.caption.text()
+            assert "Opened 0" in overlay.caption.text()
             win.overlay.show_screen_overlay.setChecked(False)
             assert overlay.isHidden()
             assert not win.overlay.share_screen_overlay.isEnabled()
@@ -509,9 +509,9 @@ def test_second_source_combines_counts_resets_and_can_stop_independently():
             win.handle({"type": "counts", "certain": 5, "approx": 10})
             win.handle_secondary({"type": "counts", "certain": 2, "approx": 4})
             assert win.counts == (7, 14)
-            assert "14 chests" in dashboard.token_odds.text()
+            assert dashboard.token_odds.text() == "0.010181%"
             assert dashboard.token_mode.currentText() == "Duo"
-            assert dashboard.approx.value.text() == "7" and dashboard.total.value.text() == "14"
+            assert dashboard.approx.value.text() == "7" and dashboard.total.text() == "14"
             assert "Total: 14" in dashboard.viewers.text() and "Pirate Token" in dashboard.viewers.text()
             win.reset_counts()
             assert win.worker.commands == ["reset"] and win.secondary_worker.commands == ["reset"]
@@ -543,7 +543,7 @@ def test_second_source_combines_counts_resets_and_can_stop_independently():
             secondary.setCurrentIndex(0)
             win.start_counting()
             assert win._workers_pending == {"primary"}
-            assert "0 chests" in dashboard.token_odds.text()
+            assert dashboard.token_odds.text() == "0.000000%"
             win.worker.alive = False
             win.handle({"type": "exit", "code": 0})
             secondary.setCurrentIndex(secondary.findData(screen2))

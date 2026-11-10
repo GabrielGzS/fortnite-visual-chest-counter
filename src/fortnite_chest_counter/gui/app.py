@@ -23,8 +23,8 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, QSize, Qt, QTimer, QUrl, QVariantAnimation
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter, QPalette, QPixmap
+from PySide6.QtCore import QByteArray, QPoint, QRect, QSize, Qt, QTimer, QUrl, QUrlQuery
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
@@ -35,6 +35,7 @@ from fortnite_chest_counter import paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
+from fortnite_chest_counter.gui.chest_illustration import ChestIllustration
 from fortnite_chest_counter.gui.worker import Worker, run_command
 from fortnite_chest_counter.obs import credentials as obs_credentials
 from fortnite_chest_counter.obs.link import TextOutputLink
@@ -370,14 +371,9 @@ class CountCard(QFrame):
         self.setObjectName("countCard")
         self.color = color
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 18, 0)
-        layout.setSpacing(16)
-        bar = QFrame()
-        bar.setFixedWidth(5)
-        bar.setStyleSheet(f"background: {color}; border-top-left-radius: 12px; border-bottom-left-radius: 12px;")
-        layout.addWidget(bar)
+        layout.setContentsMargins(10, 0, 10, 0)
         box = QVBoxLayout()
-        box.setContentsMargins(0, 14, 0, 14)
+        box.setContentsMargins(0, 2, 0, 4)
         box.setSpacing(0)
         box.addWidget(label(title, "countLabel"))
         self.value = label("0", "countValue")
@@ -398,51 +394,21 @@ class CountCard(QFrame):
         self.value.setText(text)
 
 
-class ChestIllustration(QWidget):
-    """A small dashboard illustration, repainted only during a confirmed opening."""
+class ScreenOverlayCard(QFrame):
+    """The same on-screen overlay content in settings and in the floating window."""
 
-    def __init__(self):
-        super().__init__()
-        self.setFixedSize(160, 112)
-        self._lift = 0.0
-        self._opening = QVariantAnimation(self)
-        self._opening.setDuration(480)
-        self._opening.setStartValue(0.0)
-        self._opening.setKeyValueAt(0.36, 1.0)
-        self._opening.setKeyValueAt(0.65, 1.0)
-        self._opening.setEndValue(0.0)
-        self._opening.valueChanged.connect(self._set_lift)
-
-    def _set_lift(self, lift):
-        self._lift = lift
-        self.update()
-
-    def celebrate(self):
-        if self.isVisible():
-            self._opening.stop()
-            self._opening.start()
-
-    def paintEvent(self, event):
-        with QPainter(self) as painter:
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor("#282440"))
-            painter.drawEllipse(QRectF(5, 1, 150, 110))
-            painter.setBrush(QColor("#141323"))
-            painter.drawEllipse(QRectF(27, 94, 106, 10))
-            painter.setBrush(QColor("#6e488b"))
-            painter.drawRoundedRect(QRectF(26, 57, 108, 38), 8, 8)
-            painter.setBrush(QColor("#e4b66a"))
-            for x in (38, 110):
-                painter.drawRoundedRect(QRectF(x, 56, 12, 39), 3, 3)
-            painter.save()
-            painter.translate(0, -18 * self._lift)
-            painter.drawRoundedRect(QRectF(22, 36, 116, 29), 9, 9)
-            painter.setBrush(QColor("#9765b8"))
-            painter.drawRoundedRect(QRectF(29, 41, 102, 15), 5, 5)
-            painter.setBrush(QColor("#f4cf86"))
-            painter.drawRoundedRect(QRectF(70, 56, 20, 16), 4, 4)
-            painter.restore()
+    def __init__(self, flags=Qt.Widget):
+        super().__init__(None, flags)
+        self.setObjectName("overlayBox")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(9, 6, 13, 6)
+        layout.setSpacing(8)
+        self.chest = ChestIllustration(compact=True)
+        layout.addWidget(self.chest)
+        self.caption = label("", "screenOverlayCaption", wrap=True)
+        self.caption.setTextFormat(Qt.PlainText)
+        self.caption.setMaximumWidth(720)
+        layout.addWidget(self.caption, 1)
 
 
 class PreviewPanel(QFrame):
@@ -456,9 +422,9 @@ class PreviewPanel(QFrame):
         self.view.setAlignment(Qt.AlignCenter)
         self.view.setMinimumSize(240, 135)
         self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(self.view, 1)
         self.caption = label(caption, "hint", wrap=True)
         layout.addWidget(self.caption)
+        layout.addWidget(self.view, 1)
         self.image = None
         self.last_frame_at = None
 
@@ -827,6 +793,8 @@ class Dashboard(QWidget):
         self.screen_overlay = None
         self.screen_overlay_display = None
         layout = page_layout(self, "Dashboard", None)
+        layout.setContentsMargins(24, 24, 24, 24)
+        self.findChild(QScrollArea).setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         header = layout.itemAt(0).widget()
         layout.removeWidget(header)
         top = QHBoxLayout()
@@ -862,14 +830,24 @@ class Dashboard(QWidget):
         self.notice.hide()
         layout.addWidget(self.notice)
 
-        sources, sources_layout = card()
+        sources_layout = QVBoxLayout()
+        sources_layout.setSpacing(4)
+        source_row = QHBoxLayout()
         self.source_summary = label("", "hint", wrap=True)
         self.source_summary.setTextFormat(Qt.PlainText)
-        sources_layout.addWidget(self.source_summary)
+        source_row.addWidget(self.source_summary, 1)
+        self.show_capture = button("Capture settings", "toggle")
+        self.show_capture.setCheckable(True)
+        source_row.addWidget(self.show_capture)
+        sources_layout.addLayout(source_row)
+        self.metrics = label("", "metrics", wrap=True)
+        self.metrics.hide()
+        sources_layout.addWidget(self.metrics)
         self.secondary_status = label("", "hint", wrap=True)
         self.secondary_status.hide()
         sources_layout.addWidget(self.secondary_status)
-        layout.addWidget(sources)
+        layout.addLayout(sources_layout)
+        capture_index = layout.count()
 
         board = QHBoxLayout()
         board.setSpacing(14)
@@ -877,7 +855,7 @@ class Dashboard(QWidget):
         stage.setObjectName("chestStage")
         stage_layout.addStretch(1)
         self.chest = ChestIllustration()
-        stage_layout.addWidget(self.chest, 0, Qt.AlignHCenter)
+        stage_layout.addWidget(self.chest)
         total_title = label("TOTAL CHESTS", "countLabel")
         stage_layout.addWidget(total_title, 0, Qt.AlignHCenter)
         self.total = label("0", "stageTotal")
@@ -915,6 +893,7 @@ class Dashboard(QWidget):
         counts.addWidget(self.certain, 1)
         counts.addWidget(self.approx, 1)
         rail_layout.addLayout(counts)
+        rail_layout.addWidget(hline())
         rail_layout.addWidget(label("Recent openings", "cardTitle"))
         self.recent = QListWidget()
         self.recent.setObjectName("recentOpenings")
@@ -959,6 +938,8 @@ class Dashboard(QWidget):
                                 "streamer). One profile counts at a time; OBS always shows the selected profile.")
         self.profile.activated.connect(win.switch_profile)
         prow.addWidget(self.profile, 1)
+        box_layout.addLayout(prow)
+        prow = QHBoxLayout()
         self.profile_new = button("New profile...", tip="A new profile with its own counts, starting at 0",
                                   on_click=win.new_profile)
         self.profile_rename = button("Rename...", tip="Change the name of the selected profile (its counts stay)",
@@ -974,7 +955,7 @@ class Dashboard(QWidget):
         row.addWidget(label("Video source"))
         self.source = QComboBox()
         self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.source.setMinimumContentsLength(24)
+        self.source.setMinimumContentsLength(12)
         self.source.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         row.addWidget(self.source, 1)
         self.refresh = button("Refresh", tip="Look for video devices and screens again", on_click=win.refresh_sources)
@@ -984,7 +965,7 @@ class Dashboard(QWidget):
         row.addWidget(label("Second video source"))
         self.secondary_source = QComboBox()
         self.secondary_source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.secondary_source.setMinimumContentsLength(24)
+        self.secondary_source.setMinimumContentsLength(12)
         self.secondary_source.addItem("None (optional)")
         self.secondary_source.setToolTip("Count a teammate's video too. For Discord, play the stream fullscreen on a separate "
                                          "screen or send it to an OBS Virtual Camera or Windowed Projector.")
@@ -992,8 +973,8 @@ class Dashboard(QWidget):
         row.addWidget(self.secondary_source, 1)
         box_layout.addLayout(row)
         self.source.currentTextChanged.connect(self.update_source_summary)
+        self.source.currentIndexChanged.connect(lambda _: self.clear_recent(source=1))
         self.secondary_source.currentTextChanged.connect(self.update_source_summary)
-        self.update_source_summary()
         self.url_row = QWidget()                            # only for "Livestream URL"
         url_layout = QVBoxLayout(self.url_row)
         url_layout.setContentsMargins(0, 0, 0, 0)
@@ -1002,6 +983,8 @@ class Dashboard(QWidget):
         self.url.setPlaceholderText("Paste the live link, e.g.  https://www.twitch.tv/channel  or  "
                                     "https://www.youtube.com/watch?v=...")
         url_layout.addWidget(self.url)
+        self.url.textChanged.connect(self.update_source_summary)
+        self.update_source_summary()
         stab = QHBoxLayout()
         stab.addWidget(label("Stream stability"))
         self.stability = QComboBox()
@@ -1027,13 +1010,9 @@ class Dashboard(QWidget):
         self.source_hint = label("", "hint", wrap=True)
         box_layout.addWidget(self.source_hint)
         box_layout.addWidget(hline())
-        row = QHBoxLayout()
-        self.metrics = label("Not counting.", "metrics", wrap=True)
-        row.addWidget(self.metrics, 1)
         self.analyse = button("Analyse a recording...", tip="Count the chests in a video file (does not change your counter)",
                               on_click=win.analyse_video)
-        row.addWidget(self.analyse)
-        box_layout.addLayout(row)
+        box_layout.addWidget(self.analyse, 0, Qt.AlignLeft)
         row = QHBoxLayout()
         row.addWidget(label("Diagnostic recording"))
         self.rec_mode = QComboBox()
@@ -1049,11 +1028,8 @@ class Dashboard(QWidget):
         box_layout.addWidget(self.rec_status)
         # optional panels
         row = QHBoxLayout()
-        capture = button("Capture settings", "toggle")
-        capture.setCheckable(True)
         box.hide()
-        capture.toggled.connect(box.setVisible)
-        row.addWidget(capture)
+        self.show_capture.toggled.connect(box.setVisible)
         self.show_log = button("Activity", "toggle", tip="What the counter sees and decides, live")
         self.show_log.setCheckable(True)
         self.show_preview = button("Live preview", "toggle", tip="The video the counter is analysing")
@@ -1072,7 +1048,7 @@ class Dashboard(QWidget):
                                 on_click=win.open_logs)
         row.addWidget(self.open_logs)
         layout.addLayout(row)
-        layout.addWidget(box)
+        layout.insertWidget(capture_index, box)
 
         self.split = QSplitter(Qt.Horizontal)
         self.log = QPlainTextEdit()
@@ -1102,10 +1078,28 @@ class Dashboard(QWidget):
     def update_source_summary(self):
         primary = self.source.currentText() or "Scanning..."
         secondary = self.secondary_source.currentText() or "None (optional)"
-        self.source_summary.setText(f"Source 1  ·  {primary}     |     Source 2  ·  {secondary}")
+        profile = self.profile.currentText()
+        if (self.source.currentData() or {}).get("source") == "stream":
+            url = QUrl(self.url.text())
+            if url.host():
+                primary = url.host() + url.path()
+                if url.host().lower().removeprefix("www.") == "youtube.com" and url.path() == "/watch":
+                    video = QUrlQuery(url).queryItemValue("v")
+                    if video:
+                        primary += f"?v={video}"
+        self.source_summary.setText(f"{profile + '  |  ' if profile else ''}"
+                                    f"Source 1  ·  {primary}  |  Source 2  ·  {secondary}")
 
-    def clear_recent(self):
-        self.recent.clear()
+    def clear_recent(self, source=None):
+        if source is None:
+            self.recent.clear()
+        else:
+            for index in reversed(range(self.recent.count())):
+                data = self.recent.item(index).data(Qt.UserRole)
+                if data and data["source"] == source:
+                    self.recent.takeItem(index)
+        if self.recent.count():
+            return
         item = QListWidgetItem("Open a chest in Fortnite to see it here.")
         item.setForeground(QColor(theme.MUTED))
         self.recent.addItem(item)
@@ -1126,13 +1120,21 @@ class Dashboard(QWidget):
         if self.recent.item(0).data(Qt.UserRole) is None:
             self.recent.clear()
         item = QListWidgetItem()
-        self._describe_opening(item, {**message, "source": source})
-        self.recent.insertItem(0, item)
+        data = {**message, "source": source}
+        self._describe_opening(item, data)
+        index = 0
+        emitted_at = data.get("emitted_at", 0)
+        while index < self.recent.count() and self.recent.item(index).data(Qt.UserRole).get("emitted_at", 0) > emitted_at:
+            index += 1
+        self.recent.insertItem(index, item)
         if self.recent.count() > 20:
             self.recent.takeItem(20)
         self.recent.scrollToTop()
         if verdict == "certain":
             self.chest.celebrate()
+            if self.screen_overlay is not None:
+                self.screen_overlay.chest.celebrate()
+            self.win.overlay.preview.chest.celebrate()
 
     @staticmethod
     def _describe_opening(item, data):
@@ -1160,11 +1162,8 @@ class Dashboard(QWidget):
         if self.screen_overlay is None:
             flags = (Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
                      | Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus)
-            self.screen_overlay = QLabel(None, flags)
+            self.screen_overlay = ScreenOverlayCard(flags)
             self.screen_overlay.setAttribute(Qt.WA_ShowWithoutActivating)
-            self.screen_overlay.setTextFormat(Qt.PlainText)
-            self.screen_overlay.setStyleSheet("background: #141924; color: #ffffff; padding: 10px 16px; "
-                                              "font-size: 16px; font-weight: 600;")
         self.reload_screen_overlay()
         self.screen_overlay.show()
         self.apply_screen_overlay_capture()
@@ -1209,8 +1208,8 @@ class Dashboard(QWidget):
             self.viewers.setText(summary)
         if self.screen_overlay is None or not page.show_screen_overlay.isChecked():
             return
-        if text != self.screen_overlay.text():
-            self.screen_overlay.setText(text)
+        if text != self.screen_overlay.caption.text():
+            self.screen_overlay.caption.setText(text)
             self.screen_overlay.adjustSize()
             self.position_screen_overlay()
 
@@ -1233,7 +1232,7 @@ class Dashboard(QWidget):
         self.log.setVisible(self.show_log.isChecked())
         self.preview_group.setVisible(self.show_preview.isChecked())
         self.secondary_preview.setVisible(self.win.secondary_selected)
-        for widget in (self.detail, self.clear):
+        for widget in (self.detail, self.clear, self.open_logs):
             widget.setVisible(self.show_log.isChecked())
         self.split.setVisible(self.show_log.isChecked() or self.show_preview.isChecked())
         self.win.preview_visibility_changed()
@@ -1323,8 +1322,7 @@ class OverlayPage(QWidget):
         layout.addWidget(box)
 
         box, box_layout = card("On-screen preview", "Preview of the overlay using the current counts.")
-        self.preview = label("", "overlayBox")
-        self.preview.setTextFormat(Qt.PlainText)
+        self.preview = ScreenOverlayCard()
         box_layout.addWidget(self.preview)
         layout.addWidget(box)
 
@@ -1567,7 +1565,7 @@ class OverlayPage(QWidget):
 
     def refresh_preview(self):
         display = {**self.display, **self.changes()}
-        self.preview.setText(self.win.dashboard.screen_overlay_text(display))
+        self.preview.caption.setText(self.win.dashboard.screen_overlay_text(display))
 
     def _defaults(self):
         d = settings.DEFAULTS["display"]
@@ -2046,7 +2044,8 @@ class MainWindow(QMainWindow):
         outer = QHBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        outer.addWidget(self._sidebar())
+        self.sidebar = self._sidebar()
+        outer.addWidget(self.sidebar)
         self.pages = QStackedWidget()
         self.dashboard = Dashboard(self)
         self.overlay = OverlayPage(self)
@@ -2102,19 +2101,18 @@ class MainWindow(QMainWindow):
         side.setObjectName("sidebar")
         side.setFixedWidth(214)
         layout = QVBoxLayout(side)
-        layout.setContentsMargins(0, 18, 0, 14)
-        layout.setSpacing(6)
-        brand = QHBoxLayout()
-        brand.setContentsMargins(18, 0, 12, 10)
-        logo = QLabel()
-        logo.setPixmap(QPixmap(str(ASSETS / "icon_64.png")).scaled(38, 38, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        brand.addWidget(logo)
-        names = QVBoxLayout()
-        names.setSpacing(0)
-        names.addWidget(label("Chest Counter", "brandName"))
-        names.addWidget(label("Fortnite Visual", "brandSub"))
-        brand.addLayout(names, 1)
-        layout.addLayout(brand)
+        layout.setContentsMargins(8, 16, 8, 14)
+        layout.setSpacing(8)
+        header = QHBoxLayout()
+        self.menu_toggle = button("\u2630", "menuToggle", tip="Toggle navigation", on_click=self.toggle_navigation)
+        self.menu_toggle.setCheckable(True)
+        self.menu_toggle.setChecked(True)
+        self.menu_toggle.setAccessibleName("Toggle navigation")
+        self.menu_toggle.setFixedSize(36, 36)
+        header.addWidget(self.menu_toggle)
+        self.brand = label("Chest Counter", "brandName")
+        header.addWidget(self.brand, 1)
+        layout.addLayout(header)
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
         for name in ("Dashboard", "Overlay", "Settings", "Help & diagnostics"):
@@ -2122,13 +2120,22 @@ class MainWindow(QMainWindow):
         self.nav.setCurrentRow(0)
         self.nav.currentRowChanged.connect(self._page_changed)
         layout.addWidget(self.nav, 1)
+        layout.addStretch()
         self.update_link = button("", "link", on_click=self.open_update_dialog)
         self.update_link.hide()
         layout.addWidget(self.update_link)
-        version = label(f"v{__version__} · {RELEASE_CHANNEL}", "version")
-        version.setContentsMargins(20, 0, 0, 0)
-        layout.addWidget(version)
+        self.nav_version = label(f"v{__version__} · {RELEASE_CHANNEL}", "version")
+        self.nav_version.setContentsMargins(8, 0, 0, 0)
+        layout.addWidget(self.nav_version)
         return side
+
+    def toggle_navigation(self):
+        expanded = self.menu_toggle.isChecked()
+        self.sidebar.setFixedWidth(214 if expanded else 54)
+        for widget in (self.brand, self.nav, self.nav_version):
+            widget.setVisible(expanded)
+        self.update_link.setVisible(expanded and bool(self.update_link.text()))
+        self.menu_toggle.setToolTip("Collapse navigation" if expanded else "Expand navigation")
 
     def go_to(self, index):
         self.nav.setCurrentRow(index)
@@ -2249,6 +2256,7 @@ class MainWindow(QMainWindow):
         if save and (source is None or source["source"] != "file"):
             self.save_app_option("secondary_source", json.dumps(source, sort_keys=True))
         self.secondary_selected = source is not None
+        self.dashboard.clear_recent(source=2)
         self.dashboard.secondary_status.hide()
         self.dashboard.secondary_preview.clear()
         self.dashboard.secondary_preview.setVisible(self.secondary_selected)
@@ -2321,6 +2329,7 @@ class MainWindow(QMainWindow):
             box.addItem(p["name"], p["id"])
         box.setCurrentIndex(max(box.findData(reg["active"]), 0))
         box.blockSignals(False)
+        self.dashboard.update_source_summary()
         self.dashboard.profile_delete.setEnabled(reg["active"] != profiles.DEFAULT_ID and not self.workers_active())
         name = profiles.active(reg)["name"]
         self.setWindowTitle(APP_NAME if len(reg["profiles"]) == 1 else f"{APP_NAME}  -  {name}")
@@ -2459,6 +2468,8 @@ class MainWindow(QMainWindow):
             if data["source"] == "stream":
                 url = self.dashboard.url.text().strip()
                 if not url.lower().startswith(("http://", "https://")) or any(c.isspace() for c in url):
+                    self.dashboard.show_capture.setChecked(True)
+                    self.dashboard.url.setFocus()
                     show_error(self, "Paste the full link of the live stream, for example\n"
                                      "https://www.twitch.tv/channel  or  https://www.youtube.com/watch?v=...")
                     return
@@ -2470,6 +2481,8 @@ class MainWindow(QMainWindow):
             except (C.UserError, OSError, profiles.ProfileError) as error:
                 show_error(self, f"Could not save the video source choice: {error}")
                 return
+        if data["source"] == "stream" and url != cfg["live"]["url"]:
+            self.dashboard.clear_recent(source=1)
         self.dashboard.banner.hide()
         self.dashboard.secondary_status.hide()
         self.error_seen = False
@@ -2548,7 +2561,7 @@ class MainWindow(QMainWindow):
         if not running:
             self.started_at = None
             self.stream_state = None
-            d.metrics.setText("Not counting.")
+            d.metrics.hide()
             d.preview.view.setStyleSheet("")
             d.preview.clear()
             d.secondary_preview.clear()
@@ -2616,7 +2629,7 @@ class MainWindow(QMainWindow):
         m = self.updates
         text = m.indicator_text()
         self.update_link.setText(text)
-        self.update_link.setVisible(bool(text))
+        self.update_link.setVisible(self.menu_toggle.isChecked() and bool(text))
         self.settings_page.update_status.setText(m.check_message)
         self.settings_page.check_button.setEnabled(not m.busy())
         self.dashboard.start.setEnabled(m.state != UM.INSTALLING and self.mode != "stopping")
@@ -2746,6 +2759,7 @@ class MainWindow(QMainWindow):
             self.primary_types = message.get("breakdown") or {}
             self.refresh_types()
         elif kind == "reset":
+            self.dashboard.clear_recent(source=1)
             self._pending_resets.discard("primary")
         elif kind == "stream":
             self.show_stream_state(message.get("state"))
@@ -2817,6 +2831,7 @@ class MainWindow(QMainWindow):
             self.secondary_types = message.get("breakdown") or {}
             self.refresh_types()
         elif kind == "reset":
+            self.dashboard.clear_recent(source=2)
             self._pending_resets.discard("secondary")
         elif kind == "error":
             self._secondary_failed = True
@@ -2958,6 +2973,7 @@ class MainWindow(QMainWindow):
                 if s.get("dropped"):
                     parts.append(f"{fmt(s['dropped'])} skipped")
             self.dashboard.metrics.setText("   ·   ".join(parts))
+            self.dashboard.metrics.show()
 
     # ---- activity log
     def add_log(self, message):
@@ -3065,6 +3081,7 @@ class MainWindow(QMainWindow):
         except (C.UserError, OSError) as error:
             show_error(self, f"Could not reset the second video source: {error}")
             return
+        self.dashboard.clear_recent(source=2)
         self.read_secondary_state()
 
     def _set(self, certain, approx, action):
@@ -3074,6 +3091,8 @@ class MainWindow(QMainWindow):
             show_error(self, str(error))
             return
         self.set_counts(session.state["certain"], session.state["approximate"], flash=True)
+        if action == "reset":
+            self.dashboard.clear_recent(source=1)
         what = "reset to 0" if action == "reset" else f"set to CERTAIN {fmt(certain)} / APPROX {fmt(approx)}"
         self.add_log({"type": "info", "text": f"Counter {what}."
                       + (" The running counter picks it up within a second." if self.worker.running() else "")})
@@ -3087,7 +3106,7 @@ class MainWindow(QMainWindow):
         if self.mark_available():
             return self.worker.send("mark")
         why = ("start counting first" if self.mode != "counting" else
-               "diagnostic recording is off - choose 'Only around my marks' on the Dashboard (it keeps the 30 s before "
+               "diagnostic recording is off - choose 'Only around my marks' in Dashboard > Capture settings (it keeps the 30 s before "
                "each mark)")
         self.add_log({"type": "warn", "text": f"Mark not saved: {why}."})
         self.dashboard.rec_status.setText(f"Mark not saved: {why}.")
@@ -3248,7 +3267,7 @@ def _palette():
     palette = QPalette()
     for role, color in ((QPalette.Window, theme.BG), (QPalette.WindowText, theme.TEXT), (QPalette.Base, theme.SURFACE_2),
                         (QPalette.AlternateBase, theme.SURFACE), (QPalette.Text, theme.TEXT), (QPalette.Button, theme.SURFACE_2),
-                        (QPalette.ButtonText, theme.TEXT), (QPalette.Highlight, theme.ACCENT), (QPalette.HighlightedText, "#ffffff"),
+                        (QPalette.ButtonText, theme.TEXT), (QPalette.Highlight, theme.SURFACE_3), (QPalette.HighlightedText, theme.TEXT),
                         (QPalette.ToolTipBase, theme.SURFACE_3), (QPalette.ToolTipText, theme.TEXT),
                         (QPalette.PlaceholderText, theme.DIM), (QPalette.Link, theme.ACCENT)):
         palette.setColor(role, QColor(color))

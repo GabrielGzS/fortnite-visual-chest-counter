@@ -1,22 +1,26 @@
-"""Colours and the Qt style sheet of the desktop app (one dark theme, in the spirit of OBS)."""
+"""Tonal surfaces and expressive shapes for the Windows counter."""
 
-BG = "#111318"
-SIDEBAR = "#0b0d11"
-SURFACE = "#191c23"
-SURFACE_2 = "#20242d"
-SURFACE_3 = "#2a2f3a"
-BORDER = "#2b303b"
-TEXT = "#e8eaee"
-MUTED = "#8c94a4"
-DIM = "#5f6776"
-ACCENT = "#5b8cff"
-ACCENT_HOVER = "#7aa2ff"
-CERTAIN = "#34d399"
-APPROX = "#fbbf24"
+BG = "#1c1814"
+SIDEBAR = "#211c17"
+SURFACE = "#2b241e"
+SURFACE_2 = "#352c24"
+SURFACE_3 = "#43372c"
+BORDER = "#534438"
+TEXT = "#f6eee5"
+MUTED = "#c8b7a6"
+DIM = "#ac9784"
+ACCENT = "#ffd2a1"
+ACCENT_HOVER = "#ffe1bd"
+CERTAIN = "#62ddb0"
+APPROX = "#f0bd70"
 REJECT = "#f87171"
 DANGER = "#ef4444"
 WARN = "#c084fc"
 INFO = "#67c7e8"
+CHEST_EMBER = "#e8663c"
+CHEST_METAL = "#f4b42a"
+STAGE = "#34251c"
+STAGE_MOTIF = "#5b3a29"
 
 LOG_COLORS = {"certain": CERTAIN, "approx": APPROX, "rejected": REJECT, "generic": DIM, "info": INFO, "warn": WARN,
               "error": REJECT, "line": MUTED, "status": DIM, "detail": DIM}
@@ -26,65 +30,76 @@ STYLE = f"""
 QMainWindow, QDialog, #page {{ background: {BG}; }}
 QToolTip {{ background: {SURFACE_3}; color: {TEXT}; border: 1px solid {BORDER}; padding: 4px 6px; }}
 
-#sidebar {{ background: {SIDEBAR}; border-right: 1px solid {BORDER}; }}
-#brandName {{ font-size: 11pt; font-weight: 600; }}
+#sidebar {{ background: {SIDEBAR}; border-right: 1px solid {SURFACE_2}; }}
+#brandName {{ font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 17pt; }}
+#menuToggle {{ padding: 0; font-size: 16pt; border-radius: 18px; }}
 #brandSub {{ color: {MUTED}; font-size: 8.5pt; }}
 #nav {{ background: transparent; border: none; outline: none; }}
-#nav::item {{ padding: 9px 12px; margin: 2px 8px; border-radius: 6px; color: {MUTED}; }}
+#nav::item {{ padding: 10px 14px; margin: 2px 4px; border-radius: 18px; color: {MUTED}; }}
 #nav::item:hover {{ background: {SURFACE}; color: {TEXT}; }}
-#nav::item:selected {{ background: {SURFACE_2}; color: {TEXT}; }}
+#nav::item:selected {{ background: {SURFACE_3}; color: {ACCENT}; font-weight: 600; }}
 #version {{ color: {DIM}; font-size: 8.5pt; }}
 
-#pageTitle {{ font-size: 17pt; font-weight: 600; }}
+#pageTitle {{ font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 25pt; }}
 #pageSub {{ color: {MUTED}; }}
-#card {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px; }}
-#cardTitle {{ font-weight: 600; font-size: 10.5pt; }}
+#card {{ background: {SURFACE}; border: 1px solid transparent; border-radius: 18px; }}
+#cardTitle {{ font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 15pt; }}
 #hint, .hint {{ color: {MUTED}; font-size: 9pt; }}
 #metrics {{ color: {MUTED}; font-size: 9pt; }}
 
-#chestStage {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #24203a, stop:1 #151824);
-              border: 1px solid #3f3557; border-radius: 14px; }}
-#stageTotal {{ color: {TEXT}; font-size: 44pt; font-weight: 700; }}
-#stageOdds {{ color: #f4cf86; font-size: 20pt; font-weight: 600; }}
+#chestStage {{ background: {STAGE}; border: 1px solid transparent; border-radius: 28px; }}
+#stageTotal {{ color: {ACCENT}; font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 53pt; }}
+#stageOdds {{ color: {ACCENT_HOVER}; font-family: "Bahnschrift SemiBold Condensed", "Segoe UI"; font-size: 22pt; }}
 #recentOpenings {{ background: transparent; border: none; min-height: 120px; }}
-#recentOpenings::item {{ border-bottom: 1px solid {BORDER}; padding: 5px 2px; }}
+#recentOpenings::item {{ padding: 6px 2px; }}
 
-#countCard {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 12px; }}
+#countCard {{ background: transparent; border: 1px solid transparent; border-radius: 7px; }}
 #countLabel {{ color: {MUTED}; font-size: 9pt; font-weight: 600; letter-spacing: 1px; }}
-#countValue {{ font-size: 40pt; font-weight: 700; }}
+#countValue {{ font-size: 33pt; font-weight: 700; }}
 #countSub {{ color: {MUTED}; font-size: 9pt; }}
 
 #pill {{ border-radius: 11px; padding: 3px 12px; font-size: 9pt; font-weight: 600; }}
 #banner {{ background: #3a1d22; border: 1px solid #6b2a33; border-radius: 8px; }}
 #bannerText {{ color: #ffd7dc; }}
 #notice {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 8px; }}
-#overlayBox {{ background: #000000; border: 1px solid {BORDER}; border-radius: 8px; padding: 10px 14px;
-               font-family: "Segoe UI"; font-size: 15pt; font-weight: 700; color: #ffffff; }}
+#overlayBox {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 7px; }}
+#screenOverlayCaption {{ color: {TEXT}; font-size: 12pt; font-weight: 600; }}
 
-QPushButton {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 7px; padding: 7px 14px; }}
+QPushButton {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 12px; padding: 7px 14px; }}
 QPushButton:hover {{ background: {SURFACE_3}; }}
 QPushButton:pressed {{ background: {BORDER}; }}
+QPushButton:focus {{ border-color: {ACCENT}; }}
 QPushButton:disabled {{ color: {DIM}; background: {SURFACE}; }}
-QPushButton#primary {{ background: {ACCENT}; border: 1px solid {ACCENT}; color: white; font-weight: 600; padding: 9px 22px; }}
+QPushButton#primary {{ background: {ACCENT}; border: 1px solid {ACCENT}; color: {BG}; font-weight: 600; border-radius: 18px; padding: 9px 22px; }}
 QPushButton#primary:hover {{ background: {ACCENT_HOVER}; border-color: {ACCENT_HOVER}; }}
 QPushButton#primary:disabled {{ background: {SURFACE_3}; border-color: {SURFACE_3}; color: {MUTED}; }}
-QPushButton#danger {{ background: {DANGER}; border: 1px solid {DANGER}; color: white; font-weight: 600; padding: 9px 22px; }}
+QPushButton#danger {{ background: {DANGER}; border: 1px solid {DANGER}; color: white; font-weight: 600; border-radius: 18px; padding: 9px 22px; }}
 QPushButton#danger:hover {{ background: #f05a5a; }}
 QPushButton#toggle {{ background: transparent; border: 1px solid {BORDER}; border-radius: 14px; padding: 5px 14px; color: {MUTED}; }}
 QPushButton#toggle:checked {{ background: {SURFACE_2}; color: {TEXT}; border-color: {ACCENT}; }}
 QPushButton#link {{ background: transparent; border: none; color: {ACCENT}; padding: 0; }}
 QPushButton#link:hover {{ color: {ACCENT_HOVER}; text-decoration: underline; }}
 
-QComboBox, QLineEdit, QSpinBox {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 7px; padding: 6px 10px;
-                                  selection-background-color: {ACCENT}; }}
+QComboBox, QLineEdit, QSpinBox {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 12px; padding: 6px 10px;
+                                  selection-background-color: {SURFACE_3}; }}
+QComboBox:hover, QLineEdit:hover, QSpinBox:hover {{ border-color: {DIM}; }}
 QComboBox:focus, QLineEdit:focus, QSpinBox:focus {{ border-color: {ACCENT}; }}
-QComboBox QAbstractItemView {{ background: {SURFACE_2}; border: 1px solid {BORDER}; selection-background-color: {SURFACE_3};
-                              outline: none; padding: 4px; }}
+QComboBox QAbstractItemView, QMenu {{ background: {SURFACE}; border: 1px solid {BORDER};
+                                      outline: none; border-radius: 12px; padding: 4px; selection-background-color: {SURFACE_3};
+                                      selection-color: {TEXT}; }}
+QComboBox QAbstractItemView::item, QMenu::item {{ padding: 6px 10px; }}
+QMenu::item:selected {{ background: {SURFACE_3}; color: {ACCENT}; }}
+QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 7px; }}
 QLineEdit:read-only {{ color: {MUTED}; }}
 
 QCheckBox, QRadioButton {{ spacing: 8px; padding: 3px 0; }}
+QCheckBox:focus, QRadioButton:focus {{ color: {ACCENT}; }}
+QRadioButton::indicator {{ width: 12px; height: 12px; border: 1px solid {DIM};
+                            border-radius: 7px; background: {BG}; }}
+QRadioButton::indicator:checked {{ border: 4px solid {ACCENT}; width: 6px; height: 6px; }}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color: {ACCENT}; }}
 
-QPlainTextEdit#log, QPlainTextEdit#report {{ background: #0c0e12; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px;
+QPlainTextEdit#log, QPlainTextEdit#report {{ background: #1c1814; border: 1px solid {BORDER}; border-radius: 8px; padding: 6px;
                                             font-family: "Cascadia Mono", "Consolas", monospace; font-size: 9pt; }}
 #previewBox {{ background: #000000; border: 1px solid {BORDER}; border-radius: 8px; color: {DIM}; }}
 
