@@ -218,6 +218,10 @@ def test_french_rare_x2_counts_each_stable_opening_once():
         estimator = E.ChestEstimator()
         folder = paths.TEMPLATES_DIR / "chest/fr"
         templates = {name: np.load(folder / f"stack_{name}.npy") for name in ("exp", "rare", "x2", "sprite")}
+        # A fallback reading of the first rare line can land on the qualifier.
+        estimator.pending_scaled.append({"onset": -0.1, "y": 74, "x": 193, "template": "fr:COFFRE",
+                                         "blur": 0.8, "scale": 1.0, "confirmed": True,
+                                         "french_type": chest_types.RARE})
         layouts = [
             [("rare", 71, 152)],
             [("x2", 70, 146)],

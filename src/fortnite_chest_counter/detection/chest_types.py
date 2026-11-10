@@ -202,4 +202,5 @@ class FrenchQualifiedPopups:
         return added
 
     def owns(self, y, x):
-        return any(abs(row_y - y) <= 8 and abs(row_x - x) <= 23 for _, row_y, row_x, _, _ in self.rows)
+        # The short-word reader can lock onto the qualifier to the right of COFFRE.
+        return any(abs(row_y - y) <= 8 and -23 <= x - row_x <= 34 for _, row_y, row_x, _, _ in self.rows)
