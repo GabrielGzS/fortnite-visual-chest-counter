@@ -203,6 +203,35 @@ def test_preview_block_round_trip_and_only_when_wanted():
         reader.close()
 
 
+def test_hdr_capture_can_publish_a_preview_without_detector_frames():
+    from types import SimpleNamespace
+
+    from fortnite_chest_counter.input.video_sources import LiveSource, tone_map_scrgb
+    from fortnite_chest_counter.preview import PreviewReader, PreviewWriter, block_name
+
+    name = block_name(uuid.uuid4().hex[:12])
+    reader = PreviewReader(name)
+    writer = PreviewWriter(name)
+    source = LiveSource("test HDR", [], 15, hdr=True)
+    frame = np.full((720, 1280, 4), 2.0, dtype="<f2")
+    source._process = SimpleNamespace(stdout=io.BytesIO(frame.tobytes()))
+    source._t0 = time.monotonic()
+    source.set_preview(writer)
+    try:
+        reader.set_wanted(True)
+        source._read_frames()
+        assert source.frames_processed == 0
+        _, width, height, data = reader.read()
+        expected = tone_map_scrgb(frame[::2, ::2], exposure=0.25)
+        assert np.array_equal(np.frombuffer(data, np.uint8).reshape(height, width, 3), expected)
+        _, detector_frame = next(source.frames())
+        assert np.array_equal(detector_frame, tone_map_scrgb(frame))
+    finally:
+        source.set_preview(None)
+        writer.close()
+        reader.close()
+
+
 # ------------------------------------------------------------------ the app's count editing
 
 def test_set_counts_and_reset_from_the_app():
@@ -317,12 +346,12 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
             win.overlay.share_screen_overlay.setChecked(True)
             assert overlay.text().splitlines() == [
                 "CERTAIN OPENED CHESTS: 5", "APPROX. OPENED CHESTS: 10",
-                "Pirate Token · 0.007272%",
+                "Pirate Token · 0.007272%", "Total chests: 10",
             ]
             win.dashboard.token_mode.setCurrentText("Squad")
             win.dashboard.token_teammates.setValue(20)
             assert "0.021816% · 30 chests" in win.dashboard.token_odds.text()
-            assert "0.021816%" in overlay.text()
+            assert "0.021816%\nTotal chests: 30" in overlay.text()
             win.dashboard.token_mode.setCurrentText("Solo")
             assert "0.007272% · 10 chests" in win.dashboard.token_odds.text()
             win._set(0, 0, "reset")
@@ -336,12 +365,17 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
             win.refresh_types()
             win.overlay.apply()
             assert overlay.text().splitlines() == [
-                "CERTAIN OPENED CHESTS: 0", "Odds: 0.000000%", "Chest types: not classified 3",
+                "CERTAIN OPENED CHESTS: 0", "Odds: 0.000000%", "Total chests: 0",
+                "Chest types: not classified 3",
             ]
             assert win.overlay.preview.text() == overlay.text()
             win.overlay.show_token.setChecked(False)
             win.overlay.apply()
             assert "Odds:" not in overlay.text()
+            assert "Total chests: 0" in overlay.text()
+            win.overlay.show_total.setChecked(False)
+            win.overlay.apply()
+            assert "Total chests:" not in overlay.text()
             win.overlay.show_screen_overlay.setChecked(False)
             assert overlay.isHidden()
             assert not win.overlay.share_screen_overlay.isEnabled()
@@ -373,6 +407,7 @@ def test_token_odds_use_approx_and_optional_teammate_chests():
             assert win.dashboard.secondary_source.currentData() == second
             assert win.overlay.show_screen_overlay.isChecked() and win.overlay.share_screen_overlay.isChecked()
             assert win.overlay.show_types.isChecked() and not win.overlay.show_token.isChecked()
+            assert not win.overlay.show_total.isChecked()
             assert win.overlay.mode_buttons["certain"].isChecked()
             assert win.overlay.token_text.text() == "Odds: #"
         finally:

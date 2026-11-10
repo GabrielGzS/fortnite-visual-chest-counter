@@ -1,9 +1,9 @@
 """
 Live video preview for the desktop app.
 
-The counting worker copies a small version (640x360) of the frame it is analysing into a named shared-memory block a few
-times per second; the app reads it from there. PRESENTATION ONLY: it never changes what is analysed, and while the app's
-preview is hidden (the default) the worker does not even copy - it reads one flag per frame and moves on.
+The worker copies a small version (640x360) of an input frame into a named shared-memory block a few times per second.
+For sources with a separate capture reader, the copy runs there without waiting for detection. This does not change what
+is analysed. When the preview is hidden, no preview image is copied or converted.
 
 Block layout (little endian):  seq u32 | width u32 | height u32 | wanted u32 | t f64 | RGB bytes (width * height * 3)
   seq     even = a complete picture, odd = being written (a reader that sees seq change while copying drops that copy)
@@ -47,7 +47,9 @@ class PreviewWriter:
         self.next = now + self.interval
         if frame.shape[0] < 2 * HEIGHT or frame.shape[1] < 2 * WIDTH:
             return False
-        pixels = frame[:2 * HEIGHT:2, :2 * WIDTH:2, :3] if convert is None else convert(HEIGHT, WIDTH)
+        pixels = frame[:2 * HEIGHT:2, :2 * WIDTH:2, :3]
+        if convert is not None:
+            pixels = convert(pixels)
         small = np.ascontiguousarray(pixels, dtype=np.uint8)
         self.seq += 1                                                       # odd: writing
         struct.pack_into("<I", self.mm, 0, self.seq)

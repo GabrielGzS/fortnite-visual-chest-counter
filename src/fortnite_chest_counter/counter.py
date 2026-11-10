@@ -1233,7 +1233,9 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
 
     est = estimator.ChestEstimator()
     preview = _open_preview(args)
-    preview_conversion = source.hdr_preview if kind == "desktop-hdr" else None
+    preview_from_capture = preview is not None and isinstance(source, sources.LiveSource)
+    if preview_from_capture:
+        source.set_preview(preview)
     capture = _open_capture(cfg, kind, source.label, res, in_fps, fps)
     closing_threads = []                                    # recordings switched off mid-session, finishing in background
     session.save()
@@ -1277,8 +1279,8 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
             dt = time.perf_counter() - t0
             recent.append(dt)
             n_frames, total_s, max_s = n_frames + 1, total_s + dt, max(max_s, dt)
-            if preview is not None:
-                preview.offer(t, frame, convert=preview_conversion)                     # after counting; skipped unless the app shows the preview
+            if preview is not None and not preview_from_capture:
+                preview.offer(t, frame)                     # sources without an independent frame reader
             if capture is not None:                         # after counting; never blocks (see capture.py)
                 capture.offer(t, frame)
                 if applied:
@@ -1366,6 +1368,8 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
         session.apply_type_updates(est.take_type_updates())
         session.save()
         session.write_obs()
+        if preview_from_capture:
+            source.set_preview(None)
         source.close(wait=not closing)
         for thread in closing_threads:                     # recordings switched off mid-session: let them finish
             thread.join(3.0 if closing else 30.0)

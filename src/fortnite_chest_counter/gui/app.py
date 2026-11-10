@@ -412,13 +412,16 @@ class PreviewPanel(QFrame):
         self.caption = label(caption, "hint", wrap=True)
         layout.addWidget(self.caption)
         self.image = None
+        self.last_frame_at = None
 
     def show_frame(self, width, height, data):
+        self.last_frame_at = time.monotonic()
         self.image = QImage(data, width, height, 3 * width, QImage.Format_RGB888).copy()
         self._render()
 
     def clear(self, text="Start counting to see the video here"):
         self.image = None
+        self.last_frame_at = None
         self.view.setPixmap(QPixmap())
         self.view.setText(text)
 
@@ -858,8 +861,9 @@ class Dashboard(QWidget):
         self.token_teammates.setToolTip("Enter any extra chests opened by teammates.")
         self.token_teammate_label = label("Teammate chests")
         self.token_odds = label("", "hint", wrap=True)
-        self.token_odds.setToolTip("Cumulative estimate using Epic's base rate of 1 in 137,500 per chest, "
-                                   "adjusted by the selected boost.")
+        self.token_odds.setToolTip("Estimated chance that at least one chest in the shown total would drop a Pirate Token. "
+                                   "The model assumes independent rolls at 1 in 137,500 per chest before the selected boost. "
+                                   "The total uses APPROX and includes any manually entered teammate chests.")
         for widget in (self.token_mode, self.token_boost, self.token_teammate_label, self.token_teammates, self.token_odds):
             token_row.addWidget(widget)
         token_row.setStretch(4, 1)
@@ -1029,6 +1033,7 @@ class Dashboard(QWidget):
         probability = -math.expm1(min(total, 10_000_000) * math.log1p(-boost / PIRATE_TOKEN_RATE)) if total else 0
         chance = f"{probability:.6%}"
         self.token_chance = chance
+        self.token_total = total
         scenario = f" · {self.token_boost.currentText()}" if boost > 1 else ""
         self.token_odds.setText(f"Pirate Token · {chance} · {total:,} chests{scenario}")
         self.refresh_screen_overlay()
@@ -1070,6 +1075,9 @@ class Dashboard(QWidget):
             if "#" not in wording:
                 wording += " #"
             lines.append(wording.replace("#", self.token_chance))
+        if display["screen_show_total"]:
+            total = settings.format_count(self.token_total, display["use_thousands_separator"])
+            lines.append(f"Total chests: {total}")
         if display["screen_show_types"] and self.types.text():
             lines.append(f"Chest types: {self.types.text()}")
         return "\n".join(lines)
@@ -1154,8 +1162,10 @@ class OverlayPage(QWidget):
             box_layout.addWidget(radio)
             radio.toggled.connect(self._changed)
         self.show_token = QCheckBox("Show Pirate Token odds on screen")
+        self.show_total = QCheckBox("Show total chests on screen")
+        self.show_total.setToolTip("Show the estimated total used for Pirate Token odds, including any manually entered teammate chests.")
         self.show_types = QCheckBox("Show chest types on screen")
-        for toggle in (self.show_token, self.show_types):
+        for toggle in (self.show_token, self.show_total, self.show_types):
             box_layout.addWidget(toggle)
             toggle.toggled.connect(self._changed)
         layout.addWidget(box)
@@ -1281,6 +1291,7 @@ class OverlayPage(QWidget):
         self.thousands.setChecked(self.display["use_thousands_separator"])
         self.token_text.setText(self.display["screen_token_text"])
         self.show_token.setChecked(self.display["screen_show_token"])
+        self.show_total.setChecked(self.display["screen_show_total"])
         self.show_types.setChecked(self.display["screen_show_types"])
         ws = cfg["obs_websocket"]
         self.ws_enabled.blockSignals(True)
@@ -1396,6 +1407,7 @@ class OverlayPage(QWidget):
         mode = self._mode()
         texts = {"use_thousands_separator": self.thousands.isChecked(),
                  "screen_show_token": self.show_token.isChecked(),
+                 "screen_show_total": self.show_total.isChecked(),
                  "screen_show_types": self.show_types.isChecked()}
         if self.token_text.text().strip():
             texts["screen_token_text"] = self.token_text.text().strip()
@@ -2884,6 +2896,8 @@ class MainWindow(QMainWindow):
         if frame is not None:
             _, width, height, data = frame
             panel.show_frame(width, height, data)
+        elif panel.last_frame_at is not None and time.monotonic() - panel.last_frame_at > 2:
+            panel.clear("Waiting for new video frames…")
 
     # ---- counter actions
     def _cfg_for_actions(self):

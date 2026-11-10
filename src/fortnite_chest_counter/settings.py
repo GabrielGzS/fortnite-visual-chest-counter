@@ -36,6 +36,7 @@ DEFAULTS = {
         "use_thousands_separator": True,
         "screen_token_text": "Pirate Token · #",
         "screen_show_token": True,
+        "screen_show_total": True,
         "screen_show_types": False,
         # v0.1.0 names, still understood: a config that sets only these gets "<label>: {count}" as its text.
         "certain_label": "CERTAIN OPENED CHESTS",

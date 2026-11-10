@@ -113,6 +113,9 @@ class LiveSource:
         self.frames_processed = 0
         self.frames_dropped = 0
         self.stderr_tail = []
+        self.preview = None
+        self._preview_lock = threading.Lock()
+        self._preview_conversion = self.hdr_preview if hdr else None
 
     # ---- lifecycle ----
     def open(self, timeout=20.0):
@@ -137,6 +140,11 @@ class LiveSource:
             detail = " | ".join(self.stderr_tail[-3:]) or "no output from ffmpeg"
             raise RuntimeError(f"no frames arrived from '{self.label}' ({detail})")
         return self.info
+
+    def set_preview(self, preview):
+        # Detaching waits for any in-flight copy before the worker closes its shared memory.
+        with self._preview_lock:
+            self.preview = preview
 
     def request_stop(self):
         """Non-blocking: make frames() return promptly (safe to call from another thread)."""
@@ -179,11 +187,16 @@ class LiveSource:
                 break
             frame = (np.frombuffer(raw, "<f2").reshape(HEIGHT, WIDTH, 4) if self.hdr else
                      np.frombuffer(raw, np.uint8).reshape(HEIGHT, WIDTH, 3))
+            t = time.monotonic() - self._t0
             with self._cond:
-                self._latest = (time.monotonic() - self._t0, frame)
+                self._latest = (t, frame)
                 self._seq += 1
                 self.frames_read += 1
                 self._cond.notify_all()
+            if self.preview is not None:
+                with self._preview_lock:
+                    if self.preview is not None:
+                        self.preview.offer(t, frame, convert=self._preview_conversion)
         with self._cond:
             self._eof = True
             self._cond.notify_all()
@@ -207,15 +220,13 @@ class LiveSource:
                 self.frames_processed += 1
                 last = seq
                 t, frame = item
-                if self.hdr:
-                    self.scrgb_frame = frame
-                    frame = tone_map_scrgb(frame)
-                yield t, frame
+                yield t, tone_map_scrgb(frame) if self.hdr else frame
             elif self.on_idle is not None:
                 self.on_idle()
 
-    def hdr_preview(self, height, width):
-        return tone_map_scrgb(self.scrgb_frame[:2 * height:2, :2 * width:2], exposure=HDR_PREVIEW_EXPOSURE)
+    @staticmethod
+    def hdr_preview(pixels):
+        return tone_map_scrgb(pixels, exposure=HDR_PREVIEW_EXPOSURE)
 
     def elapsed(self):
         return time.monotonic() - self._t0
