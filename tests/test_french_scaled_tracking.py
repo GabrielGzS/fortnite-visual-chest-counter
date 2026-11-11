@@ -201,3 +201,36 @@ def test_bright_exp_fallback_waits_for_existing_popup_and_counts_only_unmatched(
     assert est._finish(9.0, False) == []
     assert est._finish(11.3, False) == [{"time": 8.0, "approx_counted": True}]
     assert calls[-1]["bright_exp"]
+
+@pytest.mark.parametrize("kind", [CT.RARE, CT.SPRITE])
+def test_french_contrast_votes_reject_a_qualified_line(kind):
+    est = E.ChestEstimator()
+    roi = np.full((202, 360, 3), (160, 130, 180), dtype=np.uint8)
+    normalized = np.full((182, 324, 3), (160, 130, 180), dtype=np.uint8)
+    y, x = 63, 155
+    word = est.french_template
+    h, w = word.shape
+    normalized[y:y + h, x:x + w][word > .5] = (250, 245, 250)
+    suffix = est.french_suffixes[kind]
+    sh, sw = suffix.shape
+    start = x + w + 4
+    normalized[y:y + sh, start:start + sw][suffix > .5] = (250, 245, 250)
+    for t in (1.0, 1.1, 1.2):
+        est._observe_french_contrast_type(t, roi, (.9, normalized, None))
+    popup = {"onset": 1.1, "y": round((y + h // 2) / .9), "x": round((x + w // 2) / .9)}
+    assert not est._contrast_type_votes(popup)
+    assert not est.pending_popups and not est.pending_scaled
+
+
+def test_french_contrast_type_evidence_is_consumed_only_once():
+    est = E.ChestEstimator()
+    est.french_contrast_history.extend((t, 73, 188, CT.NORMAL) for t in (1.0, 1.15, 1.3))
+    popup = {"onset": 1.8, "y": 82, "x": 190}
+    assert est._contrast_type_votes(popup) == {CT.NORMAL: 3}
+    assert not est._contrast_type_votes(popup)
+
+def test_french_contrast_type_votes_skip_an_ambiguous_adjacent_opening():
+    est = E.ChestEstimator()
+    est.french_contrast_history.extend((t, 73, 188, CT.NORMAL) for t in (1.0, 1.15, 1.3))
+    est.pending_popups.append({"onset": 1.1})
+    assert not est._contrast_type_votes({"onset": 1.8, "y": 82, "x": 190})

@@ -97,6 +97,11 @@ runs below normal priority.
 The updater now waits for a short stable ready state before accepting a new version, closing a race where an app
 could report readiness and immediately exit before rollback was armed.
 
+## French chest type refinement
+
+- Use repeated high-contrast readings only to label an already-counted French notification. Leave qualified or adjacent ambiguous openings to the existing detector.
+- Replayed the four retained HDR excerpts that previously showed an unknown type. All four classify as normal with the same count, onset and confidence tier.
+
 ## Validation
 
 - Replayed all 13,248 recorded frames of a local French HDR session with original frame timings. The earlier

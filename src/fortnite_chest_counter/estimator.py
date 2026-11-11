@@ -38,6 +38,7 @@ import time
 from collections import Counter, deque
 
 import numpy as np
+from scipy.ndimage import gaussian_filter
 
 from fortnite_chest_counter import paths
 from fortnite_chest_counter.detection import chest_types
@@ -252,6 +253,7 @@ class ChestEstimator:
         self.recent_counted_popups = deque()
         self.last_french_exp = -float("inf")
         self.french_type_history = deque()
+        self.french_contrast_history = deque()
         self.french_scaled_reads = {}       # no votes shared between different glyph scales
         self.french_plane = None           # this frame's winning (scale, RGB ROI, mask)
         self.french_xp_templates = {}
@@ -652,6 +654,8 @@ class ChestEstimator:
                     candidate["french_type"] = kind
         if plane is not None and score >= FRENCH_TYPE_READ_MIN:
             self._vote_french_type(t, best, plane[2])
+        if plane is not None and score >= 0.58 and 0.9 in self._scaled_scales():
+            self._observe_french_contrast_type(t, roi, plane)
         for p in list(self.pending_scaled):                 # not claimed by the exact path in time -> a pop-up
             if not p.get("small") and t <= p["onset"] + POPUP_FINISH_DELAY:
                 origin = p.get("origin")
@@ -694,6 +698,54 @@ class ChestEstimator:
             return
         if self.scaled_onset.armed and reading != chest_types.UNKNOWN:
             history.append((t, word_y, word_x, reading))
+
+    def _observe_french_contrast_type(self, t, roi, plane):
+        """Collect type-only readings of the bright glyph core on noisy backgrounds."""
+        history = self.french_contrast_history
+        while history and t - history[0][0] > SCALED_WAIT + 0.9:
+            history.popleft()
+        scale = 0.9
+        normalized = (plane[1] if plane[0] == scale else
+                      V.resize_box(roi, round(roi.shape[1] * scale), round(roi.shape[0] * scale)))
+        y0, x0 = 38, 90
+        crop = normalized[y0:105, x0:230]
+        light = crop.min(axis=2).astype(np.float32)
+        contrast = light - gaussian_filter(light, 2.0)
+        mask = ((contrast > 40) & (crop[:, :, 1] > 125)).astype(np.float32)
+        score, y, x = V.robust_correlation_at(mask, self.robust_templates["fr:COFFRE"], ROBUST_SIGMA)
+        if score < 0.76:
+            return
+        h, w = self.french_template.shape
+        kind = chest_types.classify_french_line(mask, y, x, h, w, self.french_suffixes)
+        if kind == chest_types.NORMAL:
+            # A lower contrast reading can still identify a faint qualifier.
+            soft = ((contrast > 14) & (crop[:, :, 1] > 125)).astype(np.float32)
+            alternate = chest_types.classify_french_line(soft, y, x, h, w, self.french_suffixes)
+            if alternate in (chest_types.RARE, chest_types.SPRITE):
+                kind = alternate
+        if kind != chest_types.UNKNOWN:
+            history.append((t, round((y0 + y + h // 2) / scale), round((x0 + x + w // 2) / scale), kind))
+
+    def _contrast_type_votes(self, popup):
+        history = self.french_contrast_history
+        onset = popup["onset"]
+        # Do not borrow a readable row from a second opening in the same XP group.
+        if (any(abs(stamp - onset) <= 1.4 for stamp in self.recent_counted_popups)
+                or any(abs(other["onset"] - onset) <= 1.4
+                       for other in (*self.pending_scaled, *self.pending_popups) if other is not popup)):
+            return Counter()
+        nearby = [row for row in history if onset - 0.9 <= row[0] <= onset + 1.4
+                  and abs(row[2] - popup["x"]) <= 34
+                  and abs(row[1] - popup["y"]) <= (10 if abs(row[2] - popup["x"]) <= 10 else 5)]
+        if any(row[3] != chest_types.NORMAL for row in nearby):
+            return Counter()
+        for _, y, x, _ in nearby:
+            aligned = [row for row in nearby if abs(row[1] - y) <= 3 and abs(row[2] - x) <= 4]
+            if len(aligned) >= FRENCH_SCALED_CONFIRM_FRAMES:
+                used = set(nearby)
+                self.french_contrast_history = deque(row for row in history if row not in used)
+                return Counter({chest_types.NORMAL: len(aligned)})
+        return Counter()
 
     def _recover_french_line(self, t, roi, mask, score, cy, cx, scale=1.0):
         """Read a French line, returning position, type and whether it earns HIGH."""
@@ -946,6 +998,12 @@ class ChestEstimator:
             popup["french_type"] = p["french_type"]
         if "french_type_votes" in p:
             popup["french_type_votes"] = p["french_type_votes"]
+        if (p["template"] == "fr:COFFRE" and p.get("origin", (0,))[0] in (0.85, 0.9)
+                and p.get("french_type", chest_types.UNKNOWN) == chest_types.UNKNOWN
+                and not any(p.get("french_type_votes", {}).get(kind) for kind in (chest_types.RARE, chest_types.SPRITE))):
+            contrast_votes = self._contrast_type_votes(p)
+            if contrast_votes:
+                popup["french_contrast_votes"] = contrast_votes
         if p.get("saturated_french"):
             popup["saturated_french"] = True
         if p.get("run") is not None:
@@ -1153,6 +1211,9 @@ class ChestEstimator:
             if observed != chest_types.UNKNOWN:
                 kind, confidence = observed, agreement
                 type_evidence = {"read": "aligned French blurred line", "votes": dict(votes)}
+        if kind == chest_types.UNKNOWN and p.get("french_contrast_votes"):
+            kind, confidence = chest_types.decide(p["french_contrast_votes"])
+            type_evidence = {"read": "aligned high-contrast French line", "votes": dict(p["french_contrast_votes"])}
         extra.update(chest_type=kind, type_confidence=confidence, type_evidence=type_evidence)
         if scaled is not None:
             extra["scaled_popup"] = {"blur": round(float(scaled["blur"]), 3), "scale": scaled["scale"]}

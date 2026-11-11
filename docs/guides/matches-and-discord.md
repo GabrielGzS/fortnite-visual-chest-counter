@@ -68,7 +68,7 @@ Select a match in **Match history** and click **Compare replay…**. An automati
 
 ### What the replay can verify
 
-In the 2026-11-11 HDR test, the replay identified normal, rare, rare sprite and spirit poster chests. An earlier replay also identified buried chests. Destroyed chests are recorded separately in the comparison and excluded from the opened-chest total. The live detector still uses the chest XP pop-up and can miss an opening or leave the type unknown. The same report found 14 ammo boxes, three food boxes and one treasure find. These are separate replay categories, outside the app's verified chest total.
+In the 2026-11-11 HDR test, the replay identified normal, rare, rare sprite and spirit poster chests. An earlier replay also identified buried chests. Destroyed chests are recorded separately in the comparison and excluded from the opened-chest total. The live detector uses the chest XP pop-up and can still miss an opening or leave its type unknown. For scaled French notifications, repeated high-contrast readings can refine an existing count when the chest line is unambiguous. The same report found 14 ammo boxes, three food boxes and one treasure find. These are separate replay categories, outside the app's verified chest total.
 
 | To validate next | Live capture | Fortnite replay |
 |---|---|---|
