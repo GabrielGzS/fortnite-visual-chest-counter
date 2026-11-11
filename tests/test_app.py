@@ -763,6 +763,16 @@ def test_mark_button_and_hotkey_need_a_running_recording():
             assert win.recording is None and not win.dashboard.mark.isEnabled()
             win.handle({"type": "capture", "state": "off", "mode": "events"})                  # a start that failed
             assert win.dashboard.rec_mode.currentData() == "off" and fake.sent[-1] == "mark"  # shown honestly, not re-sent
+            C.update_config_file(Path(tmp) / "config.toml", "logging", {
+                "enabled": True, "save_snapshots": True, "log_candidates": True})
+            win.settings_page.load()
+            win.dashboard.rec_mode.setCurrentIndex(win.dashboard.rec_mode.findData("marks"))
+            win.dashboard.rec_mode.setCurrentIndex(win.dashboard.rec_mode.findData("off"))
+            saved = settings.load_config(Path(tmp) / "config.toml")[0]
+            assert saved["capture"]["mode"] == "off"
+            assert all(saved["logging"][key] is False for key in ("enabled", "save_snapshots", "log_candidates"))
+            assert not win.settings_page.logging.isChecked() and not win.settings_page.snapshots.isChecked()
+            assert fake.sent[-1] == "capture off"
             if win._source_scan is not None:                              # the device scan runs ffmpeg in this folder
                 win._source_scan.join(30)
             win.preview_reader and win.preview_reader.close()

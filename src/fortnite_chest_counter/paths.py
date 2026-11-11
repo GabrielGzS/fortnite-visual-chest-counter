@@ -141,3 +141,20 @@ def worker_python():
         if candidate.is_file():
             return str(candidate)
     return sys.executable
+
+
+def prefer_detector_cpu():
+    """Give only the live detector a modest Windows scheduler preference.
+
+    No affinity restriction, busy waiting, or High/Realtime priority. Applying
+    this inside the worker also covers Windows venv launcher redirection.
+    """
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel32.SetPriorityClass.restype = wintypes.BOOL
+    return bool(kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), 0x00008000))  # ABOVE_NORMAL_PRIORITY_CLASS

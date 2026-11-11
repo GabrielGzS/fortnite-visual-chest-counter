@@ -49,7 +49,7 @@ from fortnite_chest_counter.version import APP_NAME, RELEASE_CHANNEL, TAGLINE, _
 ASSETS = Path(__file__).resolve().parent / "assets"
 APP_ID = "GabrielGzS.FortniteVisualChestCounter"
 HOTKEY_ID = 0xC0DE
-RECORDING_CHOICES = (("Off", "off"), ("Only around my marks  (smallest)", "marks"),
+RECORDING_CHOICES = (("Off (stop diagnostic files)", "off"), ("Only around my marks  (smallest)", "marks"),
                      ("Around chest decisions and my marks", "events"), ("Whole session  (about 10 GB per hour)", "session"))
 RECORDING_TEXT = {"marks": "only around your marks", "events": "around chest decisions and your marks",
                   "session": "the whole session"}
@@ -4975,8 +4975,16 @@ class MainWindow(QMainWindow):
         mode = self.dashboard.rec_mode.currentData()
         try:
             C.update_config_file(config_file(), "capture", {"mode": mode})
+            if mode == "off":
+                # Off is an immediate stop for diagnostics, including text and PNG
+                # files enabled by an earlier test. The worker watches this config.
+                C.update_config_file(config_file(), "logging", {
+                    "enabled": False, "log_candidates": False, "save_snapshots": False})
+                self.settings_page.logging.setChecked(False)
+                self.settings_page.snapshots.setChecked(False)
         except (C.UserError, OSError) as error:
             show_error(self, f"Could not save the recording choice: {error}")
+            return
         if self.worker.running():
             self.worker.send(f"capture {mode}")
         self.update_recording_ui()

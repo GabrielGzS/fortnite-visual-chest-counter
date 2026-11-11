@@ -85,7 +85,8 @@ jobs:
                   "test_profiles.py", "test_logging_reload.py", "test_match_history.py",
                   "test_match_stats.py", "test_group_live.py", "test_discord_scoreboard.py",
                   "test_discord_rate_limit.py", "test_overlay_layout.py", "test_review_timing.py",
-                  "test_french_qualified_layout.py", "test_diagnostics_cleanup.py",
+                  "test_french_qualified_layout.py", "test_french_scaled_tracking.py",
+                  "test_hdr_pipeline.py", "test_detector_priority.py", "test_diagnostics_cleanup.py",
               )
               targets = [tests / name for name in names]
           report = reports / (os.environ["RUNNER_OS"] + ".xml")

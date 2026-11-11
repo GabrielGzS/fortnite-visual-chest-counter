@@ -239,6 +239,8 @@ class ChestEstimator:
         self.french_template = next((t["array"] for t in self.templates if t["id"] == "fr:COFFRE"), None)
         self.french_suffixes = chest_types.load_french_suffixes() if self.french_template is not None else {}
         self.french_reads = deque()
+        self.french_scaled_reads = {}       # no votes shared between different glyph scales
+        self.french_plane = None           # this frame's winning (scale, RGB ROI, mask)
         self.french_xp_templates = {}
         if self.french_template is not None:
             # Each pair is the EXP line and chest line, plus the word's column within the template.
@@ -281,6 +283,7 @@ class ChestEstimator:
         self.stacked = bool((STACKED_POPUPS if stacked is None else stacked) and self.stack_word)
         self.french_group = chest_types.FrenchQualifiedPopups() if self.stacked and self.stack_word == "fr:COFFRE" else None
         self.trackers = {}                 # "normal" / "small" -> popup_lines.PopupTracker
+        self.tracker_scales = {}           # fixed normalized plane for enlarged French HUD runs
         self.tracking = None               # the key of the tracker following the pop-up on screen
         self.tracked_scaled = None         # {"blur", "scale"} when that pop-up came from a scale-aware / small channel
         self.robust_hist = deque()         # (t, {template: blurred match}) while a pop-up is followed (stacked steps)
@@ -423,6 +426,12 @@ class ChestEstimator:
 
     def _stacked(self, t, roi, mask):
         tracker = self.trackers[self.tracking]
+        scale = self.tracker_scales.get(self.tracking, 1.0)
+        if scale != 1.0:
+            if self.french_plane is not None and self.french_plane[0] == scale:
+                mask = self.french_plane[2]
+            else:
+                mask = V.lavender_mask(V.resize_box(roi, round(roi.shape[1] * scale), round(roi.shape[0] * scale)))
         a = time.perf_counter()
         before = tracker.rejected_without_xp
         change = tracker.update(t, mask)
@@ -495,6 +504,7 @@ class ChestEstimator:
 
     def _scaled_popup(self, t, roi, mask, exact_fired):
         """Second pop-up channel, after the exact path of the same frame. Only adds pop-ups the exact path did not find."""
+        self.french_plane = None
         if exact_fired:                                     # the exact path owns this pop-up: drop blurred onsets near it
             self.exact_onsets.append(t)
             kept = [p for p in self.pending_scaled if p["onset"] < t - SCALED_WAIT]
@@ -519,10 +529,18 @@ class ChestEstimator:
         if self.small is not None:
             self._small_popup(t, roi, small)
         score, cy, cx, s, tid, strong = best
-        recovered = self._recover_french_line(t, roi, mask, score, cy, cx) if "fr:COFFRE" in self.scaled_templates else None
+        plane = self.french_plane if tid == "fr:COFFRE" and self.french_plane is not None else None
+        if plane is not None and plane[0] != 1.0:
+            recovered = self._recover_french_line(t, plane[1], plane[2], score,
+                                                  round(cy * s), round(cx * s), scale=s)
+            if recovered is not None:
+                ry, rx, kind = recovered
+                recovered = (round(ry / s), round(rx / s), kind)
+        else:
+            recovered = self._recover_french_line(t, roi, mask, score, cy, cx) if "fr:COFFRE" in self.scaled_templates else None
         if recovered is not None:
             cy, cx, kind = recovered
-            s, tid = 1.0, "fr:COFFRE"
+            s, tid = (s if plane is not None else 1.0), "fr:COFFRE"
         near_french = []
         if tid == "fr:COFFRE":
             th, tw = self.french_template.shape
@@ -531,8 +549,12 @@ class ChestEstimator:
                            and abs(p["y"] - cy) <= th + 1 and abs(p["x"] - cx) <= tw]
         if self.scaled_onset.update(t, max(score, SCALED_TRIGGER) if recovered is not None else score, cy, cx):
             owned = self.french_group is not None and tid == "fr:COFFRE" and self.french_group.owns(cy, cx)
+            # A normalized French tracker owns this visible group, including
+            # fade/reflow. Only its XP-confirmed content changes add openings.
+            tracked_french = (tid == "fr:COFFRE" and self.tracking in self.tracker_scales
+                              and self.trackers[self.tracking].active)
             same_french_line = any(p.get("confirmed") or recovered is not None for p in near_french)
-            if not (owned or same_french_line) and not any(abs(o - t) <= SCALED_WAIT for o in self.exact_onsets) and \
+            if not (owned or same_french_line or tracked_french) and not any(abs(o - t) <= SCALED_WAIT for o in self.exact_onsets) and \
                     not any(abs(p["onset"] - t) <= POPUP_FINISH_DELAY for p in self.pending_popups):
                 self.pending_scaled.append({"onset": t, "blur": score, "scale": s, "y": cy, "x": cx, "template": tid})
                 if tid == "fr:COFFRE":
@@ -545,6 +567,12 @@ class ChestEstimator:
                 self.scaled_stats["onsets"] += 1
                 if s == 1.0 and tid == self.stack_word:
                     self.pending_scaled[-1]["run"] = self._track(t, "normal", {"blur": score, "scale": s}, (cy, cx))
+                elif tid == "fr:COFFRE" and tid == self.stack_word:
+                    key = ("fr", s)
+                    self.tracker_scales[key] = s
+                    self.pending_scaled[-1]["run"] = self._track(
+                        t, key, {"blur": score, "scale": s}, (round(cy * s), round(cx * s)))
+                    self.pending_scaled[-1]["tracker_key"] = self.tracking
         if recovered is not None:
             # The first flash can shift horizontally before the word settles. Associate the reading
             # with just the closest pending opening on that XP line, within one word's width.
@@ -572,7 +600,7 @@ class ChestEstimator:
                 self.pending_scaled.remove(p)
                 self._promote_scaled(p)
 
-    def _recover_french_line(self, t, roi, mask, score, cy, cx):
+    def _recover_french_line(self, t, roi, mask, score, cy, cx, scale=1.0):
         """Confirm a weak COFFRE match with repeated readings of the full French line."""
         th, tw = self.french_template.shape
         y, x = cy - th // 2, cx - tw // 2
@@ -602,10 +630,11 @@ class ChestEstimator:
             kind = chest_types.classify_french_line(mask, y, x, th, tw, self.french_suffixes)
         else:
             return None
-        while self.french_reads and t - self.french_reads[0][0] > 0.36:
-            self.french_reads.popleft()
-        self.french_reads.append((t, y, x, kind))
-        votes = Counter(read_kind for _, read_y, read_x, read_kind in self.french_reads
+        reads = self.french_reads if scale == 1.0 else self.french_scaled_reads.setdefault(scale, deque())
+        while reads and t - reads[0][0] > 0.36:
+            reads.popleft()
+        reads.append((t, y, x, kind))
+        votes = Counter(read_kind for _, read_y, read_x, read_kind in reads
                         if abs(read_y - y) <= 4 and abs(read_x - x) <= 7)
         if sum(votes.values()) < FRENCH_SCALED_CONFIRM_FRAMES:
             return None
@@ -657,8 +686,10 @@ class ChestEstimator:
         """Best blurred match, with a sharp-glyph check at the same position for French."""
         best = (0.0, 0, 0, 1.0, None)
         winner = None
+        self.french_plane = None
         for s in self._scaled_scales():
-            m = mask if s == 1.0 else V.lavender_mask(V.resize_box(roi, round(roi.shape[1] * s), round(roi.shape[0] * s)))
+            scaled_roi = roi if s == 1.0 else V.resize_box(roi, round(roi.shape[1] * s), round(roi.shape[0] * s))
+            m = mask if s == 1.0 else V.lavender_mask(scaled_roi)
             if m.sum() < 20:
                 continue
             for tid, tpl in self.scaled_templates.items():
@@ -667,6 +698,7 @@ class ChestEstimator:
                     h, w = tpl.shape
                     best = (score, int((y + h // 2) / s), int((x + w // 2) / s), s, tid)
                     winner = (m, y + h // 2, x + w // 2)
+                    self.french_plane = (s, scaled_roi, m) if tid == "fr:COFFRE" else None
         strong = False
         if best[4] == "fr:COFFRE" and best[0] >= ROBUST_HIGH_MIN:
             m, y, x = winner
@@ -678,7 +710,8 @@ class ChestEstimator:
 
     def _promote_scaled(self, p):
         """A blurred onset the exact path did not claim becomes a pending pop-up (finished and counted like any other)."""
-        if p.get("run") is not None and p["run"] == self.tracked_run:
+        if p.get("run") is not None and p["run"] == self.tracked_run and \
+                p.get("tracker_key", self.tracking) == self.tracking:
             self.tracked_counted = True
         exact_peak = max((h[1] for h in self.popup_hist if p["onset"] <= h[0] <= p["onset"] + POPUP_FINISH_DELAY),
                          default=0.0)
@@ -691,7 +724,7 @@ class ChestEstimator:
         if "french_type" in p:
             popup["french_type"] = p["french_type"]
         if p.get("run") is not None:
-            popup["slot"] = ("small" if p.get("small") else "normal", p["run"], "first")
+            popup["slot"] = (p.get("tracker_key", "small" if p.get("small") else "normal"), p["run"], "first")
         if "roi" in p:
             popup["roi"] = p["roi"]
         self.pending_popups.append(popup)

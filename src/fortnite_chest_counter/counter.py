@@ -1131,6 +1131,7 @@ def cmd_live(args):
     cfg, origin = make_config(args)
     live = cfg["live"]
     kind, fps = live["source"], cfg["detector"]["process_fps"]
+    paths.prefer_detector_cpu()
     preflight(cfg)
     if getattr(args, "gui", False):
         # desktop-app worker: no console; the app's Stop button / closing the app arrives through stdin

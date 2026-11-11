@@ -49,6 +49,31 @@ Session logs, candidate logs, detection snapshots and diagnostic video are all o
 The example configuration is checked against the code defaults. Portable builds include no saved configuration,
 credentials, player names, counters, diagnostic recordings or sample match data.
 
+## French HUD scaling
+
+The French fallback now follows enlarged HUD text in a fixed coordinate plane at 0.9 and 0.85, instead of detecting
+an initial blurred word and then trying to track it with native-size glyphs. Scale-specific votes remain separate;
+normal, Rare and Sprite confidence checks are retained. On Lionel's 40 saved images held for repeated observations,
+35 become typed Chest and five remain Unknown; these static probes cannot prove the number of live openings or
+stack deduplication. No confidence threshold was lowered to promote these images to Certain.
+
+## Diagnostics and HDR scheduling
+
+Choosing Diagnostic recording **Off** also immediately disables session journals, candidate logs and PNG snapshots.
+Existing diagnostic files are retained for investigation; Off stops new writes rather than deleting evidence.
+The running worker reloads logging switches, and the Settings checkboxes reflect the saved choice.
+HDR preparation runs in one additional worker thread, overlapping tone mapping with detection. Only the latest raw
+capture and latest converted result are retained; old frames are skipped rather than queued. The source timestamps
+and end-to-end drop counters are preserved. Preview-only capture does not start this converter, and SDR keeps its
+existing path. A bounded 45-frame synthetic 720p benchmark with the real estimator measured about 16–22 FPS
+sequentially and 25–28 FPS pipelined; this is processing capacity, not a live-capture rate guarantee.
+
+On Windows the counting worker starts at Above Normal priority. The GUI is unchanged; diagnostic encoding stays
+below normal. This is a small scheduler preference, not a CPU reservation or a guarantee of 15 fresh frames per second.
+
+The updater now waits for a short stable ready state before accepting a new version, closing a race where an app
+could report readiness and immediately exit before rollback was armed.
+
 ## Validation
 
 - Detector development replayed 11 diagnostic recordings comprising 20,455 analysed frames. A rare-chest replay
@@ -62,7 +87,9 @@ credentials, player names, counters, diagnostic recordings or sample match data.
   count 31 openings; the visually checked burst is exactly four Rare chests and one Sprite chest, with no extra
   count from ammo, fading notifications or inventory. One opening logged live is absent in both replays near a
   weak glyph threshold in the standard MJPEG recording; this is not counted as a new detector regression or hidden
-  by lowering confidence thresholds. Static saved images additionally exercise the previously clipped X2 layouts.
+  by lowering confidence thresholds. Static saved images additionally exercise the previously clipped X2 layouts. The final
+  enlarged-HUD change was also checked on the 300-frame Rare/Sprite burst: exactly four Rare plus one Sprite,
+  all Certain.
 - Before release, repeat tests with an installed Windows build, HDR and SDR capture, Discord screen sharing and
   a live Host/Guest setup. Live performance and Discord delivery need separate verification.
 

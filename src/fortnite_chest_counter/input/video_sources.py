@@ -6,6 +6,8 @@ LATEST-FRAME semantics: if the detector is slower than the source, old frames ar
 How: ffmpeg (already a requirement) opens the video input, scales it to 1280x720 and reduces it
 to the detector cadence; a reader thread keeps draining its pipe and stores only the newest
 frame. No new Python dependency, no frames written to disk.
+For HDR, one additional thread prepares the latest SDR frame while detection
+processes its predecessor; neither stage queues a backlog.
 
 Backends (all passive pixel capture: nothing touches Fortnite, nothing runs on the gaming PC):
 
@@ -112,8 +114,12 @@ class LiveSource:
         self.hdr = hdr
         self.info = {"input_resolution": None, "input_fps": None}
         self._process, self._thread, self._err_thread = None, None, None
+        self._tone_thread = None
         self._cond = threading.Condition()
         self._latest, self._seq, self._eof, self._stop = None, 0, False, False
+        self._converted, self._converted_seq = None, 0
+        self._conversion_eof, self._conversion_error = False, None
+        self._read_error = None
         self._t0 = None
         self.frames_read = 0
         self.frames_processed = 0
@@ -164,6 +170,8 @@ class LiveSource:
         self.request_stop()
         process = self._process
         if process is None:
+            if wait and self._tone_thread is not None and self._tone_thread is not threading.current_thread():
+                self._tone_thread.join(timeout=1)
             return
         if process.poll() is None:
             process.terminate()
@@ -173,13 +181,53 @@ class LiveSource:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=3)
-            for reader in (self._thread, self._err_thread):
+            for reader in (self._thread, self._err_thread, self._tone_thread):
                 if reader is not None and reader is not threading.current_thread():
                     reader.join(timeout=1)
             process.stdout.close()
             process.stderr.close()
 
     # ---- threads ----
+    def _start_hdr_conversion(self):
+        if not self.hdr:
+            return
+        with self._cond:
+            if self._tone_thread is None and not self._stop:
+                self._tone_thread = threading.Thread(target=self._convert_hdr_frames, daemon=True)
+                self._tone_thread.start()
+
+    def _convert_hdr_frames(self):
+        """One in-flight conversion and one latest result, never a queued backlog.
+
+        NumPy releases the GIL during the conversion so the detector can process
+        the previous result while this thread prepares the next raw capture.
+        Capture/preview remain independent and keep their original timestamps.
+        """
+        last = 0
+        try:
+            while True:
+                with self._cond:
+                    self._cond.wait_for(lambda: self._seq > last or self._eof or self._stop)
+                    if self._stop:
+                        return
+                    if self._seq <= last:
+                        return  # EOF after converting the final complete frame
+                    (t, frame), seq = self._latest, self._seq
+                converted = tone_map_scrgb(frame)
+                with self._cond:
+                    if self._stop:
+                        return
+                    self._converted, self._converted_seq = (t, converted), seq
+                    last = seq
+                    self._cond.notify_all()
+        except Exception as error:
+            with self._cond:
+                self._conversion_error = error
+        finally:
+            with self._cond:
+                self._conversion_eof = True
+                self._cond.notify_all()
+
     def _read_stderr(self):
         for raw in self._process.stderr:
             line = raw.decode("utf-8", errors="replace").strip()
@@ -194,6 +242,17 @@ class LiveSource:
                     self.info["input_fps"] = float(rate[1])
 
     def _read_frames(self):
+        try:
+            self._drain_frames()
+        except Exception as error:
+            with self._cond:
+                self._read_error = error
+        finally:
+            with self._cond:
+                self._eof = True
+                self._cond.notify_all()
+
+    def _drain_frames(self):
         stream = self._process.stdout
         size = WIDTH * HEIGHT * 8 if self.hdr else FRAME_BYTES
         while not self._stop:
@@ -212,30 +271,36 @@ class LiveSource:
                 with self._preview_lock:
                     if self.preview is not None:
                         self.preview.offer(t, frame, convert=self._preview_conversion)
-        with self._cond:
-            self._eof = True
-            self._cond.notify_all()
 
     # ---- consumer ----
     on_idle = None
 
     def frames(self):
+        self._start_hdr_conversion()
         last = 0
         while not self._stop:
             with self._cond:
-                self._cond.wait_for(lambda: self._seq > last or self._eof or self._stop, timeout=1.0)
-                if self._seq > last:
-                    item, seq = self._latest, self._seq
+                self._cond.wait_for(lambda: (self._converted_seq if self.hdr else self._seq) > last
+                                    or (self._conversion_eof if self.hdr else self._eof) or self._stop, timeout=1.0)
+                if self._stop:
+                    return
+                seq = self._converted_seq if self.hdr else self._seq
+                if seq > last:
+                    item = self._converted if self.hdr else self._latest
                 else:
                     item, seq = None, last
-                    if self._eof:
+                    if self._conversion_error is not None:
+                        raise RuntimeError(f"HDR conversion failed for '{self.label}': {self._conversion_error}") from self._conversion_error
+                    if self._read_error is not None:
+                        raise RuntimeError(f"Video capture failed for '{self.label}': {self._read_error}") from self._read_error
+                    if (self._conversion_eof if self.hdr else self._eof):
                         return
             if item is not None:
                 self.frames_dropped += seq - last - 1       # overwritten before the detector got to them
                 self.frames_processed += 1
                 last = seq
                 t, frame = item
-                yield t, tone_map_scrgb(frame) if self.hdr else frame
+                yield t, frame
             elif self.on_idle is not None:
                 self.on_idle()
 

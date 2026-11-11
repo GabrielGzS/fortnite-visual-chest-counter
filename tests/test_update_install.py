@@ -374,6 +374,43 @@ def test_a_new_version_that_dies_right_after_reporting_is_rolled_back():
     assert_health_failure(None, exit_after_report=True)
 
 
+def test_ready_report_cannot_commit_in_the_window_before_a_post_start_exit(monkeypatch):
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    monkeypatch.setattr(H.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(H.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(H, "health_report_is_valid", lambda txn, pid: True)
+    process = SimpleNamespace(pid=123, poll=lambda: None if clock[0] < .2 else 0)
+    assert H._wait_for_health(object(), process) == "It closed straight after starting."
+    assert clock[0] >= .2
+
+
+def test_ready_report_must_stay_valid_and_alive_for_the_startup_grace(monkeypatch):
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    monkeypatch.setattr(H.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(H.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(H, "health_report_is_valid", lambda txn, pid: not .1 <= clock[0] < .3)
+    process = SimpleNamespace(pid=123, poll=lambda: None)
+    assert H._wait_for_health(object(), process) is None
+    assert clock[0] >= .3 + H.HEALTH_STABLE_SECONDS
+
+
+def test_startup_grace_does_not_extend_the_health_deadline(monkeypatch):
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    monkeypatch.setattr(H.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(H.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(H, "HEALTH_DEADLINE", .2)
+    monkeypatch.setattr(H, "health_report_is_valid", lambda txn, pid: True)
+    process = SimpleNamespace(pid=123, poll=lambda: None)
+    assert H._wait_for_health(object(), process) == "It did not finish starting in time."
+    assert clock[0] < .2 + H.HEALTH_POLL + 1e-9
+
+
 def test_forged_and_wrong_health_reports_are_rejected():
     for report in ({"nonce": "0" * 64}, {"nonce": None}, {"version": OLD}, {"version": "9.9.9"}, {"format": 2}, {"stage": "starting"},
                    {"pid": 1}, {"app_dir": "C:\\Windows"}, {"app_dir": None}):

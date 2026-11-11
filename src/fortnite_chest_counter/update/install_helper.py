@@ -68,6 +68,7 @@ PROCESS_WAIT = 60.0                        # seconds for the old app and its chi
 PROCESS_POLL = 0.1
 HEALTH_DEADLINE = 180.0                    # a first start on a slow PC, with every new file being scanned
 HEALTH_POLL = 0.1
+HEALTH_STABLE_SECONDS = 0.5                # a ready report must outlive an immediate post-start crash
 RENAME_TRIES = 30                          # antivirus and the search indexer hold files briefly
 RENAME_DELAY = 1.0
 REPLACE_TRIES = 5
@@ -439,12 +440,20 @@ def _start_app(txn, health):
 def _wait_for_health(txn, process):
     """-> None if the new version proved itself, else why it did not."""
     deadline = time.monotonic() + HEALTH_DEADLINE
+    ready_since = None
     while time.monotonic() < deadline:
-        if health_report_is_valid(txn, process.pid):
-            return None if process.poll() is None else "It closed straight after starting."
         code = process.poll()
         if code is not None:
+            if ready_since is not None:
+                return "It closed straight after starting."
             return f"It closed before it finished starting (exit code {code})."
+        if health_report_is_valid(txn, process.pid):
+            if ready_since is None:
+                ready_since = time.monotonic()
+            elif time.monotonic() - ready_since >= HEALTH_STABLE_SECONDS:
+                return None if process.poll() is None else "It closed straight after starting."
+        else:
+            ready_since = None
         time.sleep(HEALTH_POLL)
     return "It did not finish starting in time."
 
