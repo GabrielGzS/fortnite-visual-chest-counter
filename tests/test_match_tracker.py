@@ -595,22 +595,37 @@ def test_off_loads_none_of_it():
 
 # ------------------------------------------------------------------ overhead
 
-def test_recognition_stays_within_one_percent_of_one_core():
-    """Every cue drawn, so the costly comparisons really run. Retried because other programs can steal the CPU for a moment."""
-    names = [cue.name for cue in M.CUES]
-    frames = [with_health_bar(painted(*names, shade=90 + i)) for i in range(4)]
+def budget_run(case):
+    """One minute of video through a real tracker, in this process. -> percent of one core."""
+    if case == "painted":
+        frames = [with_health_bar(painted(*[cue.name for cue in M.CUES], shade=90 + i)) for i in range(4)]
+    else:
+        frames = [near_miss(90 + i, i) for i in range(4)]
+    tracker = MT.MatchTracker(lambda row: None, lambda text: None)
+    for i in range(60 * 15):
+        tracker.offer(i / 15, frames[(i // 15) % 4])
+    stats = tracker.stats()
+    assert not tracker.failed and stats["match_samples"] == 60, stats
+    return stats["match_percent_of_one_core"]
+
+
+def within_budget(case):
+    """Measured in a fresh process: what earlier tests leave in this one (memory, garbage collection) adds up to 0.3 points that are not the
+    tracker's. Retried because other programs can steal the CPU for a moment."""
     measured = []
     for _ in range(4):
-        log, warnings = [], []
-        tracker = MT.MatchTracker(log.append, warnings.append)
-        for i in range(60 * 15):
-            tracker.offer(i / 15, frames[(i // 15) % 4])
-        stats = tracker.stats()
-        assert not tracker.failed and stats["match_samples"] == 60, stats
-        measured.append(stats["match_percent_of_one_core"])
+        result = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, r'{ROOT / "tests"}'); import test_match_tracker as T; print(T.budget_run('{case}'))"],
+                                cwd=ROOT, capture_output=True, text=True, timeout=300)
+        assert result.returncode == 0, result.stderr[-800:]
+        measured.append(float(result.stdout.strip().splitlines()[-1]))
         if measured[-1] <= 1.0:
             return
     raise AssertionError(f"{measured} percent of one core is over the 1% budget")
+
+
+def test_recognition_stays_within_one_percent_of_one_core():
+    """Every cue drawn, so the costly comparisons really run."""
+    within_budget("painted")
 
 
 # ------------------------------------------------------------------ the whole loop
@@ -881,7 +896,53 @@ def test_what_the_hud_shows_reaches_the_state_machine():
     tracker = MT.MatchTracker(lambda row: None, lambda text: None, cues=Cues(), machine=Machine())
     tracker.offer(0.0, {**fake_frame(), "hud": True})
     tracker.offer(1.0, {**fake_frame(), "hud": False})
-    assert Machine.seen == [True, False]
+    tracker.offer(2.0, {**fake_frame(health=HP), "hud": False})
+    tracker.offer(3.0, {**fake_frame(scores={"connecting": 0.9}), "hud": False})
+    tracker.offer(4.0, {**fake_frame(scores={"connecting": 0.69}), "hud": False})
+    tracker.chest(chest_event(4.5))
+    tracker.offer(5.0, {**fake_frame(), "hud": False})
+    assert Machine.seen == [True, False, None, None, False, None], "beside a health bar, text or a chest the HUD is not read: it could change nothing"
+
+
+def near_miss(shade, seed):
+    """Every cue word with 47% of its ink: enough that every comparison really runs, too little for any to reach its threshold. No health
+    bar and busy HUD corners, so the HUD is read in full as well: the costliest frame the tracker can be given."""
+    rng = np.random.default_rng(seed)
+    frame = np.full((720, 1280, 3), shade, np.uint8)
+    for cue in M.CUES:
+        template = np.load(M.TEMPLATE_DIR / f"{cue.name}.npy") > 0
+        x0, y0 = cue.box[:2]
+        h, w = template.shape
+        ink = (255, 255, 255) if cue.ink == M.WHITE else (20, 20, 20)
+        frame[y0 + 2:y0 + 2 + h, x0 + 2:x0 + 2 + w][template & (rng.random(template.shape) < 0.47)] = ink
+    for x0, y0, x1, y1 in {cue.box for cue in M.HUD_CUES}:
+        box = frame[y0 - 6:y1 + 7, x0 - 6:x1 + 7]
+        box[rng.random(box.shape[:2]) < 0.3] = 230
+    return frame
+
+
+def test_the_hud_check_also_fits_the_budget_without_a_health_bar():
+    reader = M.CueReader()
+    for frame in (near_miss(90 + i, i) for i in range(4)):
+        assert max(reader.read(frame).values()) < M.SCORE_THRESHOLD and M.health_bar_pixels(frame) < 30 and reader.hud_in_view(frame) is False
+    within_budget("nearmiss")
+
+
+def test_the_threshold_itself_counts_as_text():
+    class Machine:
+        state = "UNKNOWN"
+        seen = []
+
+        def update(self, observation):
+            self.seen.append(observation.hud_in_view)
+            return []
+
+        def snapshot(self):
+            return None
+
+    tracker = MT.MatchTracker(lambda row: None, lambda text: None, cues=Cues(), machine=Machine())
+    tracker.offer(0.0, {**fake_frame(scores={"connecting": S.SCORE_THRESHOLD}), "hud": False})
+    assert Machine.seen == [None]
 
 
 if __name__ == "__main__":

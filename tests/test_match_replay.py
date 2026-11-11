@@ -217,6 +217,16 @@ def test_complete_match_needs_its_start_language_continuity_and_end():
     assert C.record_errors([r])
 
 
+def test_a_complete_match_may_end_by_leaving_but_never_by_the_video_stopping():
+    def ended(how):
+        r = record()
+        r.update(ended_by=how, ended_t=None, complete_duration_seconds=r["closed_t"] - r["played_from_t"], end_confidence="low")
+        return r
+    assert C.record_errors([ended("left_or_unknown")]) == []
+    for how in ("stopped", "lost", "discontinuity"):
+        assert C.record_errors([ended(how)]), how
+
+
 def test_adjacent_half_open_records_do_not_overlap():
     assert C.record_errors([record(), record(2, 10)]) == []
     assert C.record_errors([record(), record(2, 9)])

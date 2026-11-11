@@ -128,7 +128,7 @@ def test_the_reader_keeps_nothing_about_a_frame():
     reader = M.CueReader()
     before = set(vars(reader))
     reader.read(FRAMES[0])
-    assert set(vars(reader)) == before == {"_templates", "_ink", "_hud"}
+    assert set(vars(reader)) == before == {"_templates", "_ink", "_hud", "_hud_edges"}
 
 
 def test_a_frame_of_the_wrong_shape_is_refused():
@@ -290,6 +290,23 @@ def test_browser_pages_show_no_hud():
 def test_the_hud_is_on_the_waiting_island_too_so_it_cannot_start_a_match():
     rows = rows_of("waiting island")
     assert len(rows) >= 30 and sum(hud_seen(i) for i in rows) >= 0.8 * len(rows)
+
+
+def test_skipping_a_box_with_too_few_edges_never_changes_the_answer():
+    for row in range(len(HUD_KINDS)):
+        for cue in M.HUD_CUES:
+            x0, y0, x1, y1 = cue.box
+            shape = (y1 - y0 + 2 * M.HUD_SEARCH, x1 - x0 + 2 * M.HUD_SEARCH)
+            mask = np.unpackbits(HUD[cue.name][row])[:shape[0] * shape[1]].reshape(shape).astype(bool)
+            assert READER._hud_seen(cue, mask) == (READER.hud_score(cue.name, mask) >= cue.line)
+    rng = np.random.default_rng(5)
+    for cue in M.HUD_CUES:
+        template = READER._hud[cue.name].astype(bool)
+        for keep in np.linspace(0.05, 0.4, 15):
+            mask = np.zeros((template.shape[0] + 2 * M.HUD_SEARCH, template.shape[1] + 2 * M.HUD_SEARCH), bool)
+            inner = template & (rng.random(template.shape) < keep)
+            mask[M.HUD_SEARCH:M.HUD_SEARCH + template.shape[0], M.HUD_SEARCH:M.HUD_SEARCH + template.shape[1]] = inner
+            assert READER._hud_seen(cue, mask) == (READER.hud_score(cue.name, mask) >= cue.line), (cue.name, keep)
 
 
 def test_a_plain_picture_shows_no_hud():

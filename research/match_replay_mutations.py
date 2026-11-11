@@ -17,7 +17,10 @@ import test_match_replay as T
 MUTATIONS = [
     ("C", "if abs(r[\"observed_seconds\"] + r[\"uncertain_seconds\"] - span) > tolerance:", "if False:", "test_record_invariants_detect_each_impossible_time_total"),
     ("C", "if r[\"active_seconds\"] + r[\"spectating_seconds\"] > r[\"observed_seconds\"] + tolerance:", "if False:", "test_record_invariants_detect_each_impossible_time_total"),
-    ("C", "if not (r[\"observed_from_start\"] and r[\"english_confirmed\"] and not r[\"discontinuity\"] and r[\"ended_by\"] in ENDINGS):", "if False:", "test_complete_match_needs_its_start_language_continuity_and_end"),
+    ("C", "if not (r[\"observed_from_start\"] and r[\"english_confirmed\"] and not r[\"discontinuity\"] and r[\"ended_by\"] in COMPLETE_ENDINGS):", "if False:", "test_complete_match_needs_its_start_language_continuity_and_end"),
+    ("C", "COMPLETE_ENDINGS = ENDINGS | {\"left_or_unknown\"}", "COMPLETE_ENDINGS = ENDINGS | {\"left_or_unknown\", \"stopped\", \"lost\"}", "test_a_complete_match_may_end_by_leaving_but_never_by_the_video_stopping"),
+    ("C", "COMPLETE_ENDINGS = ENDINGS | {\"left_or_unknown\"}", "COMPLETE_ENDINGS = ENDINGS", "test_a_complete_match_may_end_by_leaving_but_never_by_the_video_stopping"),
+    ("C", "finish = ended if r[\"ended_by\"] in ENDINGS else r[\"closed_t\"]", "finish = ended", "test_a_complete_match_may_end_by_leaving_but_never_by_the_video_stopping"),
     ("C", "pairs = align(truth[\"matches\"], records, lambda a, b: overlap(a, b) or None)", "pairs = [(0, j) for j in range(len(records))]", "test_duplicate_prediction_cannot_satisfy_the_same_truth_twice"),
     ("C", "issues[\"false_endings\"].append", "[].append", "test_wrong_truth_fails_without_changing_predictions"),
     ("C", "issues[\"classification_errors\"].append", "[].append", "test_matching_does_not_hide_wrong_classifications"),

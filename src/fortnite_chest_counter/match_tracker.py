@@ -135,8 +135,11 @@ class MatchTracker:
         self._picture = picture.sample
         scores, health = self._reader.read(frame), self._cues.health_bar_pixels(frame)
         chests, self._pending = tuple(self._pending), []
+        # The HUD only matters when nothing else shows the game: beside a health bar, a chest or any text it changes nothing, so it is not read.
+        alone = health < S.HEALTH_BAR_MIN_PIXELS and not chests and max(scores.values(), default=0.0) < S.SCORE_THRESHOLD
+        hud = self._reader.hud_in_view(frame) if alone else None
         self._chests["no_picture" if picture.black or picture.frozen else "delivered"] += len(chests)
-        self._checkpoint(t, self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests, self._reader.hud_in_view(frame)))))
+        self._checkpoint(t, self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests, hud))))
         self._tell(t, picture)
         return True
 

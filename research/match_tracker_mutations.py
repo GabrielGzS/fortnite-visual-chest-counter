@@ -15,6 +15,11 @@ import test_match_tracker as T
 
 
 MUTATIONS = [
+    ("MT", "hud = self._reader.hud_in_view(frame) if alone else None", "hud = self._reader.hud_in_view(frame)", "test_what_the_hud_shows_reaches_the_state_machine"),
+    ("MT", "alone = health < S.HEALTH_BAR_MIN_PIXELS and not chests and max(scores.values(), default=0.0) < S.SCORE_THRESHOLD", "alone = health < S.HEALTH_BAR_MIN_PIXELS and not chests", "test_what_the_hud_shows_reaches_the_state_machine"),
+    ("MT", "alone = health < S.HEALTH_BAR_MIN_PIXELS and not chests and max(scores.values(), default=0.0) < S.SCORE_THRESHOLD", "alone = health < S.HEALTH_BAR_MIN_PIXELS and max(scores.values(), default=0.0) < S.SCORE_THRESHOLD", "test_what_the_hud_shows_reaches_the_state_machine"),
+    ("MT", "alone = health < S.HEALTH_BAR_MIN_PIXELS and not chests and max(scores.values(), default=0.0) < S.SCORE_THRESHOLD", "alone = health < S.HEALTH_BAR_MIN_PIXELS and not chests and max(scores.values(), default=0.0) <= S.SCORE_THRESHOLD", "test_the_threshold_itself_counts_as_text"),
+    ("MT", "picture.frozen, chests, hud))))", "picture.frozen, chests))))", "test_what_the_hud_shows_reaches_the_state_machine"),
     ("MT", "SAMPLE_SECONDS = 1.0", "SAMPLE_SECONDS = 0.5", "test_one_sample_per_second_at_every_frame_rate"),
     ("MT", "        self._last_sample_t = t\n", "", "test_one_sample_per_second_at_every_frame_rate"),
     ("MT", "SAMPLE_TOLERANCE = 1e-6", "SAMPLE_TOLERANCE = -0.05", "test_one_sample_per_second_at_every_frame_rate"),

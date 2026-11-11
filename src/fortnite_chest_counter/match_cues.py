@@ -110,6 +110,7 @@ class CueReader:
         self._templates = {cue.name: np.load(folder / f"{cue.name}.npy").astype(np.float32) for cue in CUES}
         self._ink = {name: float(template.sum()) for name, template in self._templates.items()}
         self._hud = {cue.name: np.load(HUD_TEMPLATE_DIR / f"{cue.name}.npy").astype(np.float32) for cue in HUD_CUES}
+        self._hud_edges = {name: float(template.sum()) for name, template in self._hud.items()}
 
     def _score(self, frame, name):
         """One template's best score in its box. A window holding k of the n ink pixels correlates at most sqrt(k/n), so when the
@@ -147,7 +148,20 @@ class CueReader:
     def hud_in_view(self, frame):
         """Is any fixed part of the HUD on screen? Evidence that the game is being shown, never that a match started or ended. Never writes to `frame`."""
         _check_frame(frame)
-        return any(self.hud_score(cue.name, hud_edges(frame, cue.box, HUD_SEARCH)) >= cue.line for cue in HUD_CUES)
+        masks = {}                                         # the two compass sizes share one box
+        for cue in HUD_CUES:
+            if cue.box not in masks:
+                masks[cue.box] = hud_edges(frame, cue.box, HUD_SEARCH)
+            if self._hud_seen(cue, masks[cue.box]):
+                return True
+        return False
+
+    def _hud_seen(self, cue, mask):
+        """A window holding k of the shape's n edge pixels correlates at most sqrt(k/n), so a box with fewer than line^2 * n edges cannot
+        reach the line and is not compared: the answer is the same, only cheaper."""
+        if mask.sum() < cue.line ** 2 * self._hud_edges[cue.name]:
+            return False
+        return self.hud_score(cue.name, mask) >= cue.line
 
 
 @dataclass(frozen=True)
