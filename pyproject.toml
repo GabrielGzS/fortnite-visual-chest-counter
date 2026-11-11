@@ -13,8 +13,8 @@ license-files = ["LICENSE"]
 dependencies = ["numpy", "scipy", "streamlink>=8.6", "pycryptodome"]   # streamlink: livestream URL input; pycryptodome: update signatures
 
 [project.optional-dependencies]
-gui = ["PySide6-Essentials>=6.8"]                      # the desktop app (v0.2.0+)
-dev = ["pytest", "PySide6-Essentials>=6.8", "pefile", "pillow", "matplotlib", "librosa", "soundfile"]
+gui = ["PySide6-Essentials>=6.8", "discord.py>=2.7,<3"]
+dev = ["pytest", "PySide6-Essentials>=6.8", "discord.py>=2.7,<3", "pefile", "pillow", "matplotlib", "librosa", "soundfile"]
 
 [project.scripts]
 fortnite-chest-counter = "fortnite_chest_counter.counter:main"
@@ -29,7 +29,7 @@ version = { attr = "fortnite_chest_counter.version.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-fortnite_chest_counter = ["templates/**/*.npy", "gui/assets/*.png", "gui/assets/*.ico"]
+fortnite_chest_counter = ["templates/**/*.npy", "gui/assets/*.png", "gui/assets/*.ico", "gui/assets/*.ttf", "gui/assets/*-license.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

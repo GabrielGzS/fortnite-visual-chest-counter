@@ -396,7 +396,7 @@ def load_update_settings(text):
 
 
 def test_update_settings_have_safe_defaults():
-    assert settings.DEFAULTS["update"] == {"check_automatically": True, "download_bandwidth": "adaptive", "custom_limit_kb_per_second": 2000}
+    assert settings.DEFAULTS["update"] == {"check_automatically": True, "download_bandwidth": "adaptive", "custom_limit_kb_per_second": 1000}
 
 
 def test_update_settings_are_validated():

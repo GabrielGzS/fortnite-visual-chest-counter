@@ -2,7 +2,7 @@
 
 Count the chests in a video file with the same detector as live counting. It runs faster than real time and **never changes
 your live counter or OBS overlay**. Counting a recording after the match is also the most conservative way to use the
-counter ([fair play](../../README.md#fair-play-and-compatibility)).
+counter ([fair play](../../README.md#compatibility-and-data)).
 
 ## Steps
 
@@ -18,8 +18,8 @@ Your Settings (for example **Fortnite language**) apply as in live counting.
 ## Which videos work well
 
 - Fortnite gameplay filling a **16:9** picture, with the HUD visible in its usual place.
-- English or Portuguese (Brazil) pop-ups. A HUD drawn up to about 1.3x larger is recognised for English pop-ups; those chests
-  count in APPROX only.
+- English, Brazilian Portuguese, or French pop-ups. The scale-aware path for larger English and French pop-ups counts
+  them in APPROX only.
 - A clean recording is best (for example an OBS recording of your gameplay scene). Stream recordings work too, but strong
   compression blurs the small pop-up text, so more chests end up in APPROX only.
 - No overlays covering the HUD; no 4:3 or vertical video.
@@ -34,4 +34,4 @@ runtime\python\python.exe -m fortnite_chest_counter video "C:\path\to\recording.
 `--start` / `--until` limit the analysis to that part of the video (in seconds). Run the commands in the app's folder.
 
 Not the same as **Review captures** (Settings), which replays the app's own diagnostic recordings to improve accuracy:
-see [CAPTURE.md](../CAPTURE.md).
+see [CAPTURE.md](diagnostic-capture.md).

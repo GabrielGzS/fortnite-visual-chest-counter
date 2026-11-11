@@ -52,7 +52,10 @@ MIN_FREE_BYTES = 3 * 1024 ** 3
 DEEPEST_PACKAGE_PATH = 110                                      # characters below the package folder, measured on v0.2.2 + a margin
 MAX_WINDOWS_PATH = 259
 TEMPLATE_FILES = ["chest/en/chest.npy", "chest/en/chest_small.npy", "chest/en/rare.npy", "chest/en/rare_small.npy",
-                  "chest/en/sprite.npy", "chest/en/sprite_small.npy", "chest/pt/bau.npy", "container_opened.npy",
+                  "chest/en/sprite.npy", "chest/en/sprite_small.npy", "chest/pt/bau.npy", "chest/fr/coffre.npy", "chest/fr/esprit.npy", "chest/fr/normal_xp.npy", "chest/fr/rare_xp.npy",
+                  "chest/fr/stack_exp.npy", "chest/fr/stack_rare.npy", "chest/fr/stack_x2.npy", "chest/fr/stack_x3.npy",
+                  "chest/fr/stack_x4.npy", "chest/fr/stack_digit2_alt.npy", "chest/fr/stack_sprite.npy",
+                  "container_opened.npy",
                   "ui/interaction_disc.npy", "ui/interaction_ring.npy"]                    # audio_fingerprint.npy is development-only
 THIRD_PARTY = ["numpy", "scipy"]
 # Livestream URL input (v0.2.1): Streamlink and its complete dependency closure on Windows / Python 3.13 (BSD / MIT /
@@ -61,6 +64,8 @@ THIRD_PARTY = ["numpy", "scipy"]
 STREAM_PACKAGES = ["streamlink", "attrs", "certifi", "cffi", "charset-normalizer", "h11", "idna", "isodate", "lxml",
                    "outcome", "pycountry", "pycparser", "pycryptodome", "PySocks", "requests", "sniffio", "sortedcontainers",
                    "trio", "trio-websocket", "urllib3", "websocket-client", "wsproto"]
+DISCORD_PACKAGES = ["discord.py", "aiohappyeyeballs", "aiohttp", "aiosignal", "audioop-lts", "frozenlist",
+                    "multidict", "propcache", "yarl"]
 # The window toolkit: only what QtCore + QtGui + QtWidgets + the Windows platform plugin load (their PE import closure;
 # the C/C++ runtime vcruntime140*.dll comes from runtime\python, which ships a newer one than PySide6).
 QT_FILES = {
@@ -228,7 +233,72 @@ def verify_record(dist):
     return d, base, checked
 
 
-def build_launcher(target, work, mingw=None):
+def apply_launcher_icon(target, icon):
+    """Replace the known launcher icon resources with the current bundled artwork."""
+    import ctypes
+    from ctypes import wintypes
+    import struct
+
+    data = Path(icon).read_bytes()
+    reserved, kind, count = struct.unpack_from("<HHH", data)
+    if reserved or kind != 1 or not count:
+        raise ValueError("The launcher icon is not an ICO file.")
+    directory = bytearray(struct.pack("<HHH", 0, 1, count))
+    images = []
+    for index in range(count):
+        width, height, colors, reserved, planes, bits, size, offset = struct.unpack_from("<BBBBHHII", data, 6 + index * 16)
+        image = data[offset:offset + size]
+        if not size or len(image) != size:
+            raise ValueError("The launcher icon contains an invalid image.")
+        images.append(image)
+        directory.extend(struct.pack("<BBBBHHIH", width, height, colors, reserved, planes, bits, size, index + 1))
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.LoadLibraryExW.argtypes = (wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD)
+    kernel.LoadLibraryExW.restype = wintypes.HMODULE
+    kernel.FreeLibrary.argtypes = (wintypes.HMODULE,)
+    kernel.BeginUpdateResourceW.argtypes = (wintypes.LPCWSTR, wintypes.BOOL)
+    kernel.BeginUpdateResourceW.restype = wintypes.HANDLE
+    kernel.UpdateResourceW.argtypes = (wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p,
+                                       wintypes.WORD, ctypes.c_void_p, wintypes.DWORD)
+    kernel.UpdateResourceW.restype = wintypes.BOOL
+    kernel.EndUpdateResourceW.argtypes = (wintypes.HANDLE, wintypes.BOOL)
+    kernel.EndUpdateResourceW.restype = wintypes.BOOL
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMODULE, ctypes.c_void_p,
+                                      ctypes.c_void_p, wintypes.WORD, ctypes.c_ssize_t)
+    kernel.EnumResourceLanguagesW.argtypes = (wintypes.HMODULE, ctypes.c_void_p, ctypes.c_void_p,
+                                              callback_type, ctypes.c_ssize_t)
+    kernel.EnumResourceLanguagesW.restype = wintypes.BOOL
+    languages = []
+    callback = callback_type(lambda module, kind, name, language, parameter: languages.append(language) or True)
+    module = kernel.LoadLibraryExW(str(Path(target).resolve()), None, 2)
+    if not module:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not kernel.EnumResourceLanguagesW(module, 14, 1, callback, 0):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.FreeLibrary(module)
+    handle = kernel.BeginUpdateResourceW(str(Path(target).resolve()), False)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        for language in languages:
+            for index, image in enumerate(images, 1):
+                buffer = ctypes.create_string_buffer(image)
+                if not kernel.UpdateResourceW(handle, 3, index, language, buffer, len(image)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            buffer = ctypes.create_string_buffer(bytes(directory))
+            if not kernel.UpdateResourceW(handle, 14, 1, language, buffer, len(directory)):
+                raise ctypes.WinError(ctypes.get_last_error())
+    except Exception:
+        kernel.EndUpdateResourceW(handle, True)
+        raise
+    if not kernel.EndUpdateResourceW(handle, False):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def build_launcher(target, work, mingw=None, *, development=False):
     """Compile packaging/launcher (C + icon + version info + manifest) into `target`. Reproducible: no timestamps."""
     env = dict(os.environ)
     if mingw:
@@ -245,8 +315,10 @@ def build_launcher(target, work, mingw=None):
     (work / "launcher.rc").write_text(RC_TEMPLATE.format(major=major, minor=minor, patch=patch, version=__version__,
                                                          app=APP_NAME, exe=EXE_NAME), encoding="ascii")
     subprocess.run([tools["windres"], "-i", "launcher.rc", "-O", "coff", "-o", "launcher.res"], cwd=work, env=env, check=True)
-    subprocess.run([tools["gcc"], "-O2", "-s", "-mwindows", "-o", "launcher.exe", str(LAUNCHER_DIR / "launcher.c"),
-                    "launcher.res", "-Wl,--no-insert-timestamp"], cwd=work, env=env, check=True)
+    defines = ["-DFCC_DEV_LAUNCHER"] if development else []
+    subprocess.run([tools["gcc"], "-O2", "-s", "-mwindows", *defines, "-o", "launcher.exe",
+                    str(LAUNCHER_DIR / "launcher.c"), "launcher.res", "-Wl,--no-insert-timestamp"],
+                   cwd=work, env=env, check=True)
     shutil.copy2(work / "launcher.exe", target)
     version = subprocess.run([tools["gcc"], "--version"], capture_output=True, text=True, env=env).stdout.splitlines()[0]
     return version
@@ -280,7 +352,8 @@ def signature_report(app_root):
 
 def write_package_files(runtime):
     """runtime/package-files.json: everything this release puts in runtime/. The updater uses it to notice anything else in there."""
-    files = sorted(p.relative_to(runtime).as_posix() for p in runtime.rglob("*") if p.is_file())
+    files = sorted(p.relative_to(runtime).as_posix() for p in runtime.rglob("*")
+                   if p.is_file() and p != runtime / PACKAGE_FILES)
     (runtime / PACKAGE_FILES).write_text(json.dumps({"format": 1, "version": __version__, "files": files}, indent=0) + "\n",
                                          encoding="utf-8", newline="\n")
 
@@ -314,7 +387,7 @@ def audit(app_root):
     print("Release audit passed: no samples, logs, saved counts, scripts or unexpected executables; OBS files start at 0.")
 
 
-def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_launcher=None):
+def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_launcher=None, replay_reader=None):
     key_problems = check_update_keys(TRUSTED_PUBLIC_KEYS)
     if key_problems:
         raise SystemExit("Refusing to build a release that could never accept an update:\n  " + "\n  ".join(key_problems))
@@ -360,7 +433,7 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
         dst = lib / PACKAGE / "templates" / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / "src" / PACKAGE / "templates" / rel, dst)
-    for dist in THIRD_PARTY + STREAM_PACKAGES:
+    for dist in THIRD_PARTY + STREAM_PACKAGES + DISCORD_PACKAGES:
         d, base, checked = verify_record(dist)
         # the package's own folders only (RECORD also lists helper scripts outside site-packages, e.g. ../../Scripts/f2py.exe)
         tops = sorted({Path(f).parts[0] for f in d.files if not str(f).endswith(".pyc") and Path(f).parts[0] != ".."})
@@ -430,7 +503,7 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
         if not files:
             raise SystemExit(f"missing licence text for {dist}")
         shutil.copy2(d.locate_file(files[0]), lic / name)
-    for dist in STREAM_PACKAGES:
+    for dist in STREAM_PACKAGES + DISCORD_PACKAGES:
         d = md.distribution(dist)
         files = [f for f in d.files if re.search(r"dist-info/(licenses/.+|LICEN[CS]E[^/]*|COPYING[^/]*|NOTICE[^/]*)$", str(f))]
         if not files:
@@ -446,7 +519,8 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
     # ---- 5. the launcher + user-facing files
     if prebuilt_launcher:
         shutil.copy2(prebuilt_launcher, app_root / EXE_NAME)
-        gcc = "a prebuilt launcher (compiled from the same source on the release PC)"
+        apply_launcher_icon(app_root / EXE_NAME, LAUNCHER_DIR / "app.ico")
+        gcc = "a prebuilt launcher with the current app icon resources"
     else:
         gcc = build_launcher(app_root / EXE_NAME, out / "_launcher-build", mingw)
     provenance += [f"launcher        : {EXE_NAME} built from packaging/launcher/launcher.c with {gcc}",
@@ -466,6 +540,14 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
     (obs / "chest_status.txt").write_text("0 certain • ~0 estimated\n", encoding="utf-8")
     (obs / "chest_counter.txt").write_text("CERTAIN OPENED CHESTS: 0\nAPPROX. OPENED CHESTS: 0\n", encoding="utf-8")
     (obs / "last_chest.txt").write_text("NO CHESTS YET\n", encoding="utf-8")
+
+    if replay_reader:
+        reader = runtime / "replay-reader"
+        required = ("ChestCounter.dll", "ChestCounter.deps.json", "ChestCounter.runtimeconfig.json", "LICENSE")
+        if not all((replay_reader / filename).is_file() for filename in required):
+            raise SystemExit("The replay reader folder must include the .NET build and its upstream license.")
+        shutil.copytree(replay_reader, reader,
+                        ignore=shutil.ignore_patterns("*.exe", "*.pdb", "*.replay", "data.json"))
 
     summary, listing = signature_report(app_root)
     provenance += summary
@@ -501,15 +583,20 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=str(ROOT / "build_out"))
     ap.add_argument("--preflight", action="store_true", help="only report whether this PC can build the release")
     ap.add_argument("--launcher-only", action="store_true", help="only compile the launcher (seconds of work), to use with --prebuilt-launcher elsewhere")
+    ap.add_argument("--development-launcher", action="store_true", help="with --launcher-only, launch the checkout's .venv")
     ap.add_argument("--prebuilt-launcher", help="use this launcher instead of compiling one, on a PC that cannot run the compiler")
+    ap.add_argument("--replay-reader", type=Path, help="LED-N .NET reader build with dependency licenses")
     a = ap.parse_args()
+    if a.development_launcher and not a.launcher_only:
+        ap.error("--development-launcher requires --launcher-only")
     if a.preflight:
         sys.exit(preflight(a.python_embed, a.ffmpeg_zip, a.ffmpeg_source, a.mingw, a.out, a.prebuilt_launcher))
     if a.launcher_only:
         Path(a.out).mkdir(parents=True, exist_ok=True)
-        build_launcher(Path(a.out) / EXE_NAME, Path(a.out) / "_launcher-build", a.mingw)
+        work = ROOT / "build_out" / "_development-launcher-build" if a.development_launcher else Path(a.out) / "_launcher-build"
+        build_launcher(Path(a.out) / EXE_NAME, work, a.mingw, development=a.development_launcher)
         print(f"Built {Path(a.out) / EXE_NAME} for v{__version__}\nSHA-256 {sha256(Path(a.out) / EXE_NAME)}")
         sys.exit(0)
     if not (a.python_embed and a.ffmpeg_zip and a.ffmpeg_source):
         ap.error("--python-embed, --ffmpeg-zip and --ffmpeg-source are required to build")
-    build(Path(a.out), Path(a.python_embed), Path(a.ffmpeg_zip), Path(a.ffmpeg_source), a.mingw, a.prebuilt_launcher)
+    build(Path(a.out), Path(a.python_embed), Path(a.ffmpeg_zip), Path(a.ffmpeg_source), a.mingw, a.prebuilt_launcher, a.replay_reader)

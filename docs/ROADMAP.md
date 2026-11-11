@@ -1,12 +1,15 @@
 # Roadmap
 
+The milestones below include historical plans. For the current local desktop behaviour, see the
+[match and Discord guide](guides/matches-and-discord.md) and [change notes](CHANGES.md).
+
 ## v0.1.0 - Public Beta (released)
 
 Detector frozen at the `rc1` baselines (`tests/baselines/*_rc1.json`).
 
 ## v0.1.1 - usability (released; download refreshed 2026-11-06)
 
-No detection changes. Notes: [RELEASE_NOTES_v0.1.1.md](RELEASE_NOTES_v0.1.1.md).
+No detection changes. Notes: [RELEASE_NOTES_v0.1.1.md](releases/RELEASE_NOTES_v0.1.1.md).
 
 - Customisable overlay text (`certain_text`, `approx_text`, `{count}` / `{certain}` / `{approx}`), `show` mode, and the
   single `chest_counter.txt` overlay file. v0.1.0 settings and file names keep working.
@@ -22,14 +25,14 @@ No detection changes. Notes: [RELEASE_NOTES_v0.1.1.md](RELEASE_NOTES_v0.1.1.md).
 ## v0.2.0 - Desktop app (released 2026-11-07, public beta)
 
 One detection addition (scale-aware pop-ups, below); otherwise the v0.1.1 detector. Notes:
-[RELEASE_NOTES_v0.2.0.md](RELEASE_NOTES_v0.2.0.md). Trust/signing analysis: [WINDOWS_TRUST.md](WINDOWS_TRUST.md).
+[RELEASE_NOTES_v0.2.0.md](releases/RELEASE_NOTES_v0.2.0.md). Trust/signing analysis: [WINDOWS_TRUST.md](maintenance/WINDOWS_TRUST.md).
 
 Done: one PySide6 app replacing every `.bat` (Dashboard with source list + Start/Stop, optional activity panel with
 Normal/Debug detail, optional live preview, Overlay page, Edit counts / Reset, Analyse a recording, Settings, Help &
 diagnostics); counting stays in the separate `live --gui` worker; small reproducible launcher exe; trimmed signed Qt files;
 signature report per build; tests in `tests/test_app.py`.
 
-Also done: **diagnostic capture** ([CAPTURE.md](CAPTURE.md)) - optional recording of exactly what the detector analysed
+Also done: **diagnostic capture** ([CAPTURE.md](guides/diagnostic-capture.md)) - optional recording of exactly what the detector analysed
 (around decisions/marks, or the whole session), Ctrl+Alt+M / Mark moment / console M, labels.csv, and the `review`
 command that replays captures through the current detector. This is the data foundation for everything below.
 
@@ -38,14 +41,14 @@ Release items (status 2026-11-07):
    earlier Twitch/Switch source that did not count: cause not confirmed.
 2. Done: the **scale-aware pop-up channel** (`estimator.SCALE_AWARE_POPUPS`, user's decision to ship it in v0.2.0) -
    event-identical on all references, recovers every verified miss on 1.2x-HUD streams (APPROX only). Evidence, cost and
-   limits: [INVESTIGATION_2026-11-07.md](INVESTIGATION_2026-11-07.md).
+   limits: [INVESTIGATION_2026-11-07.md](reference/INVESTIGATION_2026-11-07.md).
 3. Done after release (2026-11-07): **dual-PC SRT test with the public v0.2.0 download.** Gaming PC (i9 13th gen, RTX 4080)
    OBS SRT caller -> local network -> streaming PC (i5 13th gen, RTX 4070) OBS Media Source (SRT listener, MPEG-TS) ->
    OBS Virtual Camera -> app. Video: a Fortnite stream playing on the gaming PC. Numerous chests counted, no noticeable
    lag. Documentation only: [guides/obs-dual-pc-srt.md](guides/obs-dual-pc-srt.md), the v0.2.0 release notes and the
    GitHub release description were updated; zip, checksums and tag unchanged.
 4. Open: Smart App Control on the second PC (CodeIntegrity log: which file is refused); signing decision
-   ([WINDOWS_TRUST.md](WINDOWS_TRUST.md)).
+   ([WINDOWS_TRUST.md](maintenance/WINDOWS_TRUST.md)).
 5. Open: a physical capture card (through OBS and directly) and the OBS projector / Screen input.
 6. Optional, separate change: replace `scipy.signal.fftconvolve` with NumPy (-107 unsigned files, -30 MB) only if the
    regression harness shows identical events.
@@ -61,7 +64,7 @@ recognition but turning detections into gameplay statistics:
 | v0.2.1 | Livestream URL input (Twitch / YouTube, no OBS) + OBS compatibility: WebSocket overlay output, OBS projector input, analysis-rate presets (released) |
 | v0.2.2 | Better detection (stacked pop-ups, smaller HUD), count profiles, chest types (released) |
 | v0.2.3 | Built-in updater with signed releases (experimental: real-package testing postponed to v0.2.4) |
-| v0.2.4 | The updater's first real update, plus the postponed checks listed in [UPDATER.md](UPDATER.md) |
+| v0.2.4 | The updater's first real update, plus the postponed checks listed in [UPDATER.md](maintenance/UPDATER.md) |
 | **v0.3.0** | **Match Tracking & Statistics Foundation** - the backend that makes statistics possible |
 | **v0.4.0** | **Statistics & Performance Analytics** - records, history and trends on top of v0.3.0 |
 
@@ -71,7 +74,7 @@ the user approves before any code changes.
 ### v0.2.1 - OBS compatibility (in development, branch `dev/v0.2.1`)
 
 Driven by a real streamer setup: capture card owned by OBS, OBS Virtual Camera used by another program, and an existing
-"password-protected socket" counter. No detector change. Notes: [RELEASE_NOTES_v0.2.1.md](RELEASE_NOTES_v0.2.1.md).
+"password-protected socket" counter. No detector change. Notes: [RELEASE_NOTES_v0.2.1.md](releases/RELEASE_NOTES_v0.2.1.md).
 
 - **OBS WebSocket overlay output** (optional, off by default): the app copies `obs_output/chest_counter.txt` into a chosen
   OBS Text source through OBS's built-in WebSocket server. The text file stays the source of truth; the worker is
@@ -131,7 +134,7 @@ thing; recognising a match boundary across lobby, matchmaking / loading screens,
 spectating, victory / results, replays, streams and different HUD settings is another. No assumption that a universal
 visual cue exists:
 
-1. Collect labelled whole-session captures ([CAPTURE.md](CAPTURE.md)) covering those situations, from more than one
+1. Collect labelled whole-session captures ([CAPTURE.md](guides/diagnostic-capture.md)) covering those situations, from more than one
    streamer and HUD scale.
 2. Measure each candidate cue on them (hit rate, false triggers, delay) before relying on it.
 3. Combine cues in an **explicit state machine** (for example unknown / lobby / in match / spectating / post-match, with
@@ -175,7 +178,7 @@ Every step is built and measured on labelled captures (CAPTURE.md), never by tun
 ### Video input candidates
 
 The source picker is part of the v0.2.0 app's video source list. Input layer only; the detector stays frozen. Rationale and
-measurements: [INPUT_OPTIONS.md](INPUT_OPTIONS.md).
+measurements: [INPUT_OPTIONS.md](reference/INPUT_OPTIONS.md).
 
 1. **OBS projector window capture** (Windows Graphics Capture via FFmpeg `gfxcapture`): uses gameplay OBS already captures,
    leaves the Virtual Camera free, opens the capture card only once (in OBS), needs no plugin or second monitor.
@@ -184,11 +187,11 @@ measurements: [INPUT_OPTIONS.md](INPUT_OPTIONS.md).
 3. **Clear "device in use" message** when OBS (or another app) already holds the capture card.
 4. **Tell identical capture cards apart** (DirectShow alternative names).
 
-Validation required before release: see the checklist at the end of [INPUT_OPTIONS.md](INPUT_OPTIONS.md).
+Validation required before release: see the checklist at the end of [INPUT_OPTIONS.md](reference/INPUT_OPTIONS.md).
 
 ## Later
 
 - OBS WebSocket screenshots as a video input (see v0.2.1 "Deferred"), only after a live-stream measurement.
 - Own OBS plugin for a fully integrated "pick your gameplay source" experience, if users ask for it.
 - More Fortnite languages (needs a pop-up word template per language).
-- Accuracy: validate the blurred second trigger (see [ACCURACY_NOTES.md](ACCURACY_NOTES.md)) with labeled live sessions.
+- Accuracy: validate the blurred second trigger (see [ACCURACY_NOTES.md](reference/ACCURACY_NOTES.md)) with labeled live sessions.

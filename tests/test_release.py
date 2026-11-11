@@ -255,7 +255,7 @@ def test_scale_aware_popup_counts_a_larger_hud_word_as_approx_only():
     (ev,) = _run_estimator(_word_frames(1.25), scale_aware=True)
     assert ev["adjusted_tier"] == "MEDIUM" and ev["approx_counted"] and not ev["certain_counted"]
     assert ev["scaled_popup"]["scale"] == 0.8 and ev["scaled_popup"]["blur"] >= estimator.SCALED_TRIGGER
-    assert "scale-aware" in ev["reason"] and "never CERTAIN" in ev["reason"]
+    assert "scale-aware" in ev["reason"] and "counted approx only" in ev["reason"]
     assert abs(ev["time"] - 1.0) < 0.1                                                # onset time, not promotion time
 
 
@@ -277,10 +277,16 @@ def test_scale_aware_popup_is_counted_once_when_a_stacked_line_moves_it():
     assert len(events) == 1 and events[0]["approx_counted"] and not events[0]["certain_counted"]
 
 
-def test_scale_aware_channel_only_for_the_specific_english_word():
+def test_scale_aware_channel_respects_language_and_requires_portuguese_interaction_support():
+    import numpy as np
+
     try:
         estimator.configure(dict(DEFAULTS["detector"], languages=["pt"]))
-        assert estimator.ChestEstimator().scaled_templates == {}                     # short PT word: never scaled
+        portuguese = estimator.ChestEstimator()
+        assert list(portuguese.scaled_templates) == [estimator.PORTUGUESE_POPUP]
+        roi = np.full((202, 360, 3), (195, 130, 230), dtype=np.uint8)
+        mask = estimator.V.lavender_mask(roi)
+        assert portuguese._scaled_best(roi, mask, supported_portuguese=False)[4] is None
         estimator.configure(dict(DEFAULTS["detector"], medium_counts_alone_languages=[]))
         assert estimator.ChestEstimator().scaled_templates == {}                     # user: English MEDIUM not alone
         estimator.configure(DEFAULTS["detector"])
@@ -299,6 +305,7 @@ def test_snapshots_are_saved_only_when_enabled_and_never_logged_as_pixels():
     import numpy as np
     with tempfile.TemporaryDirectory() as tmp:
         cfg = tmp_config(tmp)
+        cfg["logging"]["enabled"] = True
         cfg["logging"]["save_snapshots"] = True
         s = chest_counter.CounterSession(cfg)
         ev = dict(event(False, True), _snapshot=np.full((6, 9, 3), 200, np.uint8))
@@ -307,7 +314,8 @@ def test_snapshots_are_saved_only_when_enabled_and_never_logged_as_pixels():
         assert len(pngs) == 1 and pngs[0].read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
         line = s.log.path.read_text(encoding="utf-8")
         assert "_snapshot" not in line and pngs[0].name in line
-        off = chest_counter.CounterSession(tmp_config(tmp))                    # default: off
+        cfg["logging"]["save_snapshots"] = False
+        off = chest_counter.CounterSession(cfg)
         off.apply([dict(event(False, True), _snapshot=np.zeros((2, 2, 3), np.uint8))], 3.0, quiet=True)
         assert len(list((Path(tmp) / "logs" / "snapshots").rglob("*.png"))) == 1
 
@@ -325,9 +333,10 @@ def test_manual_adjust_keeps_invariant():
 
 def test_first_run_creates_folders_and_zero_files():
     with tempfile.TemporaryDirectory() as tmp:
-        code, text = run_main(["show"] + args_for(tmp))
+        code, text = run_main(["show", "--config", str(Path(tmp) / "missing.toml")] + args_for(tmp))
         assert code == 0, text
         assert (Path(tmp) / "state").is_dir() and (Path(tmp) / "logs").is_dir()
+        assert not list((Path(tmp) / "logs").iterdir())  # preflight creates folders, but logging is opt-in
         assert (Path(tmp) / "obs_output" / "certain_chests.txt").read_text(encoding="utf-8") == "CERTAIN OPENED CHESTS: 0\n"
         assert (Path(tmp) / "obs_output" / "approximate_chests.txt").read_text(encoding="utf-8") == "APPROX. OPENED CHESTS: 0\n"
         assert (Path(tmp) / "obs_output" / "chest_status.txt").exists() and (Path(tmp) / "obs_output" / "last_chest.txt").exists()
@@ -415,7 +424,7 @@ def test_state_with_approx_below_certain_is_repaired():
 def test_default_config_is_valid_and_complete():
     cfg, origin, warnings = settings.load_config(Path(tempfile.gettempdir()) / "nope-not-here" / "x.toml")
     assert cfg == DEFAULTS and origin == "built-in defaults"
-    assert cfg["detector"]["languages"] == ["en", "pt"] and cfg["detector"]["process_fps"] == 15
+    assert cfg["detector"]["languages"] == ["en"] and cfg["detector"]["process_fps"] == 15
 
 
 def test_example_config_loads_without_warnings_and_equals_defaults():
@@ -597,12 +606,13 @@ def test_console_close_is_a_clean_stop():
         return
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
+        (tmp / "config.toml").write_text('[logging]\nenabled = true\n', encoding="utf-8")
         video = tmp / "black.mp4"
         subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=30", "-t", "40",
                         "-c:v", "mpeg4", str(video)], check=True)
         env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent / "src"))
         child = subprocess.Popen([sys.executable, "-m", "fortnite_chest_counter", "live", "--source", "file", "--video", str(video),
-                                  *args_for(tmp)], cwd=tmp, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  "--config", str(tmp / "config.toml"), *args_for(tmp)], cwd=tmp, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                  creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
         try:
             state_file = tmp / "state" / "chest_state.json"
@@ -616,6 +626,18 @@ def test_console_close_is_a_clean_stop():
         finally:
             if child.poll() is None:
                 child.kill()
+            child.wait(timeout=5)
+        # Console shutdown intentionally requests decoder termination without waiting.
+        # Wait for Windows to release this input before TemporaryDirectory removes it.
+        deadline = _time.monotonic() + 5
+        while True:
+            try:
+                video.unlink()
+                break
+            except PermissionError:
+                if _time.monotonic() >= deadline:
+                    raise
+                _time.sleep(0.05)
         log = next((tmp / "logs").glob("session_*.jsonl")).read_text(encoding="utf-8")
         end = [json.loads(l) for l in log.splitlines() if '"session_end"' in l]
         assert end and end[0]["stop_reason"] == "Ctrl+Break", log[-400:]          # same handler as the X
@@ -634,13 +656,13 @@ def _obs_files(tmp, display_overrides, certain=20, approx=231):
     return {p.name: p.read_text(encoding="utf-8") for p in Path(tmp).glob("*.txt")}
 
 
-def test_default_overlay_files_are_unchanged_from_v010_plus_one_new_file():
+def test_default_overlay_keeps_legacy_files_and_uses_one_line():
     with tempfile.TemporaryDirectory() as tmp:
         files = _obs_files(tmp, {}, 1232, 1247)
     assert files["certain_chests.txt"] == "CERTAIN OPENED CHESTS: 1,232\n"
     assert files["approximate_chests.txt"] == "APPROX. OPENED CHESTS: 1,247\n"
     assert files["chest_status.txt"] == "1,232 certain • ~1,247 estimated\n"
-    assert files["chest_counter.txt"] == "CERTAIN OPENED CHESTS: 1,232\nAPPROX. OPENED CHESTS: 1,247\n"
+    assert files["chest_counter.txt"] == "1,232 certain • ~1,247 estimated\n"
     assert set(files) == {"certain_chests.txt", "approximate_chests.txt", "chest_status.txt", "chest_counter.txt", "last_chest.txt"}
 
 
@@ -648,7 +670,7 @@ def test_show_modes_for_the_single_overlay_file():
     with tempfile.TemporaryDirectory() as tmp:
         assert _obs_files(tmp, {"show": "approx"})["chest_counter.txt"] == "APPROX. OPENED CHESTS: 231\n"
         assert _obs_files(tmp, {"show": "certain"})["chest_counter.txt"] == "CERTAIN OPENED CHESTS: 20\n"
-        assert _obs_files(tmp, {"show": "both"})["chest_counter.txt"].count("\n") == 2
+        assert _obs_files(tmp, {"show": "both", "both_layout": "stacked"})["chest_counter.txt"].count("\n") == 2
 
 
 def test_custom_wording_placeholders_unicode_braces_and_new_lines():
@@ -804,7 +826,9 @@ def _run_with_answers(argv, answers):
 
 def test_set_count_sets_approx_and_certain_zero_and_updates_obs():
     with tempfile.TemporaryDirectory() as tmp:
-        code, text = run_main(["set-count", "150"] + args_for(tmp))
+        config = Path(tmp) / "config.toml"
+        config.write_text('[logging]\nenabled = true\n', encoding="utf-8")
+        code, text = run_main(["set-count", "150", "--config", str(config)] + args_for(tmp))
         assert code == 0 and "Starting count set" in text
         st = _state_of(tmp)
         assert (st["certain"], st["approximate"]) == (0, 150)
@@ -987,7 +1011,7 @@ def test_running_counter_picks_up_overlay_changes():
 def test_show_command_says_what_viewers_see_and_which_file():
     with tempfile.TemporaryDirectory() as tmp:
         code, text = run_main(["show"] + args_for(tmp))
-        assert code == 0 and "Viewers see (both numbers on two lines)" in text and "chest_counter.txt" in text
+        assert code == 0 and "Viewers see (both numbers on one line)" in text and "chest_counter.txt" in text
 
 
 # ------------------------------------------------------------------ 9. four display modes, one OBS file (v0.1.1 refresh)
@@ -1008,8 +1032,8 @@ def test_four_display_modes_all_render_to_chest_counter_txt():
 def test_existing_configs_keep_their_look():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "config.toml"
-        for text, expected in (('[display]\nshow = "both"\n', "CERTAIN OPENED CHESTS: 20\nAPPROX. OPENED CHESTS: 231\n"),
-                               ('[display]\ncertain_label = "CONFIRMED"\n', "CONFIRMED: 20\nAPPROX. OPENED CHESTS: 231\n"),
+        for text, expected in (('[display]\nshow = "both"\nboth_layout = "stacked"\n', "CERTAIN OPENED CHESTS: 20\nAPPROX. OPENED CHESTS: 231\n"),
+                               ('[display]\ncertain_label = "CONFIRMED"\nboth_layout = "stacked"\n', "CONFIRMED: 20\nAPPROX. OPENED CHESTS: 231\n"),
                                ('[display]\nshow = "approx"\napprox_text = "Hunt: {count}"\n', "Hunt: 231\n")):
             path.write_text(text, encoding="utf-8")
             cfg, _, warnings = settings.load_config(path)

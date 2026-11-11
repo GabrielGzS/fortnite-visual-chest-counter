@@ -4,6 +4,8 @@ CERTAIN / APPROX (detection/chest_types.py, counter.type_breakdown).        Run:
 """
 
 import sys
+
+import pytest
 from pathlib import Path as _P
 
 sys.path.insert(0, str(_P(__file__).resolve().parent.parent / "src"))   # run without installing
@@ -80,7 +82,9 @@ def test_each_counted_chest_adds_to_its_type_and_the_totals_once():
 
 def test_a_later_type_reading_moves_the_chest_without_changing_any_total():
     with tempfile.TemporaryDirectory() as tmp:
-        session = C.CounterSession(_cfg(tmp))
+        cfg = _cfg(tmp)
+        cfg["logging"]["enabled"] = True
+        session = C.CounterSession(cfg)
         _quiet(session.apply, [_ev(3.0, True, CT.UNKNOWN)], 4.0, quiet=True)
         assert session.apply_type_updates([{"time": 3.0, "chest_type": CT.RARE, "type_confidence": 0.9}])
         st = session.state
@@ -167,6 +171,7 @@ def test_counted_chests_of_every_case_get_the_right_type_or_unknown():
     assert total >= 28 and unknown <= 3, (total, unknown)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="The desktop UI integrates Windows native APIs.")
 def test_app_shows_the_type_split_of_the_selected_profile():
     import os
     try:

@@ -21,10 +21,19 @@ import uuid
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from fortnite_chest_counter import counter as C
 from fortnite_chest_counter import paths, settings
 from fortnite_chest_counter.console import CONSOLE
+
+
+@pytest.fixture(autouse=True)
+def isolate_discord_credentials(monkeypatch):
+    from fortnite_chest_counter import discord_group, discord_summary
+
+    monkeypatch.setattr(discord_group, "load_webhook", lambda: None)
+    monkeypatch.setattr(discord_summary, "load", lambda: None)
 
 ROOT = Path(__file__).resolve().parent.parent
 SAMPLE = ROOT / "samples" / "video tests" / "Fortnite-PS5-Pro-HD-No-Audio.mp4"
@@ -104,7 +113,7 @@ def test_session_announces_counts_and_overlay():
     assert out[0]["type"] == "event" and out[0]["certain"] == 1 and out[0]["approx"] == 1
     counts = [m for m in out if m["type"] == "counts"]
     assert counts[-1] == {"type": "counts", "certain": 1, "approx": 1, "certain_text": "1", "approx_text": "1",
-                          "overlay": "CERTAIN OPENED CHESTS: 1\nAPPROX. OPENED CHESTS: 1"}
+                          "overlay": "1 certain • ~1 estimated"}
     types = [m for m in out if m["type"] == "types"]                  # v0.2.2: the chest-type split follows the counts
     assert out[-1]["type"] == "types" and types[-1]["breakdown"]["unknown"] == {"certain": 1, "approx": 1}
     assert types[-1]["breakdown"]["unclassified"] == {"certain": 0, "approx": 0}
@@ -162,12 +171,14 @@ def test_gui_worker_runs_live_and_stops_cleanly_on_request():
     stdin = sys.stdin
     try:
         with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "config.toml"
+            config.write_text('[logging]\nenabled = true\n', encoding="utf-8")
             sys.stdin = os.fdopen(read, "r")
             threading.Timer(1.5, lambda: os.write(write, b"stop\n")).start()
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 code = C.main(["live", "--gui", "--state", str(Path(tmp) / "s.json"), "--obs-dir", str(Path(tmp) / "o"),
-                               "--log-dir", str(Path(tmp) / "l")])
+                               "--log-dir", str(Path(tmp) / "l"), "--config", str(config)])
             log = [json.loads(l) for l in next((Path(tmp) / "l").glob("*.jsonl")).read_text(encoding="utf-8").splitlines()]
     finally:
         sources.make_source, paths.ffmpeg_executable, sys.stdin = real_make, real_ff, stdin
@@ -203,16 +214,46 @@ def test_preview_block_round_trip_and_only_when_wanted():
         reader.close()
 
 
+def test_hdr_capture_can_publish_a_preview_without_detector_frames():
+    from types import SimpleNamespace
+
+    from fortnite_chest_counter.input.video_sources import LiveSource, tone_map_scrgb
+    from fortnite_chest_counter.preview import PreviewReader, PreviewWriter, block_name
+
+    name = block_name(uuid.uuid4().hex[:12])
+    reader = PreviewReader(name)
+    writer = PreviewWriter(name)
+    source = LiveSource("test HDR", [], 15, hdr=True)
+    frame = np.full((720, 1280, 4), 2.0, dtype="<f2")
+    source._process = SimpleNamespace(stdout=io.BytesIO(frame.tobytes()))
+    source._t0 = time.monotonic()
+    source.set_preview(writer)
+    try:
+        reader.set_wanted(True)
+        source._read_frames()
+        assert source.frames_processed == 0
+        _, width, height, data = reader.read()
+        expected = tone_map_scrgb(frame[::2, ::2], exposure=0.25)
+        assert np.array_equal(np.frombuffer(data, np.uint8).reshape(height, width, 3), expected)
+        _, detector_frame = next(source.frames())
+        assert np.array_equal(detector_frame, tone_map_scrgb(frame))
+    finally:
+        source.set_preview(None)
+        writer.close()
+        reader.close()
+
+
 # ------------------------------------------------------------------ the app's count editing
 
 def test_set_counts_and_reset_from_the_app():
     with tempfile.TemporaryDirectory() as tmp:
         cfg = tmp_cfg(tmp)
+        cfg["logging"]["enabled"] = True
         session = C.set_counts(cfg, 3, 150)
         assert (session.state["certain"], session.state["approximate"]) == (3, 150)
         assert C.load_state(cfg["state"]["path"])["approximate"] == 150
         assert (Path(tmp) / "obs_output" / "chest_counter.txt").read_text(encoding="utf-8") == \
-            "CERTAIN OPENED CHESTS: 3\nAPPROX. OPENED CHESTS: 150\n"
+            "3 certain • ~150 estimated\n"
         for bad in ((5, 4), (-1, 3), (0, C.MAX_STARTING_COUNT + 1)):
             try:
                 C.set_counts(cfg, *bad)
@@ -223,8 +264,8 @@ def test_set_counts_and_reset_from_the_app():
         C.set_counts(cfg, 0, 0, "reset")
         state = C.load_state(cfg["state"]["path"])
         assert (state["certain"], state["approximate"]) == (0, 0)
-        actions = [json.loads(l).get("action") for l in next((Path(tmp) / "logs").glob("*.jsonl")).read_text(
-            encoding="utf-8").splitlines()]
+        actions = [json.loads(line).get("action") for log in (Path(tmp) / "logs").glob("*.jsonl")
+                   for line in log.read_text(encoding="utf-8").splitlines()]
         assert "set_count" in actions and "reset" in actions
 
 
@@ -263,11 +304,11 @@ def test_child_process_flags_hide_consoles_only_when_asked_or_windowless():
 
 def test_language_choices_map_to_the_detector_setting_and_back():
     names = [name for name, _ in settings.LANGUAGE_CHOICES]
-    assert names == ["English", "Portuguese (Brazil)", "Both (English + Portuguese (Brazil))"]
+    assert names == ["English", "Portuguese (Brazil)", "Both (English + Portuguese (Brazil))", "French"]
     for i, (_, langs) in enumerate(settings.LANGUAGE_CHOICES):
         assert settings.language_choice(langs) == i
     assert settings.language_choice(["pt", "en"]) == 2                 # order does not matter
-    assert settings.language_choice(settings.DEFAULTS["detector"]["languages"]) == 2   # default unchanged: both
+    assert settings.language_choice(settings.DEFAULTS["detector"]["languages"]) == 0   # English
 
 
 def test_language_choice_is_saved_and_existing_configs_keep_their_language():
@@ -286,7 +327,163 @@ def test_language_choice_is_saved_and_existing_configs_keep_their_language():
         assert "# my settings" in text and 'show = "approx"' in text and "process_fps = 15" in text
 
 
-# ------------------------------------------------------------------ diagnostic capture
+def test_token_odds_use_total_and_separate_estimated_chests():
+    qt = _qt()
+    if qt is None:
+        return
+    from PySide6.QtCore import Qt
+    from fortnite_chest_counter.gui import app as A
+
+    previous_dir, previous_app_dir = os.getcwd(), paths.APP_DIR
+    personal_template = "Opened {total}\nConfirmed {certain} · Estimated {approx}\nOdds {chance}\nGames {matches}\n{types}"
+    cumulative_template = "Lifetime {total}\nLifetime odds {chance}\nGames {matches}"
+    with tempfile.TemporaryDirectory() as tmp:
+        os.chdir(tmp)
+        paths.APP_DIR = Path(tmp)
+        win = None
+
+        def check_shared_output():
+            text = win.dashboard.screen_overlay_text(win.overlay.display)
+            assert win.dashboard.screen_overlay.plain_text == text
+            assert win.dashboard.overlay_preview.plain_text == text
+            assert Path(win.overlay.obs_path.text()).read_text(encoding="utf-8") == text + "\n"
+
+        try:
+            C.update_config_file(A.config_file(), "app", {"screen_overlay_shared": False, "auto_match_lifecycle": False})
+            C.update_config_file(A.config_file(), "display", {
+                "use_custom_sections": True, "screen_show_token": True, "screen_show_matches": False,
+                "screen_show_types": False, "screen_personal_title": "My match",
+                "screen_personal_template": personal_template, "screen_team_enabled": False,
+                "screen_cumulative_enabled": False,
+            })
+            win = A.MainWindow()
+            win.timer.stop()
+            win._set(5, 10, "set-count")
+            win.read_state(force=True)
+            assert win.dashboard.certain.value.text() == "5"
+            assert win.dashboard.approx.value.text() == "5"
+            assert win.dashboard.total.text() == "10"
+            assert win.dashboard.token_odds.text() == "0.007272%"
+            win.dashboard.token_boost.setCurrentIndex(1)
+            assert win.dashboard.token_odds.text() == "0.010909%"
+            win.dashboard.token_boost.setCurrentIndex(2)
+            assert win.dashboard.token_odds.text() == "0.014545%"
+            win.dashboard.token_boost.setCurrentIndex(0)
+            win.overlay.show_screen_overlay.setChecked(True)
+            overlay = win.dashboard.screen_overlay
+            assert overlay.windowFlags() & Qt.WindowTransparentForInput
+            assert overlay.windowFlags() & Qt.WindowStaysOnTopHint
+            assert win.overlay.share_screen_overlay.isEnabled()
+            assert not win.overlay.share_screen_overlay.isChecked()
+            win.overlay.share_screen_overlay.setChecked(True)
+            assert overlay.plain_text.splitlines() == [
+                "My match", "Opened 10", "Confirmed 5 · Estimated 5", "Odds 0.007272%",
+            ]
+            check_shared_output()
+            win.dashboard.token_mode.setCurrentText("Squad")
+            assert win.dashboard.token_odds.text() == "0.007272%"
+            win.dashboard.token_mode.setCurrentText("Solo")
+            assert win.dashboard.token_odds.text() == "0.007272%"
+            win._set(0, 0, "reset")
+            win.read_state(force=True)
+            win.dashboard.token_mode.setCurrentText("Duo")
+            assert win.dashboard.token_odds.text() == "0.000000%"
+            assert "0.000000%" in overlay.plain_text
+
+            win.overlay.section_titles["personal"].setText("My counter")
+            win.overlay.show_types.setChecked(True)
+            win.overlay.show_matches.setChecked(True)
+            win.overlay.transparency.setValue(35)
+            win._set(2, 3, "set-count")
+            win.read_state(force=True)
+            win.overlay.apply()
+            assert overlay.plain_text.splitlines() == [
+                "My counter", "Opened 3", "Confirmed 2 · Estimated 1", "Odds 0.002182%",
+                "Games 1", "Chest types · not classified 3",
+            ]
+            assert win.overlay.preview.plain_text == overlay.plain_text
+            assert not overlay.caption.wordWrap()
+            assert abs(overlay.windowOpacity() - 0.65) < 0.01
+            check_shared_output()
+
+            win.overlay.section_templates["personal"].setPlainText("Opened " * 180 + "{total}")
+            win.overlay.apply()
+            assert overlay.caption.wordWrap()
+            assert overlay.caption.minimumWidth() <= overlay.caption.maximumWidth()
+            check_shared_output()
+            win.overlay.section_templates["personal"].setPlainText(personal_template)
+            win.overlay.show_token.setChecked(False)
+            win.overlay.section_enabled["team"].setChecked(True)
+            win.overlay.section_enabled["cumulative"].setChecked(True)
+            win.overlay.section_titles["cumulative"].setText("All games")
+            win.overlay.section_templates["cumulative"].setPlainText(cumulative_template)
+            win.overlay.apply()
+            assert "Odds" not in overlay.plain_text and "Lifetime odds" not in overlay.plain_text
+            assert "Opened 3" in overlay.plain_text and "Lifetime 3" in overlay.plain_text
+            assert win.overlay.section_titles["team"].text() not in overlay.plain_text.splitlines()
+            assert overlay.plain_text.splitlines()[-3:] == ["All games", "Lifetime 3", "Games 1"]
+            check_shared_output()
+            win.overlay.show_screen_overlay.setChecked(False)
+            assert overlay.isHidden()
+            assert not win.overlay.share_screen_overlay.isEnabled()
+
+            win.dashboard.token_mode.setCurrentText("Squad")
+            win.dashboard.token_boost.setCurrentIndex(1)
+            win.dashboard.show_preview.setChecked(True)
+            win.dashboard.show_log.setChecked(False)
+            monitors = [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)]
+            win._fill_sources([], monitors)
+            assert win.dashboard.source.findData({"source": "desktop", "monitor": 2}) >= 0
+            assert not hasattr(win.dashboard, "secondary_source")
+            win.overlay.show_screen_overlay.setChecked(True)
+            win.overlay.share_screen_overlay.setChecked(True)
+            if win._source_scan is not None:
+                win._source_scan.join(30)
+            win.close()
+            qt.processEvents()
+
+            win = A.MainWindow()
+            win.timer.stop()
+            win._fill_sources([], monitors)
+            assert win.dashboard.token_mode.currentText() == "Squad"
+            assert win.dashboard.token_boost.currentData() == 1.5
+            assert win.dashboard.show_preview.isChecked() and not win.dashboard.show_log.isChecked()
+            assert win.overlay.show_screen_overlay.isChecked() and win.overlay.share_screen_overlay.isChecked()
+            assert win.overlay.show_types.isChecked() and win.overlay.show_matches.isChecked()
+            assert not win.overlay.show_token.isChecked()
+            assert win.overlay.section_titles["personal"].text() == "My counter"
+            assert win.overlay.section_templates["personal"].toPlainText() == personal_template
+            assert win.overlay.section_enabled["cumulative"].isChecked()
+            assert win.overlay.section_titles["cumulative"].text() == "All games"
+            assert win.overlay.section_templates["cumulative"].toPlainText() == cumulative_template
+            assert win.overlay.transparency.value() == 35
+            check_shared_output()
+        finally:
+            if win is not None:
+                if win._source_scan is not None:
+                    win._source_scan.join(30)
+                win.close()
+                qt.processEvents()
+            paths.APP_DIR = previous_app_dir
+            os.chdir(previous_dir)
+
+
+def test_hdr_tone_map_preserves_chromatic_highlights():
+    from fortnite_chest_counter.input.video_sources import tone_map_scrgb
+
+    pixels = np.array([[[8, 6, 4.4, 1], [4, 2.6, 4.4, 1], [0, 0, 0, 1],
+                        [1.2, 1.2, 1.2, 1]]], dtype=np.float16)
+    converted = tone_map_scrgb(pixels, exposure=0.25)
+    detector = tone_map_scrgb(pixels / 4)
+    assert detector[0, 1].tolist() == converted[0, 1].tolist()
+    assert min(detector[0, 1, 0], detector[0, 1, 2]) > 170
+    assert converted.dtype == np.uint8
+    assert 255 >= converted[0, 0, 0] > converted[0, 0, 1] > converted[0, 0, 2]
+    red, green, blue = map(int, converted[0, 1])
+    assert green + 8 < min(red, blue)
+    assert not converted[0, 2].any()
+    assert 145 <= converted[0, 3, 0] <= 151
+
 
 def _feed(cap, seconds, fps=15, start_t=100.0):
     """Synthetic frames (a moving bar, cheap to encode) at recording speed, never overrunning the queue."""
@@ -433,8 +630,15 @@ def test_review_reports_progress_finishes_and_can_be_stopped():
         env = dict(os.environ, PYTHONPATH=str(ROOT / "src"), PYTHONIOENCODING="utf-8")
         process = subprocess.Popen([sys.executable, "-m", "fortnite_chest_counter", "review", tmp, "--gui"], cwd=tmp, env=env,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        out = process.stdout.read().decode("utf-8")                      # stdin stays open: no stop requested
-        process.wait(timeout=120)
+        try:
+            out = process.stdout.read().decode("utf-8")                  # stdin stays open: no stop requested
+            process.wait(timeout=120)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=10)
+            process.stdin.close()
+            process.stdout.close()
         msgs = [json.loads(l) for l in out.splitlines() if l.startswith("{")]
         kinds = [m["type"] for m in msgs]
         assert process.returncode == 0 and kinds.count("review_start") == 1 and "review_report" in kinds
@@ -559,6 +763,16 @@ def test_mark_button_and_hotkey_need_a_running_recording():
             assert win.recording is None and not win.dashboard.mark.isEnabled()
             win.handle({"type": "capture", "state": "off", "mode": "events"})                  # a start that failed
             assert win.dashboard.rec_mode.currentData() == "off" and fake.sent[-1] == "mark"  # shown honestly, not re-sent
+            C.update_config_file(Path(tmp) / "config.toml", "logging", {
+                "enabled": True, "save_snapshots": True, "log_candidates": True})
+            win.settings_page.load()
+            win.dashboard.rec_mode.setCurrentIndex(win.dashboard.rec_mode.findData("marks"))
+            win.dashboard.rec_mode.setCurrentIndex(win.dashboard.rec_mode.findData("off"))
+            saved = settings.load_config(Path(tmp) / "config.toml")[0]
+            assert saved["capture"]["mode"] == "off"
+            assert all(saved["logging"][key] is False for key in ("enabled", "save_snapshots", "log_candidates"))
+            assert not win.settings_page.logging.isChecked() and not win.settings_page.snapshots.isChecked()
+            assert fake.sent[-1] == "capture off"
             if win._source_scan is not None:                              # the device scan runs ffmpeg in this folder
                 win._source_scan.join(30)
             win.preview_reader and win.preview_reader.close()
@@ -781,6 +995,75 @@ def test_app_worker_counts_exactly_what_the_command_line_counts():
     assert (finished["certain"], finished["approx"]) == (sum(e["certain_counted"] for e in cli_events),
                                                          sum(e["approx_counted"] for e in cli_events))
     assert "\x1b[" not in app.stdout and all(l.startswith("{") for l in app.stdout.splitlines() if l.strip())
+
+
+def test_live_source_waits_after_forced_kill_and_closes_decoder_pipes():
+    from fortnite_chest_counter.input.video_sources import LiveSource
+
+    class Process:
+        def __init__(self):
+            self.calls = []
+            self.stdout = io.BytesIO()
+            self.stderr = io.BytesIO()
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.calls.append("terminate")
+
+        def kill(self):
+            self.calls.append("kill")
+
+        def wait(self, timeout):
+            self.calls.append(("wait", timeout))
+            if self.calls.count(("wait", timeout)) == 1:
+                raise subprocess.TimeoutExpired("ffmpeg", timeout)
+            return 0
+
+    source = LiveSource("fixture", [], 15)
+    source._process = process = Process()
+    source.close()
+    assert process.calls == ["terminate", ("wait", 3), "kill", ("wait", 3)]
+    assert process.stdout.closed and process.stderr.closed
+
+def test_stopped_review_releases_decoder_children_behind_a_command_wrapper():
+    from unittest.mock import patch
+    from fortnite_chest_counter import review
+
+    ffmpeg = paths.ffmpeg_executable()
+    if not ffmpeg:
+        print("      (skipped: ffmpeg not available)")
+        return
+    real_popen = subprocess.Popen
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        video = folder / "wrapped-review.mp4"
+        completed = folder / "decoder-finished.txt"
+        subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=15",
+                        "-t", "12", "-c:v", "mpeg4", str(video)], check=True)
+        wrapper = ("import pathlib, subprocess, sys; "
+                   "child = subprocess.Popen(sys.argv[2:]); "
+                   "result = child.wait(); "
+                   "pathlib.Path(sys.argv[1]).write_text(str(result)); "
+                   "sys.exit(result)")
+        processes = []
+
+        def wrapped_popen(command, **kwargs):
+            process = real_popen([sys.executable, "-c", wrapper, str(completed), ffmpeg, *command[1:]], **kwargs)
+            processes.append(process)
+            return process
+
+        with patch.object(review.subprocess, "Popen", side_effect=wrapped_popen):
+            reader = review.frames(video, 15)
+            try:
+                _, frame = next(reader)
+                assert frame.shape == (720, 1280, 3)
+            finally:
+                reader.close()
+        assert completed.exists(), "the command wrapper exited before waiting for its decoder"
+        assert processes[0].poll() is not None
+        video.unlink()  # Windows must release the file before review cancellation returns.
 
 
 if __name__ == "__main__":

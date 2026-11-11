@@ -46,11 +46,14 @@ def frames(path, fps):
             yield i / fps, np.frombuffer(raw, np.uint8).reshape(V.NORMALIZED_HEIGHT, V.NORMALIZED_WIDTH, 3)
             i += 1
     finally:
-        process.kill()
+        # Closing the output makes FFmpeg stop on a broken pipe. Let any executable
+        # wrapper (such as a Windows package-manager shim) wait for its decoder child.
+        process.stdout.close()
         try:
-            process.wait(timeout=5)                 # Windows keeps the clip file locked until FFmpeg has really exited
+            process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
+            process.kill()
+            process.wait(timeout=5)
 
 
 class Stopped(Exception):
@@ -76,12 +79,20 @@ def replay(folder, detector_cfg, progress=None, should_stop=None):
     for clip in clips:
         est = estimator.ChestEstimator()
         first = int(round(clip["start"] * fps))
-        found, last = [], 0.0
+        if not 0 <= first < len(live_t):
+            raise ValueError(f"clip {clip['file']} has no recorded frame in timeline.csv")
+        origin = float(live_t[first])
+        found, detector_times, playback_times = [], [], []
         reader = frames(folder / clip["file"], fps)
         try:
             for t, frame in reader:
-                found += est.process_frame(t, frame)
-                last = t
+                k = min(first + int(round(t * fps)), len(live_t) - 1)
+                # Recording is constant-FPS, but live capture can have irregular gaps.
+                # Temporal confidence and stack/dedup gates must see the original clock.
+                detector_t = float(live_t[k]) - origin
+                detector_times.append(detector_t)
+                playback_times.append(t)
+                found += est.process_frame(detector_t, frame)
                 now = time.monotonic()
                 if now >= next_report:
                     next_report = now + 0.5
@@ -95,8 +106,11 @@ def replay(folder, detector_cfg, progress=None, should_stop=None):
         done_before += max(clip["end"] - clip["start"], 0.0)
         for ev in found:
             ev.pop("_snapshot", None)
-            k = min(first + int(round(ev["time"] * fps)), len(live_t) - 1)
-            ev["clip"], ev["clip_time"], ev["live_time"] = clip["file"], round(ev["time"], 3), float(live_t[k])
+            # Events use the detector clock; navigation/labels still use encoded video seconds.
+            playback = float(np.interp(ev["time"], detector_times, playback_times)) if detector_times else 0.0
+            live = float(np.interp(ev["time"], detector_times,
+                                   np.asarray(detector_times) + origin)) if detector_times else origin
+            ev["clip"], ev["clip_time"], ev["live_time"] = clip["file"], round(playback, 3), live
             out.append(ev)
         if progress:
             progress(done_before)

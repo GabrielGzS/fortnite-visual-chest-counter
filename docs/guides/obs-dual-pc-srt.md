@@ -28,7 +28,7 @@ Fortnite                                           OBS: Media Source "SRT from g
 - Two Windows PCs on the **same local network** (connected to the same router). A wired connection is the most dependable;
   Wi-Fi can work. Guest networks often stop devices from reaching each other - use your main network.
 - **OBS Studio** on both PCs (use a current version).
-- **Fortnite Visual Chest Counter** on the streaming PC only ([download](../../README.md#download)).
+- **Fortnite Visual Chest Counter** on the streaming PC only ([download](../../README.md#get-started)).
 - About ten minutes. The steps use **example** addresses such as `192.168.1.50` - yours will be different.
 
 ## 1. Find the streaming PC's IP address
@@ -118,7 +118,7 @@ your stream needs more (for example 1080p60 and a higher bitrate), that works to
 ## What to expect
 
 - **Counting works as on one PC.** The counter sees only the picture it receives, so the usual rules apply: 16:9 picture,
-  HUD visible, English or Portuguese (Brazil) pop-ups, CERTAIN and APPROX ([the two numbers](../../README.md#the-two-numbers-read-this-first)).
+  HUD visible, English or Portuguese (Brazil) pop-ups, CERTAIN and APPROX ([OBS counter definitions](obs-overlay.md)).
 - **A short delay.** The picture reaches the streaming PC slightly after it happens, so each chest is counted that much
   later too. In our test there was no noticeable lag.
 - **Picture quality matters.** A very low bitrate or an overloaded network blurs or breaks up the small pop-up text.
@@ -126,7 +126,7 @@ your stream needs more (for example 1080p60 and a higher bitrate), that works to
   that: use a wired connection, or try a slightly different bitrate.
 - **Load on the streaming PC:** OBS decodes the feed (hardware decoding helps) and the counter analyses 15 pictures per
   second. Our streaming PC (Intel Core i5 13th gen, RTX 4070) did this without noticeable problems.
-- **On the gaming PC only OBS runs** - it captures and sends video. Fair play notes: [README](../../README.md#fair-play-and-compatibility).
+- **On the gaming PC only OBS runs** - it captures and sends video. Fair play notes: [README](../../README.md#compatibility-and-data).
 
 ## Troubleshooting
 

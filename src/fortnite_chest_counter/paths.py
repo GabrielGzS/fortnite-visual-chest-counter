@@ -14,6 +14,7 @@ replace the program without touching the user's counts or settings.
 import hashlib
 import os
 import shutil
+import struct
 import sys
 from pathlib import Path
 
@@ -58,6 +59,14 @@ REQUIRED_TEMPLATES = [
     TEMPLATES_DIR / "chest" / "en" / "sprite.npy",
     TEMPLATES_DIR / "chest" / "en" / "sprite_small.npy",
     TEMPLATES_DIR / "chest" / "pt" / "bau.npy",
+    TEMPLATES_DIR / "chest" / "fr" / "coffre.npy",
+    TEMPLATES_DIR / "chest" / "fr" / "esprit.npy",
+    TEMPLATES_DIR / "chest" / "fr" / "normal_xp.npy",
+    TEMPLATES_DIR / "chest" / "fr" / "rare_xp.npy",
+    TEMPLATES_DIR / "chest" / "fr" / "stack_exp.npy",
+    TEMPLATES_DIR / "chest" / "fr" / "stack_rare.npy",
+    TEMPLATES_DIR / "chest" / "fr" / "stack_x2.npy",
+    TEMPLATES_DIR / "chest" / "fr" / "stack_sprite.npy",
     TEMPLATES_DIR / "container_opened.npy",
     TEMPLATES_DIR / "ui" / "interaction_disc.npy",
     TEMPLATES_DIR / "ui" / "interaction_ring.npy",
@@ -133,3 +142,26 @@ def worker_python():
         if candidate.is_file():
             return str(candidate)
     return sys.executable
+
+
+def local_fortnite_hud_scale():
+    """Read the HUDScale float from Fortnite's local Windows settings cache, if available."""
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return None
+    settings_file = Path(local) / "FortniteGame" / "Saved" / "Config" / "ClientSettings.Sav"
+    limit = 4 * 1024 * 1024
+    try:
+        with settings_file.open("rb") as stream:
+            data = stream.read(limit + 1)
+    except OSError:
+        return None
+    # Match the full serialized name and float tag, excluding InitialHUDScale.
+    tag = b"\x09\x00\x00\x00HUDScale\x00\x0e\x00\x00\x00FloatProperty\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00"
+    if len(data) > limit or data.count(tag) != 1:
+        return None
+    offset = data.index(tag) + len(tag)
+    if offset + 4 > len(data):
+        return None
+    value = struct.unpack_from("<f", data, offset)[0]
+    return round(value, 4) if 0.1 <= value <= 3.0 else None

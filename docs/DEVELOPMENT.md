@@ -1,8 +1,20 @@
 # Development notes
 
-End users: read the top-level [README.md](../README.md) and the setup guides in [guides/](guides/README.md). This file is
-for contributors.
-The original research log (how the detector was built and validated) is in [DETECTOR_NOTES.md](DETECTOR_NOTES.md).
+End users: read the top-level [README.md](../README.md) and the setup guides in [guides/](guides/index.md). This file is
+for contributors. See [change and validation notes](CHANGES.md) for the local desktop work.
+The original research log (how the detector was built and validated) is in [DETECTOR_NOTES.md](reference/DETECTOR_NOTES.md).
+
+## Local Windows executable
+
+With the editable installation in `.venv` and MinGW's `gcc` and `windres` on PATH, run:
+
+```powershell
+.\.venv\Scripts\python.exe packaging\build_release.py --launcher-only --development-launcher --out .
+```
+
+Open `Fortnite Visual Chest Counter.exe` from the checkout. It uses the local virtual environment.
+The updater requires a packaged build and a signed release channel.
+Use `debug-chest-counter.bat` to start the GUI with a console and pass through GUI arguments.
 
 ## Repository layout
 
@@ -18,7 +30,10 @@ src/fortnite_chest_counter/
                     that the live path imports only for constants.
   input/            video_sources.py: OBS Virtual Camera / capture device / desktop / file via ffmpeg
   gui/              the desktop app (v0.2.0, PySide6): app.py (window, pages, dialogs), worker.py (runs + observes the
-                    counting worker), update_manager.py (update state, no widgets), theme.py, assets/ (icon PNGs)
+                    counting worker), update_manager.py (update state, no widgets), theme.py, assets/ (icons, bundled font and their license notices)
+  match_lifecycle.py local log parsing for session fingerprints and Battle Royale mode
+  match_history.py  local saved matches and history edits
+  discord_*.py      group submissions, bot, reports and shared leaderboard
   preview.py        shared-memory picture for the app's optional live preview (no Qt)
   capture.py        optional diagnostic recording of the detector's input + decisions + marks ([capture], CAPTURE.md)
   review.py         `review` command: replay captures through the current detector, compare with live + labels
@@ -59,6 +74,27 @@ Python 3.11+. FFmpeg must be on PATH when running from source (the packaged app 
 When running from source, user data (`config.toml`, `state/`, `logs/`, `obs_output/`) lives in the **current directory**
 (or `FCC_HOME`), never inside `src/`.
 
+## Continuous integration
+
+The Tests workflow runs on each push, pull request and manual dispatch. Windows executes the full test suite;
+Linux executes the portable backend tests. Both use Python 3.13, the pinned runtime requirements and an isolated
+temporary working directory. Failed runs retain JUnit reports for seven days.
+
+Run the complete suite locally with `python -m pytest tests -q`. Use a temporary working directory and `FCC_HOME`
+when checking app startup so local user settings do not influence the run.
+
+## Desktop UI and local data
+
+Keep visual tokens in the shared Qt theme, application assets beside that theme, and engine behavior outside the GUI.
+The navigation rail follows [Material 3](https://m3.material.io/components/navigation-rail/overview). Its icons come from
+[Google Material Icons](https://github.com/google/material-design-icons) and its typeface is
+[Google Sans](https://github.com/googlefonts/googlesans). Their licenses ship alongside the assets. The bundled
+Google Sans faces are static Latin subsets at weights 400, 500 and 700, pinned at optical size 18 and grade 0.
+Generate them from the upstream variable font with FontTools when updating the assets.
+
+The Help page can remove generated diagnostics from `logs/` and `captures/`. Keep these folders, user state, and BMAD
+working artifacts out of commits. Run UI and worker tests with isolated settings and a temporary working directory.
+
 ## Regression on recordings
 
 `samples/` is not in Git. With the recordings present locally (and, for the compressed variants, after
@@ -72,7 +108,7 @@ python research/regress.py compare --tag v0.1.0 --set ROBUST_PROMOTION=False    
 
 It diffs every event against the frozen snapshots in `tests/baselines/` (event lists of the original v0.1.0 detector) and exits 1
 on a regression (lost real chest, real chest downgraded, verified non-chest newly counted). Current expected results and the
-full experiment record: [ACCURACY_NOTES.md](ACCURACY_NOTES.md). **Compare event lists, not just totals. Never tune thresholds
+full experiment record: [ACCURACY_NOTES.md](reference/ACCURACY_NOTES.md). **Compare event lists, not just totals. Never tune thresholds
 during packaging or refactoring work.**
 
 ## Releasing
@@ -83,7 +119,7 @@ build-venv\Scripts\python packaging\build_release.py --python-embed python-3.13.
     --ffmpeg-zip <ffmpeg-win64-lgpl.zip> --ffmpeg-source <ffmpeg-source-COMMIT.tar.gz> --mingw C:\MinGW\bin --out build_out\vX.Y.Z
 ```
 
-On the development PC the exact inputs of the current builds are kept in `build_out\inputs\` (git-ignored):
+On the development PC the exact inputs of the current builds are kept in `build_out\inputs` (git-ignored):
 `python-3.13.17-embed-amd64.zip` (same archive as v0.1.1, SHA-256 9e35319b...), `ffmpeg-v0.1.1-shipped-win64-lgpl.zip`
 (the v0.1.1 ffmpeg.exe, SHA-256 7a1cc6f3...) and `ffmpeg-source-db8537d8cc.tar.gz`; the `.venv` has numpy, scipy and
 PySide6-Essentials 6.12.0.
@@ -108,7 +144,7 @@ them); every command still works as `runtime\python\python.exe -m fortnite_chest
 * `runtime/ffmpeg/` - unmodified LGPL FFmpeg; the build reads its id from the binary and checks it against the source archive.
 * `runtime/PROVENANCE.txt` - versions, hashes and signers of all of the above, plus a count of signed / unsigned
   executable files. `SIGNATURES.txt` (next to the zip, not in it) lists the signature of every `.exe/.dll/.pyd`: the input
-  for code-signing / Smart App Control work (see [WINDOWS_TRUST.md](WINDOWS_TRUST.md)).
+  for code-signing / Smart App Control work (see [WINDOWS_TRUST.md](maintenance/WINDOWS_TRUST.md)).
 * Zip entries are sorted and use a fixed timestamp, so the same inputs give a byte-identical zip. `SHA256SUMS.txt` covers the
   zip and the FFmpeg source archive.
 
@@ -147,7 +183,7 @@ launchers (.bat/.cmd/.ps1/.vbs/.lnk) or any executable other than the launcher, 
   running worker adopts them via `sync_external_changes`; the Overlay page writes `config.toml`, which the worker's
   `DisplayConfigWatcher` applies within a second. `tests/test_app.py` proves the app's worker counts exactly the same events
   as the command line on a recording.
-* **Diagnostic capture** (`capture.py`, [CAPTURE.md](CAPTURE.md)): off by default; when on, the live loop queues each
+* **Diagnostic capture** (`capture.py`, [CAPTURE.md](guides/diagnostic-capture.md)): off by default; when on, the live loop queues each
   analysed frame (non-blocking, bounded) for a separate FFmpeg encoder writing 10-s segments; events mode deletes segments
   no decision or mark claims. Marks: app `mark` line on the worker's stdin (Mark moment / Ctrl+Alt+M via RegisterHotKey),
   console key M. `review` replays clips with a fresh estimator and compares (MATCH_SECONDS 0.6, as regress.py).
@@ -177,7 +213,7 @@ launchers (.bat/.cmd/.ps1/.vbs/.lnk) or any executable other than the launcher, 
   variant with evaluation against verified timestamps.
 * **Errors:** expected problems raise `UserError` (plain message, exit 1); unexpected exceptions write `logs/crash_*.txt` (exit 2).
   The console's QuickEdit mode is disabled in `live` (a click would pause the process and stall counting).
-* **Finding the program folder:** `paths.APP_DIR` is derived from `runtime\python\` when running the release runtime, so the
+* **Finding the program folder:** `paths.APP_DIR` is derived from `runtime\python` when running the release runtime, so the
   app and the command line work whatever the current directory is. The launcher also starts pythonw by full path.
 * **Bundled FFmpeg:** `runtime/ffmpeg/ffmpeg.exe`, found by `paths.bundled_ffmpeg_dir()` and prepended to `PATH` at startup. We ship an **LGPL v3** build (no GPL parts) run as a
   separate process, with its licence and `FFMPEG-NOTICE.txt`. Do not ship a `--enable-gpl` build unless you also offer the complete
@@ -185,6 +221,6 @@ launchers (.bat/.cmd/.ps1/.vbs/.lnk) or any executable other than the launcher, 
 * **Licences:** the project is MIT (`LICENSE`). The build copies the Python (PSF), NumPy and SciPy (BSD, incl. their bundled
   OpenBLAS/LAPACK/gfortran notices) licence texts into `runtime/licenses/`. Attach the zip, its two signing files, `SHA256SUMS.txt` and
   `ffmpeg-source-<commit>.tar.gz` to the GitHub release (LGPL v3: the corresponding source is offered next to the binary).
-  `packaging/check_release.py` verifies all five and is the source of that list; see [UPDATE_SIGNING.md](UPDATE_SIGNING.md).
+  `packaging/check_release.py` verifies all five and is the source of that list; see [UPDATE_SIGNING.md](maintenance/UPDATE_SIGNING.md).
   The FFmpeg source for a build: `https://github.com/FFmpeg/FFmpeg/archive/<commit>.tar.gz`.
 * **Module names:** avoid naming a module `sources` (it clashed with packaging tools in the past).

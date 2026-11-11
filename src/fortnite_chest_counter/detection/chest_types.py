@@ -1,5 +1,5 @@
 """
-Chest type from the pop-up line (v0.2.2, docs/INVESTIGATION_2026-11-08.md): "CHEST", "RARE CHEST" or "SPRITE CHEST".
+Chest type from the pop-up line (v0.2.2, docs/reference/INVESTIGATION_2026-11-08.md): "CHEST", "RARE CHEST" or "SPRITE CHEST".
 
 Classification never creates or removes a count: it only labels a chest the counter already counted. What is read:
 
@@ -20,10 +20,12 @@ Templates: chest/en/rare*.npy and sprite*.npy, cut from the English reference cl
 stream (SPRITE, normal size) and Thiefs' stream (both, small size).
 """
 
+from collections import Counter
+
 import numpy as np
 
 from fortnite_chest_counter import paths
-from fortnite_chest_counter.detection import visual as V
+from fortnite_chest_counter.detection import popup_lines, visual as V
 
 NORMAL, RARE, SPRITE, UNKNOWN = "chest", "rare", "sprite", "unknown"
 KNOWN = (NORMAL, RARE, SPRITE)                      # display order; UNKNOWN is always kept separately
@@ -42,6 +44,46 @@ SIGMA = 0.6
 def load_prefixes(size):
     """{type: binary word template} for "normal" or "small" HUD size."""
     return {kind: np.load(paths.TEMPLATES_DIR / files[size]).astype(np.float32) for kind, (_, files) in TYPES.items()}
+
+
+def load_french_suffixes():
+    # RARE has the same letters in both languages. The sprite suffix is from the XP line COFFRE À ESPRIT.
+    return {RARE: load_prefixes("normal")[RARE],
+            SPRITE: np.load(paths.TEMPLATES_DIR / "chest/fr/esprit.npy").astype(np.float32)}
+
+
+def classify_french_line(mask, y, x, th, tw, suffixes):
+    """Read the qualifier to the right of COFFRE on the same XP line."""
+    end = x + tw
+    if x < 4 or y < 2 or y + th + 2 > mask.shape[0] or end + tw > mask.shape[1]:
+        return UNKNOWN
+    left = prefix_length(mask, y, x, th, tw)
+    if left >= EMPTY_MAX:
+        return UNKNOWN
+    # Leave room for the gap, and for the short word À in COFFRE À ESPRITS.
+    region = mask[y - 2:y + th + 2, end + 1:end + int(1.8 * tw)]
+    scores = {}
+    for kind, template in suffixes.items():
+        if region.shape[0] < template.shape[0] or region.shape[1] < template.shape[1]:
+            continue
+        score, _, offset = V.best_template_correlation(region, template)
+        if offset <= (tw * 0.65 if kind == SPRITE else tw * 0.35):
+            scores[kind] = score
+    for kind, score in scores.items():
+        other = max((v for k, v in scores.items() if k != kind), default=0.0)
+        if score >= WORD_MIN and score - other >= WORD_MARGIN:
+            return kind
+    # A qualifier we cannot read must not silently become a normal chest.
+    return NORMAL if not region[:, 2:tw].any() else UNKNOWN
+
+
+def french_sprite_score(mask, y, x, th, tw, template):
+    end = x + tw
+    region = mask[max(0, y - 3):y + th + 5, max(0, end - 1):end + int(1.8 * tw)]
+    if region.shape[0] < template.shape[0] or region.shape[1] < template.shape[1]:
+        return 0.0
+    score, _, offset = V.best_template_correlation(region, template)
+    return score if offset <= tw * 0.4 else 0.0
 
 
 def prefix_length(mask, y, x, th, tw):
@@ -93,3 +135,116 @@ def decide(votes):
     kind, n = max(votes.items(), key=lambda kv: kv[1])
     share = n / total
     return (kind, round(share, 2)) if kind != UNKNOWN and share >= MAJORITY else (UNKNOWN, round(share, 2))
+
+
+class FrenchQualifiedPopups:
+    """Stable quantities of rare and sprite chests in one visible French XP group."""
+
+    def __init__(self):
+        folder = paths.TEMPLATES_DIR / "chest/fr"
+        self.templates = [(kind, quantity, V.blur_template(np.load(folder / f"stack_{name}.npy"), SIGMA))
+                          for kind, quantity, name in ((RARE, 1, "rare"), (RARE, 2, "x2"),
+                                                      (RARE, 3, "x3"), (RARE, 4, "x4"),
+                                                      (SPRITE, 1, "sprite"))]
+        self.digits = {quantity: [np.load(folder / f"stack_x{quantity}.npy")[:, 56:63]] for quantity in (2, 3, 4)}
+        self.digits[2].append(np.load(folder / "stack_digit2_alt.npy"))
+        self.exp = np.load(folder / "stack_exp.npy")
+        self.exp_blurred = V.blur_template(self.exp, SIGMA)
+        self.missing_since = None
+        self.missing_frames = 0
+        self.rows = []
+        self.last_sprite_rows = []
+        self.totals = Counter()
+        self.candidate = None
+        self.frames = 0
+
+    def _quantity(self, mask, y, x):
+        # The common COFFRE RARE prefix dominates a whole-line score. Require
+        # independent evidence from the digit before using that line's quantity.
+        region = mask[max(0, y - 1):y + 8, x + 55:x + 64]
+        scores = sorted((max(V.best_template_correlation(region, digit)[0] for digit in templates), quantity)
+                        for quantity, templates in self.digits.items())
+        score, quantity = scores[-1]
+        return quantity if score >= 0.58 and score - scores[-2][0] >= 0.08 else None
+
+    def _read_rows(self, roi):
+        # XP groups shift horizontally as their longest line changes; keep the full
+        # qualified word, including a sprite suffix at the right edge of the group.
+        y0, x0 = 25, 75
+        bright = roi[y0:140, x0:250].min(axis=2)
+        peaks = []
+        for level in (155, 178):
+            mask = (bright > level).astype(np.float32)
+            if mask.sum() < 50:
+                continue
+            for kind, quantity, template in self.templates:
+                for score, y, x in popup_lines.correlation_peaks(mask, template, 0.76):
+                    decoded = self._quantity(mask, y, x) if quantity > 1 else quantity
+                    if decoded is not None:
+                        peaks.append((score, y + y0 + 3, x + x0 + 14, kind, decoded))
+        rows = []
+        for row in sorted(peaks, reverse=True):
+            if all(abs(row[1] - other[1]) >= 6 for other in rows):
+                rows.append(row)
+        if rows and not self.totals:
+            top = min(row[1] for row in rows) - 3
+            # Ammo/upgrade notifications can sit between the XP heading and the
+            # first chest. Anchor the heading search to the detected text group,
+            # rather than assuming it immediately precedes a chest at a fixed x.
+            left = max(0, min(row[2] for row in rows) - 29)
+            right = min(roi.shape[1], max(row[2] for row in rows) + 70)
+            exp = roi[max(0, top - 90):top - 1, left:right]
+            if exp.shape[0] < self.exp.shape[0] or max(
+                    max(V.best_template_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp)[0],
+                        V.robust_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp_blurred, SIGMA))
+                    for level in (135, 155)) < 0.60:
+                return []
+        return rows
+
+    def observe(self, t, roi, enlarged=None):
+        rows = self._read_rows(roi)
+        if not rows and enlarged is not None:
+            scale, normalized = enlarged
+            rows = [(score, round(y / scale), round(x / scale), kind, quantity)
+                    for score, y, x, kind, quantity in self._read_rows(normalized)]
+        if not rows:
+            self.candidate, self.frames = None, 0
+            self.missing_frames += 1
+            if self.missing_since is None:
+                self.missing_since = t
+            elif self.missing_frames >= VOTES_MIN and t - self.missing_since >= 0.55:
+                # Only an observed disappearance re-arms the group. A slow frame
+                # or paused capture alone cannot make unchanged X2 lines new.
+                self.rows = []
+                self.totals.clear()
+            return []
+        self.missing_since = None
+        self.missing_frames = 0
+        counts = Counter()
+        for _, _, _, kind, quantity in rows:
+            counts[kind] += quantity
+        self.frames = self.frames + 1 if counts == self.candidate else 1
+        self.candidate = counts
+        if self.frames < VOTES_MIN:
+            return []
+        self.rows = rows
+        self.last_sprite_rows = [row for row in rows if row[3] == SPRITE]
+        added = []
+        for kind, quantity in counts.items():
+            delta = quantity - self.totals[kind]
+            if delta > 0:
+                row = next(row for row in rows if row[3] == kind)
+                added.extend([row] * delta)
+                self.totals[kind] = quantity
+        return added
+
+    def owns_fading_sprite(self, t, y, x):
+        # A bright background can erase the full suffix before the short word
+        # disappears. Only keep ownership of the same sprite row during its fade.
+        return (self.missing_since is not None and t - self.missing_since <= 1.5
+                and any(abs(row_y - y) <= 5 and abs(row_x - x) <= 7
+                        for _, row_y, row_x, _, _ in self.last_sprite_rows))
+
+    def owns(self, y, x):
+        # The short-word reader can lock onto the qualifier to the right of COFFRE.
+        return any(abs(row_y - y) <= 8 and -23 <= x - row_x <= 34 for _, row_y, row_x, _, _ in self.rows)

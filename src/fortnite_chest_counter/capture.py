@@ -40,7 +40,7 @@ MODES = ("off", "marks", "events", "session")
 SEGMENT_SECONDS = 10
 QUEUE_FRAMES = 30                          # ~2 s of 720p frames (~80 MB) between the counter and the encoder
 MIN_FREE_BYTES = 2 * 1024 ** 3             # do not start below 2 GB free; stop recording below 1 GB
-# Measured (docs/CAPTURE.md): the 7-px pop-up text is so small that any lossy format moves its match score a little.
+# Measured (docs/guides/diagnostic-capture.md): the 7-px pop-up text is so small that any lossy format moves its match score a little.
 #   standard  intra-only full-colour MJPEG, best quality: ~10 GB/hour; replay = live for most decisions, borderline ones
 #             (within ~0.03 of a tier threshold) can differ
 #   lossless  FFV1, exact RGB: ~22 GB/hour; the replay sees exactly what the detector saw
@@ -94,14 +94,17 @@ class Capture:
                      "segment_seconds": SEGMENT_SECONDS, "before": before, "after": after, "mark_before": mark_before,
                      "mark_after": mark_after, "started_at": datetime.now().astimezone().isoformat(timespec="seconds")}
         self._write_info()
-        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
-               "-s", f"{width}x{height}", "-framerate", str(fps), "-i", "-", *(codec_args or CODEC_ARGS),
+        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-filter_threads", "1", "-f", "rawvideo",
+               "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-framerate", str(fps), "-i", "-",
+               "-threads", "2", *(codec_args or CODEC_ARGS),
                "-f", "segment", "-segment_time", str(SEGMENT_SECONDS), "-reset_timestamps", "1",
                "-segment_format", "matroska", "-segment_list", str(self.video_dir / "segments.csv"),
                "-segment_list_type", "csv", str(self.video_dir / "seg_%05d.mkv")]
         self._encoder_log = open(self.folder / "encoder.log", "wb")
+        # Diagnostic recording yields to counting and the game when the CPU is busy.
+        flags = paths.child_process_flags() | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
         self._encoder = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=self._encoder_log,
-                                         creationflags=paths.child_process_flags())
+                                         creationflags=flags)
         self._thread = threading.Thread(target=self._write, daemon=True, name="capture-writer")
         self._thread.start()
 
@@ -218,6 +221,13 @@ class Capture:
         except queue.Full:
             pass
         self._thread.join(timeout)
+        if self._thread.is_alive():
+            self.stopped_reason = self.stopped_reason or "the recorder could not finish before the stop timeout"
+            self._encoder.kill()                  # unblock a writer waiting on a full FFmpeg pipe before closing it
+            self._encoder.wait(timeout=3)
+            self._thread.join(timeout=1)
+            if self._thread.is_alive():
+                raise TimeoutError("the recording writer did not stop after FFmpeg exited")
         try:
             self._encoder.stdin.close()
         except OSError:
@@ -226,6 +236,7 @@ class Capture:
             self._encoder.wait(timeout)
         except subprocess.TimeoutExpired:
             self._encoder.kill()
+            self._encoder.wait(timeout=3)
         self._timeline.close()
         self._encoder_log.close()
         for row in self.events + self.marks:          # exact now that every recorded frame is known

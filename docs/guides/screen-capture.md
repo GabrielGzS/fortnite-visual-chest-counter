@@ -1,5 +1,8 @@
 # Count what is on a screen (no OBS needed)
 
+The default source is **Screen 1 HDR → SDR**. For a standard SDR monitor, select the regular **Screen** entry
+in **Dashboard → Capture settings**.
+
 The app can read a monitor directly: a livestream or video playing **fullscreen**, or Fortnite itself. Nothing else to
 set up.
 
@@ -19,6 +22,6 @@ Good to know:
 - Want to count a stream without keeping it on screen? Use the [Livestream URL](livestream-url.md) input instead - it
   reads the stream itself, in the background.
 - Playing Fortnite on the same PC while the app reads that screen works technically; read
-  [Fair play and compatibility](../../README.md#fair-play-and-compatibility) first.
+  [Fair play and compatibility](../../README.md#compatibility-and-data) first.
 
 Then [show the numbers on stream](obs-overlay.md) if you want them in OBS.

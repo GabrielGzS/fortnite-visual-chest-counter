@@ -1,5 +1,5 @@
 """
-Pop-up content tracking (v0.2.2, docs/INVESTIGATION_2026-11-08.md): what is INSIDE the XP pop-up while it stays on screen.
+Pop-up content tracking (v0.2.2, docs/reference/INVESTIGATION_2026-11-08.md): what is INSIDE the XP pop-up while it stays on screen.
 
 Fortnite does not show a new pop-up for every chest. While a pop-up is on screen, the next chest is ADDED to it:
 

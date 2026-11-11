@@ -468,7 +468,7 @@ def test_the_version_is_consistent_and_public_beta():
 
 
 def test_the_release_notes_explain_the_last_manual_download():
-    notes = (ROOT / "docs" / f"RELEASE_NOTES_v{__version__}.md").read_text(encoding="utf-8")
+    notes = (ROOT / "docs" / "releases" / f"RELEASE_NOTES_v{__version__}.md").read_text(encoding="utf-8")
     assert notes.startswith(f"## Fortnite Visual Chest Counter v{__version__} — Public Beta") and R.zip_name(__version__) in notes
     assert "last manual download" in notes.lower() and "built-in updater" in notes.lower()
     assert "experimental" in notes.lower() and "not been run on a real installation" in " ".join(notes.split()), "the unverified parts must be stated"

@@ -6,7 +6,7 @@ The built-in updater installs only releases signed with a private key that never
 covers what that protects, where trust comes from, and how to create, store, use and replace the keys.
 
 **Current state (2026-11-09):** both production keys exist, and their public halves are in `TRUSTED_PUBLIC_KEYS` in
-[`update/trust.py`](../src/fortnite_chest_counter/update/trust.py). Their private halves never enter this repository, a build or a test
+[`update/trust.py`](../../src/fortnite_chest_counter/update/trust.py). Their private halves never enter this repository, a build or a test
 PC. Development and tests use temporary keys generated during each test run.
 
 ## What this protects

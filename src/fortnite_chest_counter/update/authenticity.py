@@ -8,7 +8,7 @@ Is this release really ours? Every release the updater may install carries two s
 
 The signature is checked on the raw bytes BEFORE the manifest is read at all. There is no unsigned path: a missing, damaged
 or unknown signature means no update. Several signatures are allowed so a release can be signed by an old and a new key
-while keys are being changed (docs/UPDATE_SIGNING.md).
+while keys are being changed (docs/maintenance/UPDATE_SIGNING.md).
 
 Trust comes only from trust.py in the INSTALLED app. Nothing a release carries can add a key: a key id only selects among
 the keys already installed, and the key bytes that do the verifying always come from that list.

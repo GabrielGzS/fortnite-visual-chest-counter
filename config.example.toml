@@ -7,11 +7,11 @@
 # Lines starting with # are comments.
 
 [detector]
-# Which languages Fortnite is set to. "en" = English (CHEST), "pt" = Portuguese (Brazil) (BAU). The app's Settings page
-# sets this for you (English / Portuguese (Brazil) / Both).
+# Which language Fortnite is set to. "en" = English (CHEST), "pt" = Brazilian Portuguese (BAÚ), "fr" = French (COFFRE).
+# The app's Settings page sets this for you.
 # Use only the language your Fortnite is set to, e.g.  languages = ["en"]  (the other word is not needed and only
 # adds a small risk of false alarms; on our English test videos it made no difference).
-languages = ["en", "pt"]
+languages = ["en"]
 
 # How many pictures per second are analysed (5-30). The app's Settings page offers 15 (Recommended - what the detector
 # was built and tested with), 10 (Balanced) and 5 (Performance). Fewer pictures can miss chests: on our test recordings
@@ -28,7 +28,7 @@ certain_min_tier = "HIGH"
 # decide which weaker evidence is allowed to add to APPROX only.
 count_supported_medium_as_approx = true     # medium popup + the "open chest" button + a chest-looking object
 count_interaction_object_as_approx = true   # button + chest-looking object, even if the popup was missed
-medium_counts_alone_languages = ["en"]      # languages whose medium-confidence popup counts by itself
+medium_counts_alone_languages = ["en", "fr"]  # languages whose medium-confidence popup counts by itself
 
 [display]
 # What your viewers see. EASIEST: the Overlay page of the app - it writes these lines for you.
@@ -50,7 +50,13 @@ medium_counts_alone_languages = ["en"]      # languages whose medium-confidence 
 #   show = "both" and both_layout = "stacked"    -> certain_text on the first line, approx_text on the second
 #   show = "both" and both_layout = "inline"     -> one line: combined_status_format
 show = "both"
-both_layout = "stacked"
+both_layout = "inline"
+screen_show_matches = true
+# Floating overlay opacity, 20..100. Text and chest fade together.
+screen_opacity = 100
+# Leave either label empty to hide it. # = chests, {chance} = modelled drop chance, {players} = submitted players.
+screen_team_text = "Team · # chests · {chance}"
+screen_cumulative_text = "All matches · # chests · {chance}"
 
 # Your own wording. {count} is where the number goes. You may also use {certain} and {approx} anywhere.
 # Any text, symbols and emoji are fine (whether emoji display depends on the font you pick in OBS).
@@ -63,10 +69,27 @@ certain_text = "CERTAIN OPENED CHESTS: {count}"
 approx_text = "APPROX. OPENED CHESTS: {count}"
 
 # The one-line text (show = "both" + both_layout = "inline"). Placeholders: {certain} and {approx}
-combined_status_format = "{certain} certain • ~{approximate} estimated"
+combined_status_format = "{certain} certain • ~{approx} estimated"
 
 # true -> 1,232      false -> 1232
 use_thousands_separator = true
+screen_show_types = true
+screen_token_text = "Pirate Token · #"
+screen_show_token = true
+screen_show_total = true
+screen_total_text = "Total: #"
+screen_personal_enabled = true
+screen_team_enabled = true
+screen_cumulative_enabled = true
+screen_personal_title = "PERSONAL · CURRENT MATCH"
+screen_team_title = "TEAM · CURRENT MATCH"
+screen_cumulative_title = "MATCH HISTORY + LIVE"
+screen_personal_template = "**Chests · {total}**\nConfirmed · {certain}    Estimated · {approx}\n{types}\nPirate Token · {chance}"
+screen_team_template = "**Chests · {total}**\n{member_totals}\nPirate Token · {chance}"
+screen_cumulative_template = "**Chests · {total}**\nMatches · {matches}\nPirate Token · {chance}"
+certain_label = "CERTAIN OPENED CHESTS"
+approximate_label = "APPROX. OPENED CHESTS"
+use_custom_sections = true
 
 [console]
 # The black counter window (not what viewers see).
@@ -86,9 +109,9 @@ path = "state/chest_state.json"
 obs_dir = "obs_output"
 
 [logging]
-enabled = true
+enabled = false
 # Also record detections that were NOT counted (useful when reporting a problem).
-log_candidates = true
+log_candidates = false
 # Save a small picture of the pop-up area for every pop-up the counter considered (counted or not) into
 # logs/snapshots/. Turn on if you want to report missed or wrong chests: the pictures show exactly what it saw.
 save_snapshots = false
@@ -117,11 +140,12 @@ dir = "captures"
 #                  pause to buffer; the app reconnects by itself and keeps the counts
 #   "desktop"    = capture a monitor (set "monitor" below): play the stream or the game fullscreen on it - a small player
 #                  inside a web page is too small to read
+#   "desktop-hdr" = capture a monitor with HDR-to-SDR conversion
 #   "obs-camera" = OBS Virtual Camera (your own stream's OBS scene; single PC, or a second PC fed over SRT)
 #   "device"     = a capture card opened directly (set "device" below) - less tested: not yet with a physical card
 #   "window"     = an OBS "Windowed Projector (Source)" window (when OBS owns the capture card and the Virtual Camera is
 #                  used by another app; set "window" below) - less tested: not yet with a real OBS projector
-source = "stream"
+source = "desktop-hdr"
 # Only for source = "device": the exact device name (the app's Video source list sets it for you).
 device = "OBS Virtual Camera"
 # Only for source = "desktop": which monitor (1 = the first).
@@ -153,6 +177,36 @@ source_uuid = ""
 # The desktop app reopens with the size, position and maximised state it was closed with (saved in state/window.json).
 # false = always open at the default size. If the saved place is no longer on any screen, the window is moved back.
 remember_window = true
+close_to_tray = true
+start_in_tray = false
+auto_match_lifecycle = true
+auto_verify_replay = true
+# Remove this PC’s automatic Fortnite replay after verification and saving.
+delete_verified_replay = false
+group_player = ""
+group_scoreboard_id = ""
+group_share_matches = false
+auto_discord_summary = true
+auto_start_discord_sender = true
+token_mode = "Auto"
+screen_overlay_enabled = true
+screen_overlay_shared = true
+show_activity = false
+group_role = "host"
+token_boost = "Normal ×1"
+live_preview = false
+bot_name = "Chest Counter"
+bot_avatar_path = ""
+webhook_name = "Chest Counter"
+webhook_avatar_url = "https://raw.githubusercontent.com/NEVARLeVrai/fortnite-visual-chest-counter/ui/chest-tracker-dashboard/docs/previews/logo.png"
+discord_presence_enabled = true
+discord_presence_interval = 30
+discord_presence_activity = "watching"
+discord_presence_personal_text = "In match · {total} chests · Token {chance}"
+discord_presence_team_text = "{players} players · {total} chests · Token {chance}"
+discord_presence_group_text = "Group history · {total} chests · {matches} matches · Token {chance}"
+discord_presence_idle_text = "In lobby"
+bot_banner_path = ""
 
 [update]
 # Look for a new version shortly after the app opens. Nothing is downloaded or installed unless you choose to.
@@ -162,4 +216,4 @@ check_automatically = true
 # "unlimited" = never limited.   "custom" = always limited to custom_limit_kb_per_second.
 download_bandwidth = "adaptive"
 # Only for download_bandwidth = "custom": kilobytes per second, from 50 to 1000000.
-custom_limit_kb_per_second = 2000
+custom_limit_kb_per_second = 1000

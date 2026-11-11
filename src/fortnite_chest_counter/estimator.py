@@ -38,6 +38,7 @@ import time
 from collections import Counter, deque
 
 import numpy as np
+from scipy.ndimage import gaussian_filter
 
 from fortnite_chest_counter import paths
 from fortnite_chest_counter.detection import chest_types
@@ -57,7 +58,7 @@ CERTAIN_TIERS = ("CERTAIN", "HIGH")
 # MEDIUM popups counted as APPROX even without other support, per popup template.
 # English CHEST (27 px word): every popup >= 0.75 on the English clip was a real chest (6/6).
 # Portuguese BAU (14 px word): only 2 of 9 MEDIUM popups were real chests on the PS5 clip.
-APPROX_COUNTS_MEDIUM_ALONE = {"en:CHEST": True, "pt:BAÚ": False}
+APPROX_COUNTS_MEDIUM_ALONE = {"en:CHEST": True, "pt:BAÚ": False, "fr:COFFRE": True}
 
 # A MEDIUM popup that also has a prompt >= INTERACTION_SUPPORT_PROMPT_MIN with a chest-like
 # object near it counts as APPROX. PROVISIONAL: this 0.60 level was fixed after seeing the
@@ -84,29 +85,34 @@ ROBUST_SIGMA = 0.6
 ROBUST_HIGH_MIN = 0.88
 ROBUST_SEARCH_PX = 8          # the blurred match is searched within this many px of the exact match
 
-# Scale-aware pop-ups (docs/INVESTIGATION_2026-11-07.md). Some streams draw the HUD ~1.2x larger, so the pop-up word is
+# Scale-aware pop-ups (docs/reference/INVESTIGATION_2026-11-07.md). Some streams draw the HUD ~1.2x larger, so the pop-up word is
 # ~33 px wide instead of 27 px: the exact match (one fixed size) stays near 0.25 and nearly every chest is missed, while a
 # blurred match of the picture made smaller (x0.8) scores 0.82-0.92. This is a second channel BESIDE the exact path:
 #   - it runs only when the pop-up box has >= SCALED_PREFILTER_PX lavender pixels (production computes that mask anyway)
-#   - it looks only for the specific English word (SCALED_POPUP_TEMPLATES) and only shrinks the picture (= larger HUD);
+#   - it looks only for long chest words (SCALED_POPUP_TEMPLATES) and only shrinks the picture (= larger HUD);
 #     enlarging, or the short Portuguese word, matched non-chest text on the PS5 reference
 #   - after two strong pop-ups agree on a scale (SCALED_LOCK_MIN), only that scale and its neighbours are searched
 #   - a blurred onset becomes a pop-up only when the exact path has not fired within SCALED_WAIT seconds of it, so every
 #     exact-path event (incl. back-to-back chests and the CERTAIN rules) is exactly as before
 #   - no "position jumped" re-fire (a stacked "WEAKPOINT STREAK / CHEST" pop-up would count twice)
-#   - such a pop-up is merged with prompts like any pop-up and counts APPROX ONLY (MEDIUM), never CERTAIN.
+#   - such a pop-up is merged with prompts like any pop-up. French can also earn HIGH after repeated sharp matches.
 # Validation: event-identical on every reference clip (English and PS5, clean and compressed); on three large-HUD sessions
 # 11 of 11 verified chests (exact path alone: 3), 0 duplicates, 0 wrong counts.
 SCALE_AWARE_POPUPS = True
-SCALED_POPUP_TEMPLATES = ("en:CHEST",)       # used only while the word also counts MEDIUM alone (APPROX_COUNTS_MEDIUM_ALONE)
+SCALED_POPUP_TEMPLATES = ("en:CHEST", "fr:COFFRE")  # long words can count at MEDIUM without a prompt
+PORTUGUESE_POPUP = "pt:BAÚ"
 SCALED_SCALES = (1.0, 0.9, 0.85, 0.8, 0.75)  # picture made smaller = HUD drawn larger
+WIDE_HUD_SCALE = 0.70
+REFERENCE_HUD_SCALE = 0.70  # native size in the calibrated 720p desktop capture
 SCALED_TRIGGER = 0.80
+FRENCH_SCALED_CONFIRM_FRAMES = 3
+FRENCH_TYPE_READ_MIN = 0.72  # type-only evidence for an existing popup; never starts or confirms an opening
 SCALED_REARM = 0.55
 SCALED_PREFILTER_PX = 60
 SCALED_WAIT = 2.0
 SCALED_LOCK_MIN = 0.84
 
-# Smaller HUD (docs/INVESTIGATION_2026-11-08.md). Thiefs' stream draws the HUD at ~0.8x: the chest word is 22 px wide, the
+# Smaller HUD (docs/reference/INVESTIGATION_2026-11-08.md). Thiefs' stream draws the HUD at ~0.8x: the chest word is 22 px wide, the
 # exact match stays at 0.21-0.32 and every chest was missed. Enlarging the picture was rejected: a Portuguese combat
 # pop-up reached 0.806 at x1.25 against 0.81-0.83 for the real chests, and it cost ~34 ms per frame. This channel matches
 # a CHEST word cut at its NATIVE small size (templates/chest/en/chest_small.npy, 22 x 7 px, from that stream):
@@ -228,19 +234,47 @@ def adjust_tier(base_tier, shooting, interaction):
 
 
 class ChestEstimator:
-    def __init__(self, scale_aware=None, small_hud=None, stacked=None):
+    def __init__(self, scale_aware=None, small_hud=None, stacked=None, hud_scale=None):
         """scale_aware / small_hud / stacked: None = the module constants; False / True to compare (tests, research)."""
         self.templates = [t for t in V.load_templates() if t["id"].split(":")[0] in ENABLED_LANGUAGES]
         if not self.templates:
             raise ValueError(f"no chest-word template for languages {sorted(ENABLED_LANGUAGES)}; "
                              f"available: {[t['id'] for t in V.CHEST_TEMPLATES]}")
+        self.robust_exact_templates = {tpl["id"]: tpl["array"] for tpl in self.templates}
         self.robust_templates = {t["id"]: V.blur_template(t["array"], ROBUST_SIGMA) for t in self.templates}
+        self.french_template = next((t["array"] for t in self.templates if t["id"] == "fr:COFFRE"), None)
+        self.french_suffixes = chest_types.load_french_suffixes() if self.french_template is not None else {}
+        self.french_reads = deque()
+        self.french_faint_reads = {}
+        self.french_saturated_reads = deque()
+        self.french_bright_reads = deque()
+        self.french_exp_reads = deque()
+        self.french_stacked_exp_reads = deque()
+        self.french_exp_candidates = deque()
+        self.recent_counted_popups = deque()
+        self.last_french_exp = -float("inf")
+        self.french_type_history = deque()
+        self.french_contrast_history = deque()
+        self.french_scaled_reads = {}       # no votes shared between different glyph scales
+        self.french_plane = None           # this frame's winning (scale, RGB ROI, mask)
+        self.french_xp_templates = {}
+        if self.french_template is not None:
+            # Each pair is the EXP line and chest line, plus the word's column within the template.
+            self.french_xp_templates = {
+                kind: (np.load(paths.TEMPLATES_DIR / "chest/fr" / file), dx)
+                for kind, file, dx in ((chest_types.NORMAL, "normal_xp.npy", 10),
+                                       (chest_types.RARE, "rare_xp.npy", 2))
+            }
         self.sprite_template = sprite_detector.load_or_build_template()
         evidence.load_disc_template()
         self.popup = OnsetDetector(V.EVENT_HIGH_THRESHOLD, V.EVENT_LOW_THRESHOLD, True)
         self.sprite = OnsetDetector(sprite_detector.EVENT_HIGH_THRESHOLD, sprite_detector.EVENT_LOW_THRESHOLD, False)
         self.pending_popups, self.pending_interactions = [], []
         self.sprite_events = []
+        if self.french_xp_templates:
+            normal_xp = self.french_xp_templates[chest_types.NORMAL][0]
+            self.french_normal_xp_blurred = V.blur_template(normal_xp, ROBUST_SIGMA)
+            self.french_exp_blurred = V.blur_template(normal_xp[:14, :22], ROBUST_SIGMA)
         self.prompt_series = deque()       # (t, score) every prompt sample
         self.prompt_obs = deque()          # (t, score, gold, gem, chest_like) for scores >= SUPPORT_MIN
         self.ammo_steps = deque()          # times of ammo-region steps
@@ -252,6 +286,13 @@ class ChestEstimator:
         on = SCALE_AWARE_POPUPS if scale_aware is None else scale_aware
         self.scaled_templates = {tid: self.robust_templates[tid] for tid in SCALED_POPUP_TEMPLATES
                                  if on and tid in self.robust_templates and APPROX_COUNTS_MEDIUM_ALONE.get(tid, False)}
+        if on and PORTUGUESE_POPUP in self.robust_templates:
+            self.scaled_templates[PORTUGUESE_POPUP] = self.robust_templates[PORTUGUESE_POPUP]
+        self.preferred_hud_scale = None
+        if hud_scale:
+            target = REFERENCE_HUD_SCALE / hud_scale
+            self.preferred_hud_scale = min((*SCALED_SCALES, WIDE_HUD_SCALE), key=lambda scale: abs(scale - target))
+        self.wide_hud_roi = None
         self.scaled_onset = OnsetDetector(SCALED_TRIGGER, SCALED_REARM, False)
         self.pending_scaled = []
         self.exact_onsets = deque()
@@ -265,8 +306,11 @@ class ChestEstimator:
             tpl = np.load(paths.TEMPLATES_DIR / SMALL_TEMPLATE_FILE).astype(np.float32)
             self.small = {"array": tpl, "blur": V.blur_template(tpl, ROBUST_SIGMA)}
         self.small_onset = OnsetDetector(SMALL_TRIGGER, SMALL_REARM, False)
-        self.stacked = bool((STACKED_POPUPS if stacked is None else stacked) and "en:CHEST" in self.robust_templates)
+        self.stack_word = next((word for word in SCALED_POPUP_TEMPLATES if word in self.robust_templates), None)
+        self.stacked = bool((STACKED_POPUPS if stacked is None else stacked) and self.stack_word)
+        self.french_group = chest_types.FrenchQualifiedPopups() if self.stacked and self.stack_word == "fr:COFFRE" else None
         self.trackers = {}                 # "normal" / "small" -> popup_lines.PopupTracker
+        self.tracker_scales = {}           # fixed normalized plane for enlarged French HUD runs
         self.tracking = None               # the key of the tracker following the pop-up on screen
         self.tracked_scaled = None         # {"blur", "scale"} when that pop-up came from a scale-aware / small channel
         self.robust_hist = deque()         # (t, {template: blurred match}) while a pop-up is followed (stacked steps)
@@ -304,6 +348,22 @@ class ChestEstimator:
     def _popup(self, t, frame):
         roi = frame[V.ROI_Y:V.ROI_Y + V.ROI_H, V.ROI_X:V.ROI_X + V.ROI_W]
         mask = V.lavender_mask(roi)
+        self.wide_hud_roi = None
+        # A large XP group leaves enough lavender ink in the text area to
+        # justify one extra scale, even after the normal scale has locked.
+        text_mask = mask[35:112, 100:250]
+        if (self.scaled_templates or self.french_group is not None) and text_mask.sum() >= 110:
+            scale = WIDE_HUD_SCALE
+            self.wide_hud_roi = V.resize_box(roi, round(roi.shape[1] * scale), round(roi.shape[0] * scale))
+        if self.french_group is not None:
+            enlarged = (WIDE_HUD_SCALE, self.wide_hud_roi) if self.wide_hud_roi is not None else None
+            for score, y, x, kind, _ in self.french_group.observe(t, roi, enlarged):
+                self.pending_popups.append({"onset": t, "y": y, "x": x, "score": score, "template": "fr:COFFRE",
+                                            "scaled": {"blur": score, "scale": 1.0, "confirmed": True},
+                                            "french_type": kind, "qualified_french": True})
+            self.pending_scaled[:] = [p for p in self.pending_scaled if not self._qualified_french_owns(p)]
+            self.pending_popups[:] = [p for p in self.pending_popups
+                                      if p.get("qualified_french") or not self._qualified_french_owns(p)]
         best = (0.0, 0, 0, 0)
         where = {}                                          # template id -> top-left of its best exact match
         if mask.sum() >= 20:
@@ -321,16 +381,18 @@ class ChestEstimator:
                 if SAVE_SNAPSHOTS:
                     p["roi"] = roi.copy()
         word = self.templates[k]["id"] if score > 0 else "-"
-        exact_fired = self.popup.update(t, score, y, x, allow_jump=not (self.stacked and word == "en:CHEST"))
-        if exact_fired and word == "en:CHEST" and self._same_popup_counted():
+        exact_fired = self.popup.update(t, score, y, x, allow_jump=not (self.stacked and word == self.stack_word))
+        if exact_fired and word == self.stack_word and self._same_popup_counted():
             exact_fired = False                              # the pop-up on screen, already counted: not a new chest
             self.scaled_stats["exact_same_popup"] = self.scaled_stats.get("exact_same_popup", 0) + 1
             self.exact_onsets.append(t)                      # ...but it still owns any blurred onset near it
+        if exact_fired and self.french_group is not None and word == "fr:COFFRE" and self.french_group.owns(y, x):
+            exact_fired = False
         if exact_fired:
             self.pending_popups.append({"onset": t, "score": score, "y": y, "x": x, "template": word})
             if SAVE_SNAPSHOTS:
                 self.pending_popups[-1]["roi"] = roi.copy()
-            if word == "en:CHEST":
+            if word == self.stack_word:
                 run = self._track(t, "normal", None, (y, x))
                 if run is not None:
                     self.pending_popups[-1]["slot"] = (self.tracking, run, "first")
@@ -377,13 +439,18 @@ class ChestEstimator:
             if key == "small":
                 tpl, line_min = self.small["array"], STACKED_LINE_MIN_SMALL
             else:
-                tpl, line_min = next(x["array"] for x in self.templates if x["id"] == "en:CHEST"), STACKED_LINE_MIN
+                tpl, line_min = next(x["array"] for x in self.templates if x["id"] == self.stack_word), STACKED_LINE_MIN
             self.trackers[key] = popup_lines.PopupTracker(tpl, line_min, SAMPLE_FPS)
-            if CHEST_TYPES:
+            if CHEST_TYPES and self.stack_word == "en:CHEST":
                 prefixes = chest_types.load_prefixes(key)
                 th, tw = tpl.shape
                 self.trackers[key].classify = lambda m, ln, p=prefixes, h=th, w=tw: chest_types.classify_line(
                     m, ln.y, ln.x, h, w, p)[0]
+            elif CHEST_TYPES and self.stack_word == "fr:COFFRE":
+                suffixes = self.french_suffixes
+                th, tw = tpl.shape
+                self.trackers[key].classify = lambda m, ln, s=suffixes, h=th, w=tw: chest_types.classify_french_line(
+                    m, ln.y, ln.x, h, w, s)
         self.trackers[key].start(t, center)
         self.runs[(key, self.trackers[key].run)] = self.trackers[key].info
         while len(self.runs) > 50:
@@ -394,6 +461,12 @@ class ChestEstimator:
 
     def _stacked(self, t, roi, mask):
         tracker = self.trackers[self.tracking]
+        scale = self.tracker_scales.get(self.tracking, 1.0)
+        if scale != 1.0:
+            if self.french_plane is not None and self.french_plane[0] == scale:
+                mask = self.french_plane[2]
+            else:
+                mask = V.lavender_mask(V.resize_box(roi, round(roi.shape[1] * scale), round(roi.shape[0] * scale)))
         a = time.perf_counter()
         before = tracker.rejected_without_xp
         change = tracker.update(t, mask)
@@ -407,16 +480,21 @@ class ChestEstimator:
         since = [h for h in self.popup_hist if h[0] >= change["t"]] or list(self.popup_hist)[-1:]
         score, y, x = max(since, key=lambda h: h[1])[1:4] if since else (0.0, 0, 0)   # its frames since the change began
         popup = {"onset": float(change["t"]), "until": t + POPUP_FINISH_DELAY, "score": score, "y": y, "x": x,
-                 "template": "en:CHEST", "increment": {k: (float(v) if k == "t" else v) for k, v in change.items()}}
-        robust = [r.get("en:CHEST", 0.0) for tt, r in self.robust_hist if tt >= change["t"]]
+                 "template": self.stack_word, "increment": {k: (float(v) if k == "t" else v) for k, v in change.items()}}
+        robust = [r.get(self.stack_word, 0.0) for tt, r in self.robust_hist if tt >= change["t"]]
         if robust:                                           # its compression-robust match since the change began
-            popup["robust"] = {"en:CHEST": max(robust)}
+            popup["robust"] = {self.stack_word: max(robust)}
         if self.tracked_scaled is not None:
             popup["scaled"] = dict(self.tracked_scaled)
         popup["slot"] = (self.tracking, tracker.run, change.get("line"))
         if SAVE_SNAPSHOTS:
             popup["roi"] = roi.copy()
-        self.pending_popups.append(popup)
+        if not self._qualified_french_owns(popup):
+            self.pending_popups.append(popup)
+
+    def _qualified_french_owns(self, popup):
+        return (self.french_group is not None and popup["template"] == "fr:COFFRE"
+                and self.french_group.owns(popup["y"], popup["x"]))
 
     # ------------------------------------------------------------------ scale-aware pop-ups (SCALE_AWARE_POPUPS)
     # ------------------------------------------------------------------ chest types (CHEST_TYPES)
@@ -461,6 +539,7 @@ class ChestEstimator:
 
     def _scaled_popup(self, t, roi, mask, exact_fired):
         """Second pop-up channel, after the exact path of the same frame. Only adds pop-ups the exact path did not find."""
+        self.french_plane = None
         if exact_fired:                                     # the exact path owns this pop-up: drop blurred onsets near it
             self.exact_onsets.append(t)
             kept = [p for p in self.pending_scaled if p["onset"] < t - SCALED_WAIT]
@@ -468,12 +547,15 @@ class ChestEstimator:
             self.pending_scaled = kept
         while self.exact_onsets and self.exact_onsets[0] < t - SCALED_WAIT - 1.0:
             self.exact_onsets.popleft()
-        best = (0.0, 0, 0, 1.0, None)
+        best = (0.0, 0, 0, 1.0, None, False)
         small = (0.0, 0.0, 0, 0)
+        supported_portuguese = (PORTUGUESE_POPUP in self.scaled_templates
+                                and self._object_support(t - MERGE_POPUP_AFTER_PROMPT, t) is not None)
         if mask.sum() >= SCALED_PREFILTER_PX:
             a = time.perf_counter()
             if self.scaled_templates and self.scale_locked != SMALL_SCALE:
-                best = self._scaled_best(roi, mask)
+                best = (self._scaled_best(roi, mask, supported_portuguese=True) if supported_portuguese
+                        else self._scaled_best(roi, mask))
             if self.small is not None and (self.scale_locked is None or self.scale_locked == SMALL_SCALE):
                 small = self._small_best(mask)
                 self.scaled_stats["small_searches"] += 1
@@ -484,25 +566,370 @@ class ChestEstimator:
             st["search_ms_max"] = max(st["search_ms_max"], ms)
         if self.small is not None:
             self._small_popup(t, roi, small)
-        score, cy, cx, s, tid = best
-        for p in self.pending_scaled:                       # keep the peak over the pop-up's first second
-            if not p.get("small") and t <= p["onset"] + POPUP_FINISH_DELAY and score > p["blur"]:
-                p.update(blur=score, scale=s, y=cy, x=cx)
-                if SAVE_SNAPSHOTS:
-                    p["roi"] = roi.copy()
-        if self.scaled_onset.update(t, score, cy, cx):
-            if not any(abs(o - t) <= SCALED_WAIT for o in self.exact_onsets) and \
+        score, cy, cx, s, tid, strong = best
+        plane = self.french_plane if tid == "fr:COFFRE" and self.french_plane is not None else None
+        if plane is not None and plane[0] != 1.0:
+            recovered = self._recover_french_line(t, plane[1], plane[2], score,
+                                                  round(cy * s), round(cx * s), scale=s)
+            if recovered is not None:
+                ry, rx, kind, confirmed = recovered
+                recovered = (round(ry / s), round(rx / s), kind, confirmed)
+            elif 0.62 <= score < SCALED_TRIGGER:
+                # A weak resized word can beat the native word even when only the
+                # native plane has three aligned readings of the full XP header.
+                recovered = self._recover_french_line(t, roi, mask, 0.0, 0, 0)
+                if recovered is not None:
+                    plane = None
+        else:
+            recovered = self._recover_french_line(t, roi, mask, score, cy, cx) if "fr:COFFRE" in self.scaled_templates else None
+        if recovered is None and plane is not None and 0.9 in self._scaled_scales() and score >= 0.58:
+            # A shrunken word can be readable in the bright text pixels even
+            # when the normal lavender mask drops parts of the EXP header.
+            bright_scale = 0.9
+            bright_roi = (plane[1] if plane[0] == bright_scale else
+                          V.resize_box(roi, round(roi.shape[1] * bright_scale),
+                                       round(roi.shape[0] * bright_scale)))
+            recovered = self._recover_bright_french(t, bright_roi)
+            if recovered is None:
+                exp_line = self._recover_bright_exp_line(t, bright_roi)
+                if exp_line is not None:
+                    self._queue_french_exp(t, exp_line, score, roi)
+            if recovered is not None:
+                ry, rx, kind, confirmed = recovered
+                recovered = (round(ry / bright_scale), round(rx / bright_scale), kind, confirmed)
+                s = bright_scale
+        if recovered is None and plane is not None and score >= 0.62 and 1.0 in self._scaled_scales():
+            stacked_line = self._recover_french_stacked_exp_line(t, roi, mask)
+            if stacked_line is not None:
+                self._queue_french_exp(t, stacked_line, score, roi, scale=1.0)
+        saturated_french = False
+        if recovered is None and score < 0.50 and "fr:COFFRE" in self.scaled_templates:
+            recovered = self._recover_saturated_french(t, roi, mask)
+            if recovered is not None:
+                plane = None
+                saturated_french = True
+        if recovered is not None:
+            cy, cx, kind, confirmed = recovered
+            s, tid = (s if plane is not None else 1.0), "fr:COFFRE"
+        near_french = []
+        if tid == "fr:COFFRE":
+            th, tw = self.french_template.shape
+            near_french = [p for p in self.pending_scaled if p["template"] == tid
+                           and t - p["onset"] <= SCALED_WAIT
+                           and abs(p["y"] - cy) <= th + 1 and abs(p["x"] - cx) <= tw]
+        if self.scaled_onset.update(t, max(score, SCALED_TRIGGER) if recovered is not None else score, cy, cx):
+            owned = self.french_group is not None and tid == "fr:COFFRE" and self.french_group.owns(cy, cx)
+            if tid == "fr:COFFRE" and self.french_group is not None and recovered is None:
+                owned = owned or self.french_group.owns_fading_sprite(t, cy, cx)
+            # A normalized French tracker owns this visible group, including
+            # fade/reflow. Only its XP-confirmed content changes add openings.
+            tracked_french = (tid == "fr:COFFRE" and self.tracking in self.tracker_scales
+                              and self.trackers[self.tracking].active)
+            same_french_line = any(p.get("confirmed") or recovered is not None for p in near_french)
+            if not (owned or same_french_line or tracked_french) and not any(abs(o - t) <= SCALED_WAIT for o in self.exact_onsets) and \
                     not any(abs(p["onset"] - t) <= POPUP_FINISH_DELAY for p in self.pending_popups):
                 self.pending_scaled.append({"onset": t, "blur": score, "scale": s, "y": cy, "x": cx, "template": tid})
+                if tid == "fr:COFFRE":
+                    self.pending_scaled[-1]["origin"] = (s, cy, cx)
+                if recovered is not None:
+                    self.pending_scaled[-1]["confirmed"] = confirmed
+                    self.pending_scaled[-1]["french_type"] = kind
+                    if saturated_french:
+                        self.pending_scaled[-1]["saturated_french"] = True
                 if SAVE_SNAPSHOTS:
                     self.pending_scaled[-1]["roi"] = roi.copy()
                 self.scaled_stats["onsets"] += 1
-                if s == 1.0:
+                if s == 1.0 and tid == self.stack_word:
                     self.pending_scaled[-1]["run"] = self._track(t, "normal", {"blur": score, "scale": s}, (cy, cx))
+                elif tid == "fr:COFFRE" and tid == self.stack_word:
+                    key = ("fr", s)
+                    self.tracker_scales[key] = s
+                    self.pending_scaled[-1]["run"] = self._track(
+                        t, key, {"blur": score, "scale": s}, (round(cy * s), round(cx * s)))
+                    self.pending_scaled[-1]["tracker_key"] = self.tracking
+        if recovered is not None:
+            # The first flash can shift horizontally before the word settles. Associate the reading
+            # with just the closest pending opening on that XP line, within one word's width.
+            candidate = min(near_french, key=lambda p: (abs(p["y"] - cy) + abs(p["x"] - cx), -p["onset"]),
+                            default=None)
+            if candidate is not None:
+                if confirmed:
+                    candidate["confirmed"] = True
+                if kind != chest_types.UNKNOWN and (confirmed or "french_type" not in candidate):
+                    candidate["french_type"] = kind
+        if plane is not None and score >= FRENCH_TYPE_READ_MIN:
+            self._vote_french_type(t, best, plane[2])
+        if plane is not None and score >= 0.58 and 0.9 in self._scaled_scales():
+            self._observe_french_contrast_type(t, roi, plane)
         for p in list(self.pending_scaled):                 # not claimed by the exact path in time -> a pop-up
+            if not p.get("small") and t <= p["onset"] + POPUP_FINISH_DELAY:
+                origin = p.get("origin")
+                same = (origin is None or (tid == p["template"] and s == origin[0]
+                                           and abs(origin[1] - cy) <= 5 and abs(origin[2] - cx) <= 5))
+                if same and score > p["blur"]:
+                    p.update(blur=score, scale=s, y=cy, x=cx)
+                    if SAVE_SNAPSHOTS:
+                        p["roi"] = roi.copy()
+                if origin is not None:
+                    count = p.get("confirmation_frames", 0) + 1 if same and strong else 0
+                    p["confirmation_frames"] = count
+                    if count >= FRENCH_SCALED_CONFIRM_FRAMES:
+                        p["confirmed"] = True
             if t >= p["onset"] + SCALED_WAIT:
                 self.pending_scaled.remove(p)
                 self._promote_scaled(p)
+
+    def _vote_french_type(self, t, match, mask):
+        _, word_y, word_x, scale, _, _ = match
+        th, tw = self.french_template.shape
+        y, x = round(word_y * scale) - th // 2, round(word_x * scale) - tw // 2
+        reading = chest_types.classify_french_line(mask, y, x, th, tw, self.french_suffixes)
+        history = self.french_type_history
+        while history and t - history[0][0] > 0.45:
+            history.popleft()
+        # The word can already be legible before the opening crosses the threshold.
+        # Save these readings briefly and assign them only to one nearby onset.
+        for pending in reversed(self.pending_scaled):
+            origin = pending.get("origin")
+            if (origin is None or t - pending["onset"] > SCALED_WAIT
+                    or abs(origin[1] - word_y) > 4 or abs(origin[2] - word_x) > 24):
+                continue
+            votes = pending.setdefault("french_type_votes", Counter())
+            votes.update(kind for _, prev_y, prev_x, kind in history
+                         if abs(prev_y - word_y) <= 4 and abs(prev_x - word_x) <= 8)
+            history.clear()
+            if reading != chest_types.UNKNOWN:
+                votes[reading] += 1
+            return
+        if self.scaled_onset.armed and reading != chest_types.UNKNOWN:
+            history.append((t, word_y, word_x, reading))
+
+    def _observe_french_contrast_type(self, t, roi, plane):
+        """Collect type-only readings of the bright glyph core on noisy backgrounds."""
+        history = self.french_contrast_history
+        while history and t - history[0][0] > SCALED_WAIT + 0.9:
+            history.popleft()
+        scale = 0.9
+        normalized = (plane[1] if plane[0] == scale else
+                      V.resize_box(roi, round(roi.shape[1] * scale), round(roi.shape[0] * scale)))
+        y0, x0 = 38, 90
+        crop = normalized[y0:105, x0:230]
+        light = crop.min(axis=2).astype(np.float32)
+        contrast = light - gaussian_filter(light, 2.0)
+        mask = ((contrast > 40) & (crop[:, :, 1] > 125)).astype(np.float32)
+        score, y, x = V.robust_correlation_at(mask, self.robust_templates["fr:COFFRE"], ROBUST_SIGMA)
+        if score < 0.76:
+            return
+        h, w = self.french_template.shape
+        kind = chest_types.classify_french_line(mask, y, x, h, w, self.french_suffixes)
+        if kind == chest_types.NORMAL:
+            # A lower contrast reading can still identify a faint qualifier.
+            soft = ((contrast > 14) & (crop[:, :, 1] > 125)).astype(np.float32)
+            alternate = chest_types.classify_french_line(soft, y, x, h, w, self.french_suffixes)
+            if alternate in (chest_types.RARE, chest_types.SPRITE):
+                kind = alternate
+        if kind != chest_types.UNKNOWN:
+            history.append((t, round((y0 + y + h // 2) / scale), round((x0 + x + w // 2) / scale), kind))
+
+    def _contrast_type_votes(self, popup):
+        history = self.french_contrast_history
+        onset = popup["onset"]
+        # Do not borrow a readable row from a second opening in the same XP group.
+        if (any(abs(stamp - onset) <= 1.4 for stamp in self.recent_counted_popups)
+                or any(abs(other["onset"] - onset) <= 1.4
+                       for other in (*self.pending_scaled, *self.pending_popups) if other is not popup)):
+            return Counter()
+        nearby = [row for row in history if onset - 0.9 <= row[0] <= onset + 1.4
+                  and abs(row[2] - popup["x"]) <= 34
+                  and abs(row[1] - popup["y"]) <= (10 if abs(row[2] - popup["x"]) <= 10 else 5)]
+        if any(row[3] != chest_types.NORMAL for row in nearby):
+            return Counter()
+        for _, y, x, _ in nearby:
+            aligned = [row for row in nearby if abs(row[1] - y) <= 3 and abs(row[2] - x) <= 4]
+            if len(aligned) >= FRENCH_SCALED_CONFIRM_FRAMES:
+                used = set(nearby)
+                self.french_contrast_history = deque(row for row in history if row not in used)
+                return Counter({chest_types.NORMAL: len(aligned)})
+        return Counter()
+
+    def _recover_french_line(self, t, roi, mask, score, cy, cx, scale=1.0):
+        """Read a French line, returning position, type and whether it earns HIGH."""
+        th, tw = self.french_template.shape
+        y, x = cy - th // 2, cx - tw // 2
+        kind = chest_types.UNKNOWN
+        sprite = self.french_suffixes[chest_types.SPRITE]
+        xp_region = mask[32:112, 108:236]  # centered on the HUD XP notification, in popup-box pixels
+        normal, rare = (V.best_template_correlation(xp_region, self.french_xp_templates[k][0])
+                        for k in (chest_types.NORMAL, chest_types.RARE))
+        if score >= 0.62 and chest_types.french_sprite_score(mask, y, x, th, tw, sprite) >= 0.78:
+            kind = chest_types.SPRITE
+        elif rare[0] >= 0.77 and rare[0] >= normal[0] + 0.06:
+            kind = chest_types.RARE
+            y, x = 32 + rare[1] + 14, 108 + rare[2] + self.french_xp_templates[kind][1]
+        elif normal[0] >= 0.72:
+            # The two lines give a stronger reading than the small word by itself.
+            y, x = 32 + normal[1] + 14, 108 + normal[2] + self.french_xp_templates[chest_types.NORMAL][1]
+            kind = chest_types.classify_french_line(mask, y, x, th, tw, self.french_suffixes)
+        elif score >= 0.62:
+            y0, x0 = max(0, cy - 13), max(0, cx - 57)
+            bright = (roi[y0:cy + 13, x0:cx + 40].min(axis=2) > 180).astype(np.float32)
+            bright_score, by, bx = V.best_template_correlation(bright, self.french_template)
+            y, x = y0 + by, x0 + bx
+            ink = mask[y:y + th, x:x + tw].mean()
+            if bright_score < 0.71 or not 0.40 <= ink <= 0.85:
+                return self._recover_faint_french(t, mask, score, cy, cx, scale, normal)
+            # Only a positively read bare word earns a normal-chest label.
+            kind = chest_types.classify_french_line(mask, y, x, th, tw, self.french_suffixes)
+        else:
+            return None
+        reads = self.french_reads if scale == 1.0 else self.french_scaled_reads.setdefault(scale, deque())
+        while reads and t - reads[0][0] > 0.36:
+            reads.popleft()
+        reads.append((t, y, x, kind))
+        votes = Counter(read_kind for _, read_y, read_x, read_kind in reads
+                        if abs(read_y - y) <= 4 and abs(read_x - x) <= 7)
+        if sum(votes.values()) < FRENCH_SCALED_CONFIRM_FRAMES:
+            return None
+        return y + th // 2, x + tw // 2, chest_types.decide(votes)[0], True
+
+    def _recover_bright_french(self, t, roi):
+        """Confirm a normal French chest from the bright EXP header and bare word."""
+        y0, x0 = 25, 85
+        bright = (roi[y0:112, x0:250].min(axis=2) > 145).astype(np.float32)
+        xp, xp_y, xp_x = V.robust_correlation_at(bright, self.french_normal_xp_blurred, ROBUST_SIGMA)
+        if xp < 0.62:
+            return None
+        h, w = self.french_template.shape
+        y, x = xp_y + 14, xp_x + self.french_xp_templates[chest_types.NORMAL][1]
+        top, left = max(0, y - 3), max(0, x - 5)
+        crop = bright[top:y + h + 4, left:x + w + 6]
+        word, word_y, word_x = V.robust_correlation_at(crop, self.robust_templates["fr:COFFRE"], ROBUST_SIGMA)
+        y, x = top + word_y, left + word_x
+        if word < 0.69 or chest_types.classify_french_line(
+                bright, y, x, h, w, self.french_suffixes) != chest_types.NORMAL:
+            return None
+        reads = self.french_bright_reads
+        while reads and t - reads[0][0] > 0.36:
+            reads.popleft()
+        reads.append((t, y, x))
+        if sum(abs(ry - y) <= 2 and abs(rx - x) <= 3 for _, ry, rx in reads) < FRENCH_SCALED_CONFIRM_FRAMES:
+            return None
+        return y0 + y + h // 2, x0 + x + w // 2, chest_types.NORMAL, True
+
+    def _recover_bright_exp_line(self, t, roi):
+        """Find a chest line beside the EXP glyph when the complete header is unreadable."""
+        y0, x0 = 25, 85
+        bright = (roi[y0:112, x0:250].min(axis=2) > 145).astype(np.float32)
+        word, y, x = V.robust_correlation_at(bright, self.robust_templates["fr:COFFRE"], ROBUST_SIGMA)
+        if word < 0.78:
+            return None
+        h, w = self.french_template.shape
+        kind = chest_types.classify_french_line(bright, y, x, h, w, self.french_suffixes)
+        if kind not in (chest_types.NORMAL, chest_types.UNKNOWN):
+            return None
+        # The EXP glyph can sit left of an isolated chest or right of the
+        # left-aligned chest line when a different reward occupies the row above.
+        xp = max(V.robust_correlation_at(
+            bright[max(0, y - dy - 3):max(0, y - dy + 17), max(0, x + dx - 4):max(0, x + dx + 26)],
+            self.french_exp_blurred, ROBUST_SIGMA)[0] for dy, dx in ((14, -10), (29, 25)))
+        if xp < 0.55:
+            return None
+        reads = self.french_exp_reads
+        while reads and t - reads[0][0] > 0.75:
+            reads.popleft()
+        reads.append((t, y, x, kind))
+        aligned = [seen for _, ry, rx, seen in reads if abs(ry - y) <= 2 and abs(rx - x) <= 3]
+        if len(aligned) < FRENCH_SCALED_CONFIRM_FRAMES or chest_types.NORMAL not in aligned:
+            return None
+        return y0 + y + h // 2, x0 + x + w // 2, chest_types.NORMAL, False
+
+    def _recover_french_stacked_exp_line(self, t, roi, mask):
+        """Read a bare COFFRE under another XP reward at native HUD scale."""
+        y0, x0 = 60, 105
+        word_mask = mask[y0:100, x0:176]
+        template = self.robust_templates["fr:COFFRE"]
+        score, y, x = V.robust_correlation_at(word_mask, template, ROBUST_SIGMA)
+        if score < 0.66:
+            return None
+        y, x = y0 + y, x0 + x
+        h, w = self.french_template.shape
+        if chest_types.classify_french_line(mask, y, x, h, w, self.french_suffixes) != chest_types.NORMAL:
+            return None
+        # A reward occupies the middle row. The EXP glyph is one row higher
+        # than in a standalone chest notification and sits right of COFFRE.
+        if mask[y - 14:y - 3, x:x + 2 * w].sum() < 24:
+            return None
+        xp, _, _ = V.robust_correlation_at(mask[y - 28:y - 8, x + 24:x + 54],
+                                           self.french_exp_blurred, ROBUST_SIGMA)
+        if xp < 0.55:
+            return None
+        crop = roi[y - 4:y + h + 4, x - 4:x + w + 4]
+        light = crop.min(axis=2).astype(np.float32)
+        contrast = ((light - gaussian_filter(light, 2.0) > 24) & (crop[:, :, 1] > 125)).astype(np.float32)
+        sharp, sy, sx = V.robust_correlation_at(contrast, template, ROBUST_SIGMA)
+        if sharp < 0.78 or abs(sy - 4) > 2 or abs(sx - 4) > 2:
+            return None
+        reads = self.french_stacked_exp_reads
+        while reads and t - reads[0][0] > 0.75:
+            reads.popleft()
+        reads.append((t, y, x))
+        if sum(abs(ry - y) <= 2 and abs(rx - x) <= 3 for _, ry, rx in reads) < FRENCH_SCALED_CONFIRM_FRAMES:
+            return None
+        return y + h // 2, x + w // 2, chest_types.NORMAL, False
+
+    def _queue_french_exp(self, t, line, score, roi, scale=0.9):
+        if t - self.last_french_exp > 0.75:
+            y, x, kind, _ = line
+            candidate = {"onset": t, "score": score, "y": round(y / scale), "x": round(x / scale),
+                         "template": "fr:COFFRE", "french_type": kind, "bright_exp": True,
+                         "scaled": {"blur": score, "scale": scale}}
+            if SAVE_SNAPSHOTS:
+                candidate["roi"] = roi.copy()
+            self.french_exp_candidates.append(candidate)
+        self.last_french_exp = t
+
+    def _recover_saturated_french(self, t, roi, mask):
+        """Recover a bare French XP notification when the lavender mask is saturated."""
+        y0, x0 = 32, 108
+        if mask[y0:112, x0:236].mean() < 0.95:
+            return None
+        bright = (roi[y0:112, x0:236].min(axis=2) > 165).astype(np.float32)
+        xp_score, xp_y, xp_x = V.robust_correlation_at(bright, self.french_normal_xp_blurred, ROBUST_SIGMA)
+        if xp_score < 0.75:
+            return None
+        h, w = self.french_template.shape
+        y, x = xp_y + 14, xp_x + self.french_xp_templates[chest_types.NORMAL][1]
+        crop = bright[max(0, y - 2):y + h + 3, max(0, x - 4):x + w + 5]
+        word_score, _, _ = V.robust_correlation_at(crop, self.robust_templates["fr:COFFRE"], ROBUST_SIGMA)
+        if word_score < 0.55:
+            return None
+        reads = self.french_saturated_reads
+        while reads and t - reads[0][0] > 0.36:
+            reads.popleft()
+        reads.append((t, y, x))
+        if sum(abs(ry - y) <= 2 and abs(rx - x) <= 3 for _, ry, rx in reads) < FRENCH_SCALED_CONFIRM_FRAMES:
+            return None
+        return y0 + y + h // 2, x0 + x + w // 2, chest_types.NORMAL, False
+
+    def _recover_faint_french(self, t, mask, score, cy, cx, scale, xp):
+        """Three aligned bare COFFRE + XP pairs can start an estimated opening."""
+        if score < 0.74 or xp[0] < 0.48:
+            return None
+        th, tw = self.french_template.shape
+        y, x = cy - th // 2, cx - tw // 2
+        xp_y = 32 + xp[1] + 14
+        xp_x = 108 + xp[2] + self.french_xp_templates[chest_types.NORMAL][1]
+        if abs(y - xp_y) > 2 or abs(x - xp_x) > 3:
+            return None
+        if chest_types.classify_french_line(mask, y, x, th, tw, self.french_suffixes) != chest_types.NORMAL:
+            return None
+        reads = self.french_faint_reads.setdefault(scale, deque())
+        while reads and t - reads[0][0] > 0.45:
+            reads.popleft()
+        reads.append((t, y, x))
+        if sum(abs(read_y - y) <= 3 and abs(read_x - x) <= 6 for _, read_y, read_x in reads) >= FRENCH_SCALED_CONFIRM_FRAMES:
+            return cy, cx, chest_types.NORMAL, False
+        return None
 
     def _small_best(self, mask):
         """Native small-HUD word: exact match, confirmed by the blurred match at the same place -> (gated exact score,
@@ -546,23 +973,57 @@ class ChestEstimator:
         i = SCALED_SCALES.index(self.scale_locked)
         return SCALED_SCALES[max(0, i - 1):i + 2]
 
-    def _scaled_best(self, roi, mask):
-        """Best blurred match over the active scales -> (score, centre y, centre x in pop-up box pixels, scale, template)."""
+    def _scaled_best(self, roi, mask, supported_portuguese=False):
+        """Best blurred match, with a sharp-glyph check at the same position for French."""
         best = (0.0, 0, 0, 1.0, None)
-        for s in self._scaled_scales():
-            m = mask if s == 1.0 else V.lavender_mask(V.resize_box(roi, round(roi.shape[1] * s), round(roi.shape[0] * s)))
+        winner = None
+        self.french_plane = None
+        scales = (*self._scaled_scales(), WIDE_HUD_SCALE)
+        if self.scale_locked is None and self.preferred_hud_scale in scales:
+            preferred = self.preferred_hud_scale
+            scales = (preferred, *(scale for scale in scales if scale != preferred))
+        for s in scales:
+            if s == WIDE_HUD_SCALE:
+                scaled_roi = self.wide_hud_roi
+                if scaled_roi is None or best[0] >= SCALED_TRIGGER:
+                    continue
+            else:
+                scaled_roi = roi if s == 1.0 else V.resize_box(roi, round(roi.shape[1] * s), round(roi.shape[0] * s))
+            m = mask if s == 1.0 else V.lavender_mask(scaled_roi)
             if m.sum() < 20:
                 continue
             for tid, tpl in self.scaled_templates.items():
+                if tid == PORTUGUESE_POPUP and (s == 1.0 or not supported_portuguese):
+                    continue  # the native exact detector already handles this case
                 score, y, x = V.robust_correlation_at(m, tpl, ROBUST_SIGMA)
+                if tid == PORTUGUESE_POPUP:
+                    if score < ROBUST_HIGH_MIN or score <= best[0]:
+                        continue
+                    h, w = tpl.shape
+                    sharp = self.robust_exact_templates[tid]
+                    if V.best_template_correlation(m[max(0, y - 2):y + h + 2,
+                                                     max(0, x - 2):x + w + 2], sharp)[0] < V.EVENT_HIGH_THRESHOLD:
+                        continue
+                if s == WIDE_HUD_SCALE and score < SCALED_TRIGGER:
+                    continue  # weak wide matches must not steal frames from native XP recovery
                 if score > best[0]:
                     h, w = tpl.shape
                     best = (score, int((y + h // 2) / s), int((x + w // 2) / s), s, tid)
-        return best
+                    winner = (m, y + h // 2, x + w // 2)
+                    self.french_plane = (s, scaled_roi, m) if tid == "fr:COFFRE" else None
+        strong = False
+        if best[4] == "fr:COFFRE" and best[0] >= ROBUST_HIGH_MIN:
+            m, y, x = winner
+            h, w = self.french_template.shape
+            region = m[max(0, y - h // 2 - 3):y + h // 2 + 4, max(0, x - w // 2 - 3):x + w // 2 + 4]
+            if region.shape[0] >= h and region.shape[1] >= w:
+                strong = V.best_template_correlation(region, self.french_template)[0] >= V.EVENT_HIGH_THRESHOLD
+        return (*best, strong)
 
     def _promote_scaled(self, p):
         """A blurred onset the exact path did not claim becomes a pending pop-up (finished and counted like any other)."""
-        if p.get("run") is not None and p["run"] == self.tracked_run:
+        if p.get("run") is not None and p["run"] == self.tracked_run and \
+                p.get("tracker_key", self.tracking) == self.tracking:
             self.tracked_counted = True
         exact_peak = max((h[1] for h in self.popup_hist if p["onset"] <= h[0] <= p["onset"] + POPUP_FINISH_DELAY),
                          default=0.0)
@@ -570,8 +1031,22 @@ class ChestEstimator:
                  "scaled": {"blur": p["blur"], "scale": p["scale"]}}
         if p.get("small"):
             popup["scaled"]["exact_small"] = p.get("exact_small", 0.0)
+        if p.get("confirmed"):
+            popup["scaled"]["confirmed"] = True
+        if "french_type" in p:
+            popup["french_type"] = p["french_type"]
+        if "french_type_votes" in p:
+            popup["french_type_votes"] = p["french_type_votes"]
+        if (p["template"] == "fr:COFFRE" and p.get("origin", (0,))[0] in (0.85, 0.9)
+                and p.get("french_type", chest_types.UNKNOWN) == chest_types.UNKNOWN
+                and not any(p.get("french_type_votes", {}).get(kind) for kind in (chest_types.RARE, chest_types.SPRITE))):
+            contrast_votes = self._contrast_type_votes(p)
+            if contrast_votes:
+                popup["french_contrast_votes"] = contrast_votes
+        if p.get("saturated_french"):
+            popup["saturated_french"] = True
         if p.get("run") is not None:
-            popup["slot"] = ("small" if p.get("small") else "normal", p["run"], "first")
+            popup["slot"] = (p.get("tracker_key", "small" if p.get("small") else "normal"), p["run"], "first")
         if "roi" in p:
             popup["roi"] = p["roi"]
         self.pending_popups.append(popup)
@@ -630,12 +1105,31 @@ class ChestEstimator:
         for p in list(self.pending_popups):
             if final or p.get("until", p["onset"] + POPUP_FINISH_DELAY) <= t:
                 self.pending_popups.remove(p)
+                if p.get("template") == "fr:COFFRE" and p.get("french_type", chest_types.UNKNOWN) == chest_types.UNKNOWN:
+                    matches = [line for line in self.french_exp_candidates
+                               if abs(line["onset"] - p["onset"]) <= 1.0
+                               and abs(line["y"] - p["y"]) <= 6 and abs(line["x"] - p["x"]) <= 12]
+                    if len(matches) == 1:
+                        p["french_type"] = matches[0]["french_type"]
                 out.append(self._popup_event(p))
         for i in list(self.pending_interactions):
             if final or i["t"] + INTERACTION_FINISH_DELAY <= t:
                 self.pending_interactions.remove(i)
                 if not i["merged"]:
                     out.append(self._interaction_event(i))
+        if self.french_template is not None:
+            self.recent_counted_popups.extend(e["time"] for e in out if e["approx_counted"])
+            while self.recent_counted_popups and t - self.recent_counted_popups[0] > 7.0:
+                self.recent_counted_popups.popleft()
+            while self.french_exp_candidates and (final or t - self.french_exp_candidates[0]["onset"] >= 3.25):
+                candidate = self.french_exp_candidates.popleft()
+                onset = candidate["onset"]
+                if any(abs(stamp - onset) <= 1.35 for stamp in self.recent_counted_popups):
+                    continue
+                event = self._popup_event(candidate)
+                out.append(event)
+                if event["approx_counted"]:
+                    self.recent_counted_popups.append(onset)
         return sorted(out, key=lambda e: e["time"])
 
     def _object_support(self, a, b):
@@ -710,11 +1204,24 @@ class ChestEstimator:
             reason = (f"small-HUD pop-up: native small CHEST match {scaled.get('exact_small', 0.0):.2f} / blurred "
                       f"{scaled['blur']:.2f} (HUD drawn ~0.8x; normal-word match {p['score']:.2f}) -> MEDIUM, counted "
                       f"approx only (never CERTAIN)")
+        elif scaled is not None and p["template"] == PORTUGUESE_POPUP:
+            adjusted, certain = "MEDIUM", False
+            approx = APPROX_MEDIUM_WITH_OBJECT_SUPPORT and support is not None and not shooting
+            reason = f"scaled Portuguese BAÚ match {scaled['blur']:.2f}; requires chest-object prompt support"
         elif scaled is not None:
-            # HUD drawn larger: the exact score says nothing here, so the tier rules above do not apply. APPROX only.
+            # The unscaled exact score does not apply here. A French glyph can earn HIGH after rescaling.
             adjusted, certain, approx = "MEDIUM", False, True
             reason = (f"scale-aware pop-up: blurred {p['template']} match {scaled['blur']:.2f} at x{scaled['scale']} "
-                      f"(exact match {p['score']:.2f}; HUD drawn larger) -> MEDIUM, counted approx only (never CERTAIN)")
+                      f"(unscaled exact match {p['score']:.2f}) -> MEDIUM, counted approx only")
+            if p.get("bright_exp"):
+                reason = "French COFFRE and EXP glyph aligned across three frames -> MEDIUM"
+            if p.get("saturated_french"):
+                reason = "French COFFRE and EXP header aligned across three frames on saturated background -> MEDIUM"
+            if scaled.get("confirmed"):
+                adjusted = "HIGH"
+                certain = adjusted in CERTAIN_TIERS
+                reason = ("French qualified chest line and quantity confirmed across three frames -> HIGH"
+                          if p.get("qualified_french") else "French COFFRE confirmed across three aligned frames -> HIGH")
         if inc is not None:
             step = {"new_line": "a chest line was added to the pop-up on screen",
                     "multiplier": "the chest line's multiplier " + ("appeared (X2)" if inc.get("change") == "appeared"
@@ -727,15 +1234,30 @@ class ChestEstimator:
                 reason = f"stacked pop-up: {step} -> MEDIUM, counted approx only"
             else:
                 reason = f"stacked pop-up: {step}; " + reason
-        if (self.scaled_templates or self.small is not None) and inc is None:
+        if (self.scaled_templates or self.small is not None) and inc is None and not (
+                p.get("qualified_french") or p.get("bright_exp")) and (approx or p["template"] != PORTUGUESE_POPUP):
             self._vote_scale(p)
         if not approx:
             reason += "; NOT counted"
         extra = {"_snapshot": p["roi"]} if "roi" in p else {}
         kind, confidence, type_evidence = self._label(p.get("slot"))
+        qualified_type = p.get("qualified_french") and p.get("french_type") in chest_types.KNOWN
+        if qualified_type or (kind == chest_types.UNKNOWN and p.get("french_type", chest_types.UNKNOWN) != chest_types.UNKNOWN):
+            kind, confidence, type_evidence = p["french_type"], 1.0, {"read": "aligned French XP line", "frames": 3}
+        votes = p.get("french_type_votes")
+        if kind == chest_types.UNKNOWN and votes:
+            observed, agreement = chest_types.decide(votes)
+            if observed != chest_types.UNKNOWN:
+                kind, confidence = observed, agreement
+                type_evidence = {"read": "aligned French blurred line", "votes": dict(votes)}
+        if kind == chest_types.UNKNOWN and p.get("french_contrast_votes"):
+            kind, confidence = chest_types.decide(p["french_contrast_votes"])
+            type_evidence = {"read": "aligned high-contrast French line", "votes": dict(p["french_contrast_votes"])}
         extra.update(chest_type=kind, type_confidence=confidence, type_evidence=type_evidence)
         if scaled is not None:
             extra["scaled_popup"] = {"blur": round(float(scaled["blur"]), 3), "scale": scaled["scale"]}
+            if scaled.get("confirmed"):
+                extra["scaled_popup"]["confirmed"] = True
         if inc is not None:
             extra["increment"] = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in inc.items()}
         event = {**extra, "time": onset, "source": "fused" if merged is not None else "popup",
@@ -748,7 +1270,9 @@ class ChestEstimator:
                 "certain_counted": certain, "approx_counted": approx, "reason": reason}
         slot = p.get("slot")
         tracker = self.trackers.get(slot[0]) if slot else None
-        if approx and tracker is not None and tracker.active and tracker.run == slot[1]:
+        # A qualified line already identifies this particular chest. Generic COFFRE
+        # tracking can follow another row as the stack reflows and must not relabel it.
+        if approx and not qualified_type and tracker is not None and tracker.active and tracker.run == slot[1]:
             self.open_labels.append((event, slot))          # its pop-up is still on screen: the label may still improve
         return event
 

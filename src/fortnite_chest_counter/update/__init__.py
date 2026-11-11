@@ -13,5 +13,5 @@ The built-in updater (v0.2.3). No Qt and nothing from the detector or the counte
     install_helper.py replaces the runtime, proves the new version starts, rolls back if not (standard library only)
     health.py         the new version's proof that it started
 
-docs/UPDATER.md explains the whole process; docs/UPDATE_SIGNING.md explains the signing keys and the release files.
+docs/maintenance/UPDATER.md explains the whole process; docs/maintenance/UPDATE_SIGNING.md explains the signing keys and the release files.
 """

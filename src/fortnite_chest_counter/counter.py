@@ -50,6 +50,7 @@ from fortnite_chest_counter.detection import fusion
 from fortnite_chest_counter import paths
 from fortnite_chest_counter import profiles
 from fortnite_chest_counter import settings
+from fortnite_chest_counter import overlay_layout
 from fortnite_chest_counter.detection import visual as V
 from fortnite_chest_counter.version import APP_NAME, RELEASE_CHANNEL, __version__
 
@@ -209,9 +210,12 @@ MODE_DESCRIPTIONS = {"approx": "estimated total only", "certain": "confirmed che
                      "inline": "both numbers on one line", "stacked": "both numbers on two lines"}
 
 
-def overlay_text(display, state):
+def overlay_text(display, state, context=None):
     """obs_output/chest_counter.txt - THE file OBS reads. Every display mode renders here, so switching modes never
     requires changing the OBS source."""
+    if display.get("use_custom_sections") and context is not None:
+        context = overlay_layout.reconcile_context(context, state)
+        return overlay_layout.format_text(display, overlay_layout.render_sections(display, context))
     mode = display_mode(display)
     if mode == "certain":
         return display_text(display, "certain", state)
@@ -234,13 +238,33 @@ def overlay_summary(display, state, obs_dir):
             f"OBS Text source file: {(Path(obs_dir) / 'chest_counter.txt').resolve()}")
 
 
-def write_obs_files(state, obs_dir, display):
+def read_overlay_context(obs_dir, state, state_path=None):
+    """Read only the current profile's bounded GUI snapshot, then advance it to worker state."""
+    try:
+        with (Path(obs_dir) / "overlay_context.json").open("rb") as stream:
+            raw = stream.read(128 * 1024 + 1)
+        if len(raw) > 128 * 1024:
+            return None
+        context = json.loads(raw)
+        if not overlay_layout.valid_context(context):
+            return None
+        if state_path is not None:
+            profile = context.get("profile_path")
+            if not isinstance(profile, str) or Path(profile).resolve() != Path(state_path).resolve():
+                return None
+        return overlay_layout.reconcile_context(context, state)
+    except (OSError, TypeError, ValueError, RecursionError):
+        return None
+
+
+def write_obs_files(state, obs_dir, display, *, state_path=None):
     """The OBS text files. File names never change (OBS sources point at them); only their text is customisable."""
     obs_dir = Path(obs_dir)
     atomic_write(obs_dir / "certain_chests.txt", display_text(display, "certain", state) + "\n")
     atomic_write(obs_dir / "approximate_chests.txt", display_text(display, "approx", state) + "\n")
     atomic_write(obs_dir / "chest_status.txt", status_line_text(display, state) + "\n")
-    atomic_write(obs_dir / "chest_counter.txt", overlay_text(display, state) + "\n")
+    context = read_overlay_context(obs_dir, state, state_path) if display.get("use_custom_sections") else None
+    atomic_write(obs_dir / "chest_counter.txt", overlay_text(display, state, context) + "\n")
     atomic_write(obs_dir / "last_chest.txt", last_chest_text(state) + "\n")
 
 
@@ -258,16 +282,29 @@ def write_png(path, rgb):
 
 class SessionLog:
     def __init__(self, log_cfg):
-        self.enabled, self.log_candidates = log_cfg["enabled"], log_cfg["log_candidates"]
+        self.directory = Path(log_cfg["dir"])
         self.path = None
-        if self.enabled:
-            Path(log_cfg["dir"]).mkdir(parents=True, exist_ok=True)
-            self.path = Path(log_cfg["dir"]) / f"session_{datetime.now():%Y%m%d_%H%M%S}.jsonl"
-        self.snapshot_dir = (Path(log_cfg["dir"]) / "snapshots" / self.path.stem) if self.enabled and log_cfg.get("save_snapshots") else None
+        self.enabled = False
+        self.snapshot_dir = None
+        self.configure(log_cfg)
+
+    def configure(self, log_cfg):
+        """Apply logging switches while retaining this run's path and directory."""
+        self.enabled = False
+        self.snapshot_dir = None
+        self.log_candidates = log_cfg["log_candidates"]
+        if not log_cfg["enabled"]:
+            return
+        if self.path is None:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            self.path = self.directory / f"session_{datetime.now():%Y%m%d_%H%M%S}.jsonl"
+        self.enabled = True
+        if log_cfg.get("save_snapshots"):
+            self.snapshot_dir = self.directory / "snapshots" / self.path.stem
 
     def save_snapshot(self, name, rgb):
         """Popup-region image for one event, so a human can later check what was (not) counted. -> file name or None."""
-        if self.snapshot_dir is None or rgb is None:
+        if not self.enabled or self.snapshot_dir is None or rgb is None:
             return None
         try:
             self.snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -297,6 +334,7 @@ class CounterSession:
         self.latencies = []
         self.recent = {}                      # event time -> (event id, chest type, certain, approx): for type updates
         self._warned = set()
+        self._reset_pending_ack = False
         self._mtime = self._state_mtime()
 
     def _state_mtime(self):
@@ -319,13 +357,32 @@ class CounterSession:
                 save_state(self.state_path, self.state)
             except OSError as error:                 # never let a locked/full disk kill a live session
                 self._warn_once("state", f"could not save {self.state_path} ({error}); will retry on the next chest")
+                return
             self._mtime = self._state_mtime()
+        if self._reset_pending_ack:
+            self._reset_pending_ack = False
+            CONSOLE.emit("reset")
 
     def write_obs(self):
         try:
-            write_obs_files(self.state, self.obs_dir, self.display)
+            write_obs_files(self.state, self.obs_dir, self.display, state_path=self.state_path)
         except OSError as error:
             self._warn_once("obs", f"could not update the OBS text files in {self.obs_dir} ({error}); will retry on the next chest")
+
+    def reset_from_app(self, estimator):
+        """Reset on the worker's counting thread so a simultaneous chest cannot overwrite the reset."""
+        estimator.flush()                       # discard pre-reset detections without rearming visual onset detectors
+        estimator.take_type_updates()
+        previous = {"certain": self.state["certain"], "approximate": self.state["approximate"]}
+        self.state.clear()
+        self.state.update(fresh_state())
+        self.recent.clear()
+        self._reset_pending_ack = True
+        self.save()
+        self.write_obs()
+        self.log.write({"event_id": "MANUAL", "source": "manual", "action": "reset",
+                        "previous": previous, "logged_at": now_iso()})
+        self.announce()
 
     def sync_external_changes(self):
         """`Reset Counter` / `adjust` run as separate programs and edit the state file. If that happened
@@ -379,6 +436,11 @@ class CounterSession:
                 f"{event_id}_{ev['stamp'].replace(':', 'm').replace('.', 's')}_{ev['adjusted_tier']}_{verdict}.png", snapshot)
             write_s = 0.0
             if certain_inc or approx_inc:
+                timeline = st.setdefault("match_events", [])
+                timeline.append({"id": event_id, "at": round(time.time() - max(0, now_t - ev["time"]), 3),
+                                 "type": kind, "certain": bool(certain_inc)})
+                if len(timeline) > 512:
+                    del timeline[0]
                 st["last_event_id"] = event_id
                 st["last_event"] = {k: ev[k] for k in ("event_id", "stamp", "source", "adjusted_tier",
                                                        "certain_counted", "approx_counted")}
@@ -422,6 +484,10 @@ class CounterSession:
             dst["certain"] += certain_inc
             dst["approx"] += approx_inc
             self.recent[round(u["time"], 3)] = (event_id, new, certain_inc, approx_inc)
+            for entry in reversed(self.state.get("match_events", [])):
+                if entry["id"] == event_id:
+                    entry["type"] = new
+                    break
             self.log.write({"event": "type_update", "event_id": event_id, "from": old, "to": new,
                             "confidence": u.get("type_confidence"), "evidence": u.get("type_evidence"),
                             "logged_at": now_iso()})
@@ -451,6 +517,7 @@ class CounterSession:
 def config_overrides(args):
     return {("detector", "process_fps"): getattr(args, "process_fps", None),
                  ("state", "path"): getattr(args, "state", None), ("state", "obs_dir"): getattr(args, "obs_dir", None),
+                 ("capture", "mode"): getattr(args, "capture_mode", None),
                  ("logging", "dir"): getattr(args, "log_dir", None), ("live", "source"): getattr(args, "source", None),
                  ("live", "device"): getattr(args, "device", None), ("live", "monitor"): getattr(args, "monitor", None),
                  ("live", "window"): getattr(args, "window", None), ("live", "url"): getattr(args, "url", None)}
@@ -461,9 +528,7 @@ def config_path(args):
 
 
 class DisplayConfigWatcher:
-    """The app's Overlay page / the configure command (or Notepad) edit config.toml while the counter runs: re-read [display] and [console]
-    within a second and rewrite the OBS files, so the overlay changes without a restart. Detector settings still need a
-    restart (they are not touched here)."""
+    """Reload display, console and logging switches while counting. Detector settings still need a restart."""
 
     def __init__(self, args):
         self.args, self.path = args, config_path(args)
@@ -476,7 +541,7 @@ class DisplayConfigWatcher:
             return None
 
     def check(self, session):
-        """-> True if the overlay settings were reloaded."""
+        """Return True when live display, console and logging settings were reloaded."""
         mtime = self._mtime()
         if mtime == self.mtime:
             return False
@@ -484,6 +549,14 @@ class DisplayConfigWatcher:
         cfg, _, warnings = settings.load_config(getattr(self.args, "config", None), config_overrides(self.args))
         for w in warnings:
             CONSOLE.warn(w)
+        logging_options = {key: cfg["logging"][key] for key in ("enabled", "log_candidates", "save_snapshots")}
+        session.cfg["logging"].update(logging_options)
+        try:
+            session.log.configure(logging_options)
+        except OSError as error:
+            session._warn_once("logging", f"could not enable session logging ({error})")
+        from fortnite_chest_counter import estimator
+        estimator.SAVE_SNAPSHOTS = session.log.enabled and session.log.snapshot_dir is not None
         session.display = cfg["display"]
         CONSOLE.configure(cfg["console"]["verbosity"], cfg["console"]["colors"])
         session.write_obs()
@@ -898,6 +971,7 @@ class AppControl:
         self.on_request = None
         self._marks = deque()                   # "mark [label]" lines: the app's Mark button / hotkey
         self._captures = deque()                # "capture off|marks|events|session": the app's Recording choice
+        self._reset = threading.Event()
         self._stream = stream if stream is not None else sys.stdin
         threading.Thread(target=self._read, daemon=True, name="app-control").start()
 
@@ -913,6 +987,12 @@ class AppControl:
             modes.append(self._captures.popleft())
         return modes
 
+    def take_reset(self):
+        if not self._reset.is_set():
+            return False
+        self._reset.clear()
+        return True
+
     def _read(self):
         try:
             for line in self._stream:
@@ -921,6 +1001,8 @@ class AppControl:
                     break
                 if command.lower() == "mark":
                     self._marks.append(rest.strip() or "mark")
+                if command.lower() == "reset":
+                    self._reset.set()
                 if command.lower() == "capture" and rest.strip().lower() in ("off", "marks", "events", "session"):
                     self._captures.append(rest.strip().lower())
             else:
@@ -1009,6 +1091,9 @@ def explain_source_failure(kind, label, error_text):
                 "    diagnostics to see the exact device names\n"
                 "  - Many capture cards can only be used by ONE program at a time. If OBS is already using it, "
                 "use OBS Virtual Camera (or a screen showing OBS's projector) instead.")
+    if kind == "desktop-hdr":
+        return ("Could not capture this HDR screen. Refresh the source list and select it again. "
+                f"HDR capture needs FFmpeg with 16-bit gfxcapture support.\n\nDetails: {error_text}")
     if kind == "desktop":
         return ("Could not capture the screen. Pick the screen again in the Video source list (Refresh), or count the "
                 "stream from its link (Livestream URL) instead.")
@@ -1198,8 +1283,15 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
         print("To stop: press Q in this window (or Ctrl+C, or just close the window). Nothing is lost.")
         CONSOLE.line(f"Window: {CONSOLE.verbosity} detail, colours {'on' if CONSOLE.colors else 'off'} ([console] in config.toml)\n", "dim")
 
-    est = estimator.ChestEstimator()
+    local_hud_scale = paths.local_fortnite_hud_scale() if kind in ("desktop", "desktop-hdr", "window") else None
+    est = estimator.ChestEstimator(hud_scale=local_hud_scale)
+    if local_hud_scale is not None:
+        CONSOLE.info(f"Fortnite HUD: {local_hud_scale:.0%} (local settings); "
+                     f"first popup search at {est.preferred_hud_scale:.0%} of captured size.")
     preview = _open_preview(args)
+    preview_from_capture = preview is not None and isinstance(source, sources.LiveSource)
+    if preview_from_capture:
+        source.set_preview(preview)
     capture = _open_capture(cfg, kind, source.label, res, in_fps, fps)
     closing_threads = []                                    # recordings switched off mid-session, finishing in background
     session.save()
@@ -1207,6 +1299,7 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
     session.log.write({"event": "session_start", "app_version": __version__, "source_type": kind, "source": source.label,
                        "input_resolution": res, "input_fps": in_fps, "normalized": [sources.WIDTH, sources.HEIGHT],
                        "process_fps": fps, "session_started": now_iso(), "config": origin,
+                       "fortnite_hud_scale": local_hud_scale, "preferred_popup_scale": est.preferred_hud_scale,
                        "ui": "app" if control is not None else "console", "profile": profile_label(cfg)})
     interval = live["status_interval_seconds"]
     recent = deque(maxlen=300)                              # bounded: a 12-hour stream must not grow memory
@@ -1219,6 +1312,13 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
     capture_warned = False
     if guard is not None:
         guard.on_request = source.request_stop
+
+    def apply_pending_reset():
+        if control is not None and control.take_reset():
+            session.reset_from_app(est)
+
+    if control is not None:
+        source.on_idle = apply_pending_reset
     try:
         for t, frame in source.frames():
             if guard is not None and guard.requested.is_set():
@@ -1229,14 +1329,15 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
             if args.duration and t >= args.duration:          # applies to every source type
                 stop_reason = "duration reached"
                 break
+            apply_pending_reset()
             t0 = time.perf_counter()
             applied = session.apply(est.process_frame(t, frame), t)
             session.apply_type_updates(est.take_type_updates())
             dt = time.perf_counter() - t0
             recent.append(dt)
             n_frames, total_s, max_s = n_frames + 1, total_s + dt, max(max_s, dt)
-            if preview is not None:
-                preview.offer(t, frame)                     # after counting; skipped unless the app shows the preview
+            if preview is not None and not preview_from_capture:
+                preview.offer(t, frame)                     # sources without an independent frame reader
             if capture is not None:                         # after counting; never blocks (see capture.py)
                 capture.offer(t, frame)
                 if applied:
@@ -1299,7 +1400,7 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                 guard.requested.wait(0.5)
             if control is not None and control.requested.is_set():
                 stop_reason = control.reason                # the app's Stop ended the frame source
-            if stop_reason == "stream ended" and kind in ("obs-camera", "device", "desktop", "window", "stream") \
+            if stop_reason == "stream ended" and kind in ("obs-camera", "device", "desktop", "desktop-hdr", "window", "stream") \
                     and not (guard is not None and guard.requested.is_set()):
                 stop_reason = "video source stopped"
                 if kind == "window":
@@ -1318,10 +1419,14 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
         if closing:
             stop_reason = guard.reason or "window closed (X)"
         # Persist first (the console may already be gone when the window was closed), print last.
+        apply_pending_reset()
+        session.sync_external_changes()
         flushed = session.apply(est.flush(), source.elapsed(), quiet=closing)
         session.apply_type_updates(est.take_type_updates())
         session.save()
         session.write_obs()
+        if preview_from_capture:
+            source.set_preview(None)
         source.close(wait=not closing)
         for thread in closing_threads:                     # recordings switched off mid-session: let them finish
             thread.join(3.0 if closing else 30.0)
@@ -1895,14 +2000,14 @@ def cmd_evaluate(args):
     evaluate(events, args.name)
 
 
-def report_crash(error):
+def report_crash(error, log_dir="logs"):
     """Unexpected bug: keep the full traceback in logs/ for a bug report, show the user something calm."""
     import platform
     import traceback
 
     where = None
     try:
-        log_dir = Path("logs")
+        log_dir = Path(log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         where = log_dir / f"crash_{datetime.now():%Y%m%d_%H%M%S}.txt"
         where.write_text(f"{APP_NAME} v{__version__} on {platform.platform()}\n\n"
@@ -1942,18 +2047,19 @@ def build_parser():
     p.set_defaults(func=cmd_simulate)
 
     p = sub.add_parser("live", parents=[common], help="count chests from a live video source (the default)")
-    p.add_argument("--source", choices=["obs-camera", "device", "desktop", "window", "stream", "file"],
+    p.add_argument("--source", choices=settings.LIVE_SOURCES,
                    help="override [live] source")
     p.add_argument("--url", help="livestream URL for --source stream (Twitch / YouTube)")
     p.add_argument("--device", help="DirectShow device name for --source device")
     p.add_argument("--window", help="exact window title for --source window (an OBS Windowed Projector)")
-    p.add_argument("--monitor", type=int, help="monitor number for --source desktop")
+    p.add_argument("--monitor", type=int, help="monitor number for --source desktop or desktop-hdr")
     p.add_argument("--video", help="video file for --source file (played in real time; for testing)")
     p.add_argument("--start", type=float, help="start offset in seconds for --source file")
     p.add_argument("--duration", type=float, help="stop after this many seconds (default: run until Ctrl+C)")
     p.add_argument("--reset", action="store_true", help="zero the counts first (counts are otherwise kept)")
     p.add_argument("--gui", action="store_true", help=argparse.SUPPRESS)        # desktop-app worker: JSON lines, stdin stop
     p.add_argument("--preview", help=argparse.SUPPRESS)                         # desktop-app preview block name
+    p.add_argument("--capture-mode", choices=settings.CAPTURE_MODES, help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_live)
 
     p = sub.add_parser("video", parents=[common], help="count chests in a recorded gameplay video file")
@@ -2029,7 +2135,7 @@ def main(argv=None):
     except SystemExit:
         raise
     except Exception as error:                # a bug, not a setup problem
-        report_crash(error)
+        report_crash(error, getattr(args, "log_dir", None) or "logs")
         return 2
 
 

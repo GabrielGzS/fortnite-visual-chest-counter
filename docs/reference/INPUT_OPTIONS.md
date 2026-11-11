@@ -8,7 +8,7 @@
 > working; a **minimized** window gives black pictures (no FFmpeg error - the worker watches the window and warns); a
 > **closed** window can leave FFmpeg waiting without frames (the worker stops itself with a message). Still open: a real
 > OBS projector with a physical capture card, OBS running as administrator, OBS's main window minimized, 125-150 % scaling.
-> Option **C** (WebSocket screenshots) was measured offline and deferred - see [ROADMAP.md](ROADMAP.md) v0.2.1.
+> Option **C** (WebSocket screenshots) was measured offline and deferred - see [ROADMAP.md](../ROADMAP.md) v0.2.1.
 
 Requirement: a streamer can connect the counter to gameplay **OBS already captures**, without disturbing OBS, without
 occupying OBS Virtual Camera, and without opening the capture card a second time. Detector and v0.1.0 release unchanged.

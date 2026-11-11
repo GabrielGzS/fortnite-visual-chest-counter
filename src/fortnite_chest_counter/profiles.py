@@ -51,6 +51,11 @@ def profile_state_path(base_state_path, profile_id):
     return Path(base_state_path).parent / "profiles" / f"{profile_id}.json"
 
 
+def secondary_state_path(state_path):
+    state = Path(state_path)
+    return state.parent / f"{state.stem}-secondary" / state.name
+
+
 def _default_entry():
     return {"id": DEFAULT_ID, "name": DEFAULT_NAME, "created_at": None, "source": {}}
 
@@ -193,10 +198,12 @@ def create(base_state_path, name, activate=True):
     if len(reg["profiles"]) >= MAX_PROFILES:
         raise ProfileError(f"You can have at most {MAX_PROFILES} profiles. Delete one you no longer need first.")
     clean = check_name(name, reg)
-    pid = slug(clean, {p["id"] for p in reg["profiles"]})
+    taken = {p["id"] for p in reg["profiles"]}
+    pid = slug(clean, taken)
     state_path = profile_state_path(base_state_path, pid)
-    while state_path.exists():                      # a file left behind by hand: never overwrite counts
-        pid = slug(clean, {p["id"] for p in reg["profiles"]} | {pid})
+    while state_path.exists() or secondary_state_path(state_path).exists():
+        taken.add(pid)
+        pid = slug(clean, taken)
         state_path = profile_state_path(base_state_path, pid)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     save_state(state_path, fresh_state())

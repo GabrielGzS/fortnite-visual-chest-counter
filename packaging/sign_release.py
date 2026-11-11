@@ -1,5 +1,5 @@
 """
-Create update-signing keys and sign a release.   (Maintainer only: never shipped. See docs/UPDATE_SIGNING.md.)
+Create update-signing keys and sign a release.   (Maintainer only: never shipped. See docs/maintenance/UPDATE_SIGNING.md.)
 
     python packaging/sign_release.py keygen --out "<a path outside this repository>"
     python packaging/sign_release.py sign --version 0.2.3 --zip build_out/v0.2.3/Fortnite-Visual-Chest-Counter-v0.2.3.zip \
