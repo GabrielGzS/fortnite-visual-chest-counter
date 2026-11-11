@@ -51,9 +51,12 @@ REQUIREMENTS = ROOT / "packaging" / "build-requirements.txt"
 MIN_FREE_BYTES = 3 * 1024 ** 3
 DEEPEST_PACKAGE_PATH = 110                                      # characters below the package folder, measured on v0.2.2 + a margin
 MAX_WINDOWS_PATH = 259
-# The longest entry allowed in the zip, version folder included. Windows Explorer's Extract All refuses anything over 259 characters (measured:
-# 259 works, 260 fails) and puts a folder named after the zip in front of the entry. So a zip kept in any folder of up to 92 characters extracts normally.
+# The longest paths allowed in the zip, version folder included. Windows Explorer's Extract All refuses a file over 259 characters (measured: 259 works,
+# 260 fails) or a folder over 247, and puts a folder named after the zip in front of each entry. These two leave room for a zip kept in a folder of 90 characters.
+MAX_WINDOWS_FOLDER = 247
+ZIP_FOLDER_ALLOWANCE = 90
 MAX_ARCHIVE_PATH = 130
+MAX_ARCHIVE_FOLDER = 120
 # Parts of a dependency that this program never imports and whose paths are too long to ship. Nothing else is left out.
 NOT_SHIPPED = {"lxml": ("isoschematron",)}                      # XML schema validation: Streamlink uses lxml.etree only
 TEMPLATE_FILES = ["chest/en/chest.npy", "chest/en/chest_small.npy", "chest/en/rare.npy", "chest/en/rare_small.npy",
@@ -302,6 +305,8 @@ def audit(app_root):
     problems = []
     problems += [f"path too long for Windows Explorer: {archive_entry(app_root, f)}" for f in app_root.rglob("*")
                  if f.is_file() and len(archive_entry(app_root, f)) > MAX_ARCHIVE_PATH]
+    problems += [f"folder too deep for Windows Explorer: {archive_entry(app_root, f)}" for f in app_root.rglob("*")
+                 if f.is_dir() and len(archive_entry(app_root, f)) > MAX_ARCHIVE_FOLDER]
     bad_names = {"samples", "analysis_output", ".venv", "chest_count.txt", "chest_count_save.txt",
                  "audio_fingerprint.npy", "chest_state.json", "config.toml"}
     third_party = [app_root / "runtime" / "lib" / d for d in ("numpy", "numpy.libs", "scipy", "scipy.libs")]

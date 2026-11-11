@@ -108,6 +108,8 @@ def _inspect_zip(zip_path, manifest, expected_keys, python_embed):
     by_path = {item.path: item for item in plan.files}
     found += [f"the release does not contain {module}" for module in REQUIRED_MODULES if module not in by_path]
     found += [f"the release has a path too long for Windows Explorer: {path}" for path in by_path if len(plan.root) + 1 + len(path) > build_release.MAX_ARCHIVE_PATH]
+    found += [f"the release has a folder too deep for Windows Explorer: {folder}" for folder in sorted({path.rsplit("/", 1)[0] for path in by_path if "/" in path})
+              if len(plan.root) + 1 + len(folder) > build_release.MAX_ARCHIVE_FOLDER]
     with zipfile.ZipFile(zip_path) as z:
         found += _check_launcher(z, by_path, manifest.version)
         found += _check_dependencies(z, by_path)

@@ -356,7 +356,9 @@ def build_tree(root, extra):
 
 def test_the_budget_leaves_room_for_a_normal_folder():
     stem = len("Fortnite-Visual-Chest-Counter-v0.3.0") + 1
-    assert B.MAX_WINDOWS_PATH == 259 and B.MAX_WINDOWS_PATH - stem - B.MAX_ARCHIVE_PATH >= 90, "a zip in a folder of about 90 characters must still extract"
+    assert B.MAX_WINDOWS_PATH == 259 and B.MAX_WINDOWS_FOLDER == 247 and B.ZIP_FOLDER_ALLOWANCE >= 90, "measured limits, and a zip in a folder of about 90 characters must extract"
+    assert B.ZIP_FOLDER_ALLOWANCE + stem + B.MAX_ARCHIVE_PATH <= B.MAX_WINDOWS_PATH, "the file budget"
+    assert B.ZIP_FOLDER_ALLOWANCE + stem + B.MAX_ARCHIVE_FOLDER <= B.MAX_WINDOWS_FOLDER, "the folder budget"
 
 
 def test_a_build_with_a_path_too_long_is_refused():
@@ -377,6 +379,27 @@ def test_a_release_with_a_path_too_long_is_refused():
     name = "runtime/lib/" + "a" * (budget - len("runtime/lib/") + 1)
     with release(files=with_listing({**release_files(), name: b"x"})) as r:
         assert_problem(r, "too long for Windows Explorer")
+
+
+def test_a_build_with_a_folder_too_deep_is_refused():
+    root_length = len("Fortnite-Visual-Chest-Counter-v0.3.0/")
+    with tempfile.TemporaryDirectory() as tmp:
+        B.audit(build_tree(tmp, "r/" + "a" * (B.MAX_ARCHIVE_FOLDER - root_length - 2) + "/f"))
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            B.audit(build_tree(tmp, "r/" + "a" * (B.MAX_ARCHIVE_FOLDER - root_length - 1) + "/f"))
+        except SystemExit as stop:
+            assert "folder too deep for Windows Explorer" in str(stop)
+        else:
+            raise AssertionError("a folder over the budget must stop the build")
+
+
+def test_a_release_with_a_folder_too_deep_is_refused():
+    budget = B.MAX_ARCHIVE_FOLDER - len(f"Fortnite-Visual-Chest-Counter-v{VERSION}/")
+    name = "runtime/" + "a" * (budget - len("runtime/") + 1) + "/f"
+    assert len(f"Fortnite-Visual-Chest-Counter-v{VERSION}/" + name) <= B.MAX_ARCHIVE_PATH, "only the folder may be over its budget here"
+    with release(files=with_listing({**release_files(), name: b"x"})) as r:
+        assert_problem(r, "folder too deep for Windows Explorer")
 
 
 def test_what_is_left_out_is_never_imported():
