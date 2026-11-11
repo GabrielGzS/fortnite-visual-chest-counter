@@ -29,6 +29,7 @@ analysis_output/
 build/
 dist/
 build_out/
+/runtime/replay-reader/
 /Fortnite Visual Chest Counter.exe
 *.spec
 *.zip

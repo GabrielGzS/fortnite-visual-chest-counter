@@ -436,6 +436,11 @@ class CounterSession:
                 f"{event_id}_{ev['stamp'].replace(':', 'm').replace('.', 's')}_{ev['adjusted_tier']}_{verdict}.png", snapshot)
             write_s = 0.0
             if certain_inc or approx_inc:
+                timeline = st.setdefault("match_events", [])
+                timeline.append({"id": event_id, "at": round(time.time() - max(0, now_t - ev["time"]), 3),
+                                 "type": kind, "certain": bool(certain_inc)})
+                if len(timeline) > 512:
+                    del timeline[0]
                 st["last_event_id"] = event_id
                 st["last_event"] = {k: ev[k] for k in ("event_id", "stamp", "source", "adjusted_tier",
                                                        "certain_counted", "approx_counted")}
@@ -479,6 +484,10 @@ class CounterSession:
             dst["certain"] += certain_inc
             dst["approx"] += approx_inc
             self.recent[round(u["time"], 3)] = (event_id, new, certain_inc, approx_inc)
+            for entry in reversed(self.state.get("match_events", [])):
+                if entry["id"] == event_id:
+                    entry["type"] = new
+                    break
             self.log.write({"event": "type_update", "event_id": event_id, "from": old, "to": new,
                             "confidence": u.get("type_confidence"), "evidence": u.get("type_evidence"),
                             "logged_at": now_iso()})

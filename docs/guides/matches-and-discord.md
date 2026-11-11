@@ -4,7 +4,7 @@
 
 Choose one source in **Dashboard → Capture settings**. To track manually, reset before the match, start counting and use **Finish match** to save it. **Group → Match history** lets you edit saved counts and delete checked rows. **Select all matches** checks every row. Local edits and deletions affect the history on your PC. Already shared results stay in the shared standings.
 
-**Settings → Match automation** is enabled by default. It reads new entries in `%LOCALAPPDATA%\FortniteGame\Saved\Logs\FortniteGame.log`. Battle Royale warmup resets and starts the count. A return to the lobby stops counting and saves the result. The last result stays visible until the next match. For a match already underway when the app opened, use the manual controls.
+**Settings → Match automation** is enabled by default. It reads new entries in `%LOCALAPPDATA%\FortniteGame\Saved\Logs\FortniteGame.log`. Battle Royale warmup resets and starts the count. A return to the lobby stops counting, saves the result to match history and resets the current match counter. For a match already underway when the app opened, use the manual controls.
 
 The Dashboard mode selector defaults to **Auto**. It reads the Battle Royale playlist from the same log, independently of automatic start and finish. You can select **Solo**, **Duo**, **Trio** or **Squad** manually. The Pirate Token multiplier is manual. Unrecognised playlists may need manual mode selection.
 
@@ -45,7 +45,7 @@ The bot profile and the webhook sender identity are configured separately. With 
 
 The webhook can use its own display name and image URL for outgoing messages. Its avatar is an HTTPS image URL, rather than a local image file. This sender identity is attached to the webhook messages.
 
-In **Bot presence**, choose whether the activity is shown and whether messages rotate. Choose **Watching**, **Playing** or **Listening**, set the interval from 30 to 300 seconds and customise the Current team, Team odds, Group totals and Idle text. Templates accept `{total}`, `{players}`, `{matches}` and `{chance}`. Click **Save profile and presence** to keep those preferences.
+In **Bot presence**, choose whether the activity is shown. Choose **Watching**, **Playing** or **Listening**, set the interval from 30 to 300 seconds and customise the One player, Current team, Group totals and Idle text. The bot shows the current shared match when at least one player is active. Between matches, the bot shows the lobby label alongside the group history. Its token estimate uses saved boosts. Manual additions use the base rate and reductions are spread proportionally across the recorded chests. Templates accept `{total}`, `{players}`, `{matches}` and `{chance}`. Click **Save profile and presence** to keep those preferences.
 
 The default rotation is 30 seconds. When a verified team session has recent live submissions, the bot can show its players and chests followed by the team Pirate Token estimate. Saved group totals and match counts can appear too. The text reflects received data.
 
@@ -63,3 +63,26 @@ Bot and webhook credentials are stored in Windows Credential Manager.
 Commands work in the configured server wherever Discord allows them. From **Group**, the Host can also reset checked players or delete the published leaderboard. Saved local match history is managed separately.
 
 [Chest Tracker setup reference](https://github.com/Xxoris190/chest-tracker#set-up-the-discord-bot)
+
+To compare a saved match with a Fortnite replay analyzed by LED-N, select the match in **Match history**, click **Compare replay…**, and open LED-N's `data.json`. The comparison shows both totals, chest types and the replay timeline.
+
+### What the replay can verify
+
+In the 2026-11-11 HDR test, the replay identified normal, rare, rare sprite and spirit poster chests. An earlier replay also identified buried chests. Destroyed chests are recorded separately in the comparison and excluded from the opened-chest total. The live detector still uses the chest XP pop-up and can miss an opening or leave the type unknown. The same report found 14 ammo boxes, three food boxes and one treasure find. These are separate replay categories, outside the app's verified chest total.
+
+| To validate next | Live capture | Fortnite replay |
+|---|---|---|
+| Buried chest with a visible XP notification | Check whether the opening counts and what type it receives | Found in an earlier replay |
+| Loot cannon and bounty board | Check that the count stays unchanged | Check whether the report lists either as a separate interaction |
+| Ammo box and food box | Check that chest counts stay unchanged | Both appear as separate interactions |
+| Fast stacked openings and different HUD sizes | Compare against the replay in HDR and SDR | Verify the count and types after returning to the lobby |
+
+### Automatic replay verification
+
+**Verify saved matches using Fortnite replays** in Settings is on by default. Disable it to keep the live results and skip replay reading. With automatic match detection enabled, a local Fortnite desktop capture can be checked against its automatic replay after returning to the lobby. Enable replay recording in Fortnite. The reader runs outside capture and uses the Epic display name, when set as your Group player name, and the match end time to associate the replay. The app keeps the live result if it cannot identify and read a single replay.
+
+The verified opened-chest total replaces the live estimate in match history. Destroyed chests remain in the replay comparison. Group publishes a correction under the same contribution ID, so updated hosts and guests see one result per player and match. The live timestamp history is saved with the match without video diagnostics.
+
+Under **Settings**, **Delete local Fortnite replays after successful verification** is off by default. Both host and guest can enable it independently. It removes only the matched automatic replay on that PC after saving the verified result and queuing any Group correction. Named replays and the saved match statistics are kept.
+
+Automatic verification requires the [LED-N replay reader](https://github.com/LED-N/Fortnite-ChestCounter) and the .NET 10 and ASP.NET Core 10 x64 runtimes. See [Microsoft downloads](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). A portable build can include it in `runtime/replay-reader` using the packaging script's `--replay-reader` argument. For development, set `FCC_REPLAY_READER` to the absolute path of `ChestCounter.dll` in its build directory.

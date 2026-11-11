@@ -3,8 +3,8 @@
 | Topic | Guide |
 |---|---|
 | Acknowledgements and licenses | [Credits and component notices](ACKNOWLEDGEMENTS.md) |
-| Screenshots | [Preview placeholders](previews/index.md) |
-| Install and start counting | [Project README](../README.md) |
+| Screenshots | [Application previews](previews/index.md) |
+| Install and start counting | [Project README](../README.md), [in-app Setup preview](previews/setup.png) |
 | Choose a video source | [Capture setup guides](guides/index.md), [input options](reference/INPUT_OPTIONS.md) |
 | Match history, mode detection and group sharing | [Matches and Discord](guides/matches-and-discord.md) |
 | On-screen overlay and OBS | [Overlay guide](guides/obs-overlay.md) |

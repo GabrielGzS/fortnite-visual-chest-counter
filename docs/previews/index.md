@@ -2,6 +2,10 @@
 
 These are captures of the application using sample data. Click an image to view it at full resolution.
 
+## Setup
+
+![Setup](setup.png)
+
 ## Dashboard
 
 ![Dashboard](dashboard.png)

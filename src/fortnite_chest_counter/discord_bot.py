@@ -1,6 +1,7 @@
 """Discord Gateway lifecycle and slash commands for local Group totals."""
 
 import asyncio
+import math
 from dataclasses import replace
 from pathlib import Path
 import sqlite3
@@ -158,8 +159,6 @@ class GuildBot(discord.Client):
         self._presence_text = None
         self._presence_type = None
         self._presence_updated = None
-        self._presence_kind = None
-        self._presence_index = 0
 
     async def setup_hook(self):
         if self.config.application_id and int(self.config.application_id) != self.application_id:
@@ -370,42 +369,39 @@ class GuildBot(discord.Client):
             return
         now = time.time()
         sessions = await asyncio.to_thread(self.totals.sessions)
-        active = [session for session in sessions if len(session.players) >= 2
-                  and any(not player.finished and 0 <= now - player.updated_at <= 120
-                          for player in session.players)]
-        latest = max(active, key=lambda session: max(player.updated_at for player in session.players), default=None)
-        players, team = await asyncio.to_thread(self.totals.board)
-        total = sum(player.total for player in players)
-        saved = bool(players) or team.matches > 0
+        active = [(player.updated_at, session) for session in sessions for player in session.players
+                  if not player.finished and 0 <= now - player.updated_at <= 120]
+        latest = max(active, key=lambda entry: entry[0])[1] if active else None
         def render(template, *, players=0, total=0, matches=0, chance="0.000000%"):
             text = template
             for key, value in (("players", players), ("total", total), ("matches", matches), ("chance", chance)):
                 text = text.replace("{" + key + "}", f"{value:,}" if type(value) is int else value)
             return text.replace("\n", " ").strip()[:128]
 
-        entries = []
+        defaults = settings.DEFAULTS["app"]
         if latest is not None:
-            values = {"players": len(latest.players), "total": latest.total, "chance": latest.chance_percent}
-            entries.extend((render(config.get("discord_presence_team_text", "{players} players · {total} chests"), **values),
-                            render(config.get("discord_presence_token_text", "Team token chance · {chance}"), **values)))
-        if saved:
-            entries.append(render(config.get("discord_presence_group_text", "Group · {total} chests · {matches} matches"),
-                                  players=len(players), total=total, matches=team.matches))
-        if not entries:
-            entries.append(render(config.get("discord_presence_idle_text", "the group leaderboard")))
-        kind = (latest is not None, saved)
-        if kind != self._presence_kind:
-            self._presence_index = 0
-            self._presence_kind = kind
-        index = self._presence_index if config.get("discord_presence_rotate", True) else 0
-        text = entries[index % len(entries)]
+            count = len(latest.players)
+            key = "discord_presence_personal_text" if count == 1 else "discord_presence_team_text"
+            values = {"players": count, "total": latest.total, "chance": latest.chance_percent}
+            text = render(config.get(key, defaults[key]), **values)
+        else:
+            players, team = await asyncio.to_thread(self.totals.board)
+            saved = bool(players) or team.matches > 0
+            key = "discord_presence_idle_text"
+            idle = render(config.get(key, defaults[key]))
+            text = idle
+            if saved:
+                key = "discord_presence_group_text"
+                chance = -math.expm1(math.fsum(player.log_no_drop for player in players))
+                history = render(config.get(key, defaults[key]), players=len(players), chance=f"{chance:.6%}",
+                                 total=sum(player.total for player in players), matches=team.matches)
+                text = " · ".join(part for part in (idle, history) if part)[:128]
         activity_type = getattr(discord.ActivityType, config.get("discord_presence_activity", "watching"),
                                 discord.ActivityType.watching)
         if text == self._presence_text and activity_type == self._presence_type:
             return
         await self.change_presence(status=discord.Status.online,
                                    activity=discord.Activity(type=activity_type, name=text))
-        self._presence_index += 1
         self._presence_text = text
         self._presence_type = activity_type
         self._presence_updated = monotonic
@@ -416,9 +412,13 @@ class GuildBot(discord.Client):
             return
         try:
             await self.publish_board()
-            await self.update_presence()
         except (discord.HTTPException, OSError, ValueError, sqlite3.Error):
             self.publication_status = "Could not update the published board. Check channel permissions."
+        try:
+            await self.update_presence()
+        except (discord.DiscordException, OSError, ValueError, sqlite3.Error):
+            # Discord or the local store may be temporarily unavailable. Retry on the next refresh.
+            pass
 
     async def close(self):
         self.refresh_board.cancel()

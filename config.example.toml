@@ -180,6 +180,9 @@ remember_window = true
 close_to_tray = true
 start_in_tray = false
 auto_match_lifecycle = true
+auto_verify_replay = true
+# Remove this PC’s automatic Fortnite replay after verification and saving.
+delete_verified_replay = false
 group_player = ""
 group_scoreboard_id = ""
 group_share_matches = false
@@ -197,13 +200,12 @@ bot_avatar_path = ""
 webhook_name = "Chest Counter"
 webhook_avatar_url = "https://raw.githubusercontent.com/NEVARLeVrai/fortnite-visual-chest-counter/ui/chest-tracker-dashboard/docs/previews/logo.png"
 discord_presence_enabled = true
-discord_presence_rotate = true
 discord_presence_interval = 30
 discord_presence_activity = "watching"
-discord_presence_team_text = "{players} players · {total} chests"
-discord_presence_token_text = "Team token chance · {chance}"
-discord_presence_group_text = "Group · {total} chests · {matches} matches"
-discord_presence_idle_text = "the group leaderboard"
+discord_presence_personal_text = "In match · {total} chests · Token {chance}"
+discord_presence_team_text = "{players} players · {total} chests · Token {chance}"
+discord_presence_group_text = "Group history · {total} chests · {matches} matches · Token {chance}"
+discord_presence_idle_text = "In lobby"
 bot_banner_path = ""
 
 [update]

@@ -23,6 +23,9 @@ class Match:
     group_webhook_id: str = ""
     session_fingerprint: str = ""
 
+    replay: dict = field(default_factory=dict)
+    live_events: list = field(default_factory=list)
+
     @property
     def total(self):
         return self.certain + self.estimated
@@ -72,7 +75,7 @@ def read_history(path):
                or not all(isinstance(value, str) for value in
                           (row.snapshot, row.finished_at, row.profile_id, row.profile, row.mode, row.token_chance,
                            row.player, row.group_webhook_id))
-               or not isinstance(row.chest_types, dict)
+               or not isinstance(row.replay, dict) or not isinstance(row.chest_types, dict)
                or any(not isinstance(kind, str) or type(count) is not int or count < 0
                       for kind, count in row.chest_types.items())
                or sum(row.chest_types.values()) > row.total
@@ -89,6 +92,19 @@ def save_match(path, match):
         return False
     _write_history(path, (*rows, match))
     return True
+
+
+def verify_match(path, snapshot, total, token_chance, chest_types, replay):
+    rows = read_history(path)
+    for index, row in enumerate(rows):
+        if row.snapshot == snapshot and not row.replay:
+            direct = {"certain": row.certain, "estimated": row.estimated, "chest_types": row.chest_types}
+            verified = replace(row, certain=total, estimated=0, token_chance=token_chance,
+                               chest_types=chest_types, replay={**replay, "direct": direct})
+            rows[index] = verified
+            _write_history(path, rows)
+            return verified
+    return None
 
 
 def edit_match(path, snapshot, certain, total, token_chance):

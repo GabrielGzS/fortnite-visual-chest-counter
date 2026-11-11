@@ -186,14 +186,12 @@ def test_qt_drains_before_saving_and_before_next_start(app, monkeypatch, send_en
     seed(gui, win, (9, 14))
     exit_worker(win)
     saved, = gui.match_history.read_history(win.match_history_path())
-    assert (saved.certain, saved.total) == win.counts == (9, 14)
+    assert (saved.certain, saved.total) == (9, 14)
+    assert win.counts == (0, 0)
     assert win.worker.starts == 1
     display = {**gui.load_cfg()[0]["display"], "screen_show_matches": True}
     assert "Matches · 1" in win.dashboard.screen_overlay_text(display)
 
-    # Saving the same snapshot manually is still a no-op.
-    win.finish_match()
-    assert gui.match_history.read_history(win.match_history_path()) == [saved]
     assert delivered.wait(2 if send_enabled else 0.05) is send_enabled
     assert summaries == ([saved] if send_enabled else [])
 
@@ -679,3 +677,47 @@ def test_qt_group_cooldown_defers_network_but_keeps_latest_counts(app, monkeypat
     win.publish_live_counts()
     assert sent and sent[-1][2:5] == ("Alex", 8, 10)
     assert win._next_live_share >= before + 17.25
+
+@pytest.mark.parametrize("enabled, queue_fails", [(False, False), (True, True), (True, False)])
+def test_verified_replay_cleanup_waits_for_durable_result(app, monkeypatch, tmp_path, enabled, queue_fails):
+    gui, win, _ = app
+    replay = gui.replay_comparison
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    demos = replay.demos_path()
+    demos.mkdir(parents=True)
+    path = demos / "UnsavedReplay-2026.11.11-13.05.25.replay"
+    path.write_bytes(b"replay fixture")
+    match = gui.match_history.Match("test-match", "2026-11-11 13:13", "p", "Default", "Duo",
+                                    1, 3, "0%", player="Rin")
+    gui.match_history.save_match(win.match_history_path(), match)
+    gui.C.update_config_file(gui.config_file(), "app", {"delete_verified_replay": enabled})
+    webhook = gui.discord_group.Webhook("123456789012345678", "fixture-webhook-token")
+
+    def queue(_webhook, verified, player):
+        assert player == "Rin"
+        assert gui.match_history.read_history(win.match_history_path()) == [verified]
+        assert path.exists()
+        if queue_fails:
+            raise OSError("outbox unavailable")
+
+    monkeypatch.setattr(gui.discord_group, "queue_verified", queue)
+    monkeypatch.setattr(win.discord, "retry_group_outbox", lambda: None)
+    timeline = [(1, "Chest", False), (2, "Chest", True), (3, "Buried chest", False)]
+    win.apply_verified_replay((match, webhook, (path, replay.replay_identity(path), 3, {}, 1, timeline, "Rin")))
+    saved, = gui.match_history.read_history(win.match_history_path())
+    assert (saved.total, saved.replay["destroyed"], saved.replay["direct"]["estimated"]) == (2, 1, 3)
+    assert path.exists() == (not enabled or queue_fails)
+
+def test_disabling_replay_verification_keeps_the_live_result(app):
+    gui, win, _ = app
+    page = win.settings_page
+    page.load()
+    assert page.auto_verify_replay.isChecked()
+    assert page.delete_verified_replay.isEnabled()
+    page.auto_verify_replay.setChecked(False)
+    assert not page.delete_verified_replay.isEnabled()
+    gui.C.update_config_file(gui.config_file(), "app", {"auto_verify_replay": False})
+    match = gui.match_history.Match("live", "2026-11-11 13:13", "p", "Default", "Duo", 1, 3, "0%")
+    gui.match_history.save_match(win.match_history_path(), match)
+    win.apply_verified_replay((match, None, (None, None, 1, {}, 0, [(1, "Chest", False)], "Rin")))
+    assert gui.match_history.read_history(win.match_history_path()) == [match]

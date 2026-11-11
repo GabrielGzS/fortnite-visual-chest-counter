@@ -15,6 +15,7 @@ import math
 import os
 import sqlite3
 import sys
+import subprocess
 import threading
 import time
 import traceback
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox,
                                QScrollArea, QSizePolicy, QSlider, QSpinBox, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QSystemTrayIcon, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
-from fortnite_chest_counter import diagnostics_cleanup, discord_bot, discord_group, discord_scoreboard, discord_summary, match_history, match_lifecycle, match_stats, overlay_layout, paths, profiles, settings
+from fortnite_chest_counter import diagnostics_cleanup, discord_bot, discord_group, discord_scoreboard, discord_summary, match_history, match_lifecycle, match_stats, overlay_layout, paths, profiles, replay_comparison, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -2115,6 +2116,13 @@ class SettingsPage(QWidget):
                                "warmup and save the match when you return to the lobby.")
         self.auto_match = QCheckBox("Automatically reset, start and save local Battle Royale matches")
         box_layout.addWidget(self.auto_match)
+        self.auto_verify_replay = QCheckBox("Verify saved matches using Fortnite replays")
+        self.auto_verify_replay.setToolTip("Reads Fortnite's local replay after the match. Enable replay recording in Fortnite.")
+        box_layout.addWidget(self.auto_verify_replay)
+        self.delete_verified_replay = QCheckBox("Delete local Fortnite replays after successful verification")
+        self.delete_verified_replay.setToolTip("Applies to this PC for both host and guest. Saved stats are kept.")
+        box_layout.addWidget(self.delete_verified_replay)
+        self.auto_verify_replay.toggled.connect(self.delete_verified_replay.setEnabled)
         layout.addWidget(box)
 
         box, box_layout = card("Updates", "Nothing is downloaded or installed unless you choose to. Your counts, profiles and settings are kept.")
@@ -2194,6 +2202,9 @@ class SettingsPage(QWidget):
         self.close_to_tray.setChecked(cfg["app"]["close_to_tray"])
         self.start_in_tray.setChecked(cfg["app"]["start_in_tray"])
         self.auto_match.setChecked(cfg["app"]["auto_match_lifecycle"])
+        self.auto_verify_replay.setChecked(cfg["app"]["auto_verify_replay"])
+        self.delete_verified_replay.setChecked(cfg["app"]["delete_verified_replay"])
+        self.delete_verified_replay.setEnabled(self.auto_verify_replay.isChecked())
         update = cfg["update"]
         self.update_auto.setChecked(update["check_automatically"])
         self.update_bandwidth.setCurrentIndex(max(self.update_bandwidth.findData(update["download_bandwidth"]), 0))
@@ -2246,6 +2257,8 @@ class SettingsPage(QWidget):
                 window_file().unlink(missing_ok=True)   # off = back to the default layout, also if switched on again later
             C.update_config_file(config_file(), "app", {"remember_window": self.remember_window.isChecked(),
                                                         "auto_match_lifecycle": self.auto_match.isChecked(),
+                                                        "auto_verify_replay": self.auto_verify_replay.isChecked(),
+                                                        "delete_verified_replay": self.delete_verified_replay.isChecked(),
                                                         "close_to_tray": self.close_to_tray.isChecked(),
                                                         "start_in_tray": self.start_in_tray.isChecked()})
         except (C.UserError, OSError) as error:
@@ -2350,11 +2363,13 @@ class GroupPage(QWidget):
         row = QHBoxLayout()
         self.edit = button("Edit...", on_click=self.edit_match)
         self.delete = button("Delete selected...", on_click=self.delete_match)
+        self.compare_replay = button("Compare replay...", on_click=self.compare_saved_replay)
         self.select_matches = QCheckBox("Select all matches")
-        for action in (self.edit, self.delete):
+        for action in (self.edit, self.delete, self.compare_replay):
             action.setEnabled(False)
         row.addWidget(self.select_matches)
         row.addLayout(connected_buttons(self.edit, self.delete))
+        row.addWidget(self.compare_replay)
         row.addStretch(1)
         history_layout.addLayout(row)
         self.stats = label("", "hint", wrap=True)
@@ -2874,6 +2889,7 @@ class GroupPage(QWidget):
 
     def _selection_changed(self, item, previous):
         self.edit.setEnabled(item is not None)
+        self.compare_replay.setEnabled(item is not None)
 
     def reset_selected_players(self):
         names = [item.text(1) for item in self.checked_items(self.ranks)]
@@ -2906,6 +2922,32 @@ class GroupPage(QWidget):
         self.player_status.setText(error or "Selected players reset.")
         self._next_scoreboard_refresh = 0
         self.sync_scoreboard()
+
+    def compare_saved_replay(self):
+        current = self.history.currentItem()
+        if current is None:
+            return
+        match = self.matches[current.data(0, Qt.UserRole)]
+        try:
+            if match.replay:
+                comparison = replay_comparison.saved_comparison(match)
+            else:
+                file, _ = QFileDialog.getOpenFileName(self, "Choose the LED-N replay report", "", "JSON reports (*.json)")
+                if not file:
+                    return
+                comparison = replay_comparison.compare_report(Path(file), match)
+        except (OSError, ValueError) as error:
+            show_error(self, f"Could not compare the replay. {error}")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Live and replay comparison")
+        dialog.resize(660, 510)
+        layout = QVBoxLayout(dialog)
+        report = QPlainTextEdit(comparison)
+        report.setReadOnly(True)
+        layout.addWidget(report)
+        layout.addWidget(button("Close", on_click=dialog.accept), 0, Qt.AlignRight)
+        dialog.exec()
 
     def edit_match(self):
         current = self.history.currentItem()
@@ -3027,17 +3069,15 @@ class DiscordPage(QWidget):
         appearance_layout.addWidget(self.apply_branding, 0, Qt.AlignRight)
         layout.addWidget(appearance)
 
-        presence, presence_layout = card("Bot presence", "Use {total}, {players}, {matches} and {chance}. Text rotates while the bot is online.")
+        presence, presence_layout = card("Bot presence", "Use {total}, {players}, {matches} and {chance}. The bot updates its activity while online.")
         self.presence_enabled = QCheckBox("Show bot activity")
-        self.presence_rotate = QCheckBox("Rotate activity messages")
         presence_layout.addWidget(self.presence_enabled)
-        presence_layout.addWidget(self.presence_rotate)
         row = QHBoxLayout()
         self.presence_activity = MaterialComboBox()
         for text, value in (("Watching", "watching"), ("Playing", "playing"), ("Listening", "listening")):
             self.presence_activity.addItem(text, value)
         row.addWidget(self.presence_activity, 1)
-        row.addWidget(label("Rotate every"))
+        row.addWidget(label("Update every"))
         self.presence_interval = QSpinBox()
         self.presence_interval.setRange(30, 300)
         self.presence_interval.setAlignment(Qt.AlignCenter)
@@ -3046,7 +3086,7 @@ class DiscordPage(QWidget):
         presence_layout.addLayout(row)
         form = QGridLayout()
         self.presence_texts = {}
-        for index, (key, title) in enumerate((("team", "Current team"), ("token", "Team odds"),
+        for index, (key, title) in enumerate((("personal", "One player"), ("team", "Current team"),
                                             ("group", "Group totals"), ("idle", "Idle"))):
             edit = QLineEdit()
             edit.setMaxLength(128)
@@ -3084,7 +3124,6 @@ class DiscordPage(QWidget):
         self.bot_avatar.setText(cfg["bot_avatar_path"])
         self.bot_banner.setText(cfg["bot_banner_path"])
         self.presence_enabled.setChecked(cfg["discord_presence_enabled"])
-        self.presence_rotate.setChecked(cfg["discord_presence_rotate"])
         self.presence_interval.setValue(cfg["discord_presence_interval"])
         self.presence_activity.setCurrentIndex(max(0, self.presence_activity.findData(cfg["discord_presence_activity"])))
         for key, edit in self.presence_texts.items():
@@ -3115,7 +3154,6 @@ class DiscordPage(QWidget):
         values = {"bot_name": self.bot_name.text().strip(), "bot_avatar_path": self.bot_avatar.text().strip(),
                   "bot_banner_path": self.bot_banner.text().strip(),
                   "discord_presence_enabled": self.presence_enabled.isChecked(),
-                  "discord_presence_rotate": self.presence_rotate.isChecked(),
                   "discord_presence_interval": self.presence_interval.value(),
                   "discord_presence_activity": self.presence_activity.currentData()}
         values.update((f"discord_presence_{key}_text", edit.text().strip()) for key, edit in self.presence_texts.items())
@@ -3257,6 +3295,8 @@ class DiscordPage(QWidget):
                 for match in match_history.read_history(history):
                     if match.group_webhook_id == webhook.id and match.player:
                         discord_group.queue_match(webhook, match, match.player)
+                        if match.replay:
+                            discord_group.queue_verified(webhook, match, match.player)
                 sent = discord_group.flush(webhook)
                 if sent:
                     self.win.auto_discord_result.emit(f"Group contributions sent to Discord ({sent}).")
@@ -3329,6 +3369,37 @@ class DiscordPage(QWidget):
         self._sending = False
         self._show_summary()
         self.status.setText(message)
+
+
+class SetupPage(QWidget):
+    def __init__(self, win):
+        super().__init__()
+        layout = page_layout(self, "Setup", "Set up your capture, match history and optional sharing.")
+        steps = (
+            ("Capture Fortnite",
+             "Choose your screen in Dashboard → Capture settings. For a washed-out HDR picture, "
+             "select the HDR → SDR source. Check Live preview before counting.",
+             "Open Dashboard", win.dashboard),
+            ("Language and match detection",
+             "Choose the language used in Fortnite. Turn on automatic match detection in Settings "
+             "and enable replay recording in Fortnite to verify saved matches at the lobby. "
+             "Replay verification is on by default. You can turn it off or enable cleanup in Settings.",
+             "Open Settings", win.settings_page),
+            ("On-screen overlay and OBS",
+             "Choose the stats you want to show and check the preview. The floating overlay works "
+             "without OBS. For OBS, use the text file shown on the Overlay page.",
+             "Open Overlay", win.overlay),
+            ("Group and Discord",
+             "Each player runs one capture and enters their own name and the shared webhook. "
+             "The host configures the bot and publishes the leaderboard. Solo counting needs no Discord setup.",
+             "Open Group", win.group),
+        )
+        for title, description, action, page in steps:
+            frame, controls = card(title, description)
+            controls.addWidget(button(action, on_click=lambda _checked=False, page=page: win.go_to(win.pages.indexOf(page))),
+                               0, Qt.AlignLeft)
+            layout.addWidget(frame)
+        layout.addStretch(1)
 
 
 class HelpPage(QWidget):
@@ -3602,6 +3673,7 @@ class NavigationDestination(QPushButton):
 
 class MainWindow(QMainWindow):
     auto_discord_result = Signal(str)
+    replay_result = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -3660,6 +3732,7 @@ class MainWindow(QMainWindow):
         self.stop_timer.timeout.connect(self._stop_timeout)
         self.match_timer = QTimer(self)
         self.match_timer.timeout.connect(self.poll_match_log)
+        self.replay_result.connect(self.apply_verified_replay)
         self.auto_discord_result.connect(lambda result: self.add_log({"type": "info", "text": result}))
         self.slow = QTimer(self)
         self.slow.timeout.connect(self._tick_slow)
@@ -3690,7 +3763,8 @@ class MainWindow(QMainWindow):
         self.group = GroupPage(self)
         self.discord = DiscordPage(self)
         self.group.attach_discord(self.discord)
-        for page in (self.dashboard, self.overlay, self.settings_page, self.help, self.group):
+        self.setup = SetupPage(self)
+        for page in (self.dashboard, self.overlay, self.settings_page, self.help, self.group, self.setup):
             self.pages.addWidget(page)
         outer.addWidget(self._navigation_rail())
         content = QVBoxLayout()
@@ -3788,7 +3862,7 @@ class MainWindow(QMainWindow):
         column.setContentsMargins(0, 44, 0, 12)
         column.setSpacing(4)
         self.destinations = QButtonGroup(rail)
-        destinations = ((0, "dashboard", "Dashboard"), (1, "overlay", "Overlay"), (4, "group", "Group"),
+        destinations = ((self.pages.indexOf(self.setup), "settings", "Setup"), (0, "dashboard", "Dashboard"), (1, "overlay", "Overlay"), (4, "group", "Group"),
                         (2, "settings", "Settings"), (3, "help", "Help"))
         for index, icon, name in destinations:
             destination = NavigationDestination(icon, name)
@@ -4170,7 +4244,7 @@ class MainWindow(QMainWindow):
             self._match_active = False
             fingerprint, self._match_fingerprint = self._match_fingerprint, ""
             try:
-                saved = self.save_current_match(session_fingerprint=fingerprint)
+                saved = self.save_current_match(session_fingerprint=fingerprint, verify_replay=bool(fingerprint))
             except (C.UserError, OSError, ValueError) as error:
                 self.match_automation_failed(f"Could not save the match. {error}")
                 return
@@ -4178,6 +4252,10 @@ class MainWindow(QMainWindow):
                 self.add_log({"type": "info", "text": "Battle Royale match saved to Group."})
                 if self.pages.currentWidget() is self.group:
                     self.group.load()
+            try:
+                self.reset_match_source()
+            except (C.UserError, OSError, ValueError) as error:
+                self.add_log({"type": "warn", "text": f"Could not reset the current match in the lobby. {error}"})
 
     def reset_match_source(self):
         primary = self._cfg_for_actions()
@@ -4872,7 +4950,7 @@ class MainWindow(QMainWindow):
         self.group.feedback.setText("Match saved. Use Reset on the Dashboard before the next match." if saved else
                                     "These counts have already been saved.")
 
-    def save_current_match(self, *, session_fingerprint=""):
+    def save_current_match(self, *, session_fingerprint="", verify_replay=False):
         cfg, _ = load_cfg()
         if not cfg["state"]["persist"]:
             raise C.UserError("Enable saving counter state before recording matches.")
@@ -4908,7 +4986,8 @@ class MainWindow(QMainWindow):
                                         certain, total - certain, token_odds_text(total, boost), boost,
                                         player=player, chest_types=breakdown,
                                         group_webhook_id=webhook.id if webhook else "",
-                                        session_fingerprint=session_fingerprint)
+                                        session_fingerprint=session_fingerprint,
+                                        live_events=C.load_state(primary).get("match_events", []) if primary.is_file() else [])
             saved = match_history.save_match(self.match_history_path(), match)
         if saved:
             self.dashboard.set_recent_matches(match_history.read_history(self.match_history_path()))
@@ -4918,9 +4997,54 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError, sqlite3.Error) as error:
                 self.add_log({"type": "warn", "text": f"Could not queue the group contribution. {error}"})
             self.discord.retry_group_outbox()
+        if (saved and verify_replay and cfg["app"]["auto_verify_replay"]
+                and replay_comparison.reader_path().is_file()):
+            finished_at = time.time()
+
+            def verify():
+                try:
+                    result = replay_comparison.verify_local_replay(match, finished_at)
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    result = None
+                self.replay_result.emit((match, webhook, result))
+
+            threading.Thread(target=verify, daemon=True).start()
         if saved and cfg["app"]["group_share_matches"] and cfg["app"]["auto_discord_summary"]:
             self.deliver_saved_match(match)
         return saved
+
+    def apply_verified_replay(self, payload):
+        match, webhook, result = payload
+        if not load_cfg()[0]["app"]["auto_verify_replay"]:
+            return
+        if result is None:
+            self.add_log({"type": "info", "text": "Replay could not be verified. Live counts were kept."})
+            return
+        path, identity, _, _, destroyed, timeline, owner = result
+        types = {}
+        for _, kind, broken in timeline:
+            if not broken:
+                label = replay_comparison.chest_type(kind)
+                types[label] = types.get(label, 0) + 1
+        total = sum(types.values())
+        try:
+            verified = match_history.verify_match(self.match_history_path(), match.snapshot, total,
+                                                  token_odds_text(total, match.boost), types,
+                                                  {"owner": owner, "destroyed": destroyed,
+                                                   "timeline": [list(event) for event in timeline]})
+            if verified is None:
+                return
+            if webhook is not None:
+                discord_group.queue_verified(webhook, verified, match.player)
+                self.discord.retry_group_outbox()
+            if load_cfg()[0]["app"]["delete_verified_replay"]:
+                replay_comparison.delete_consumed_replay(path, identity)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            self.add_log({"type": "warn", "text": f"Replay kept on disk. {error}"})
+        self.dashboard.set_recent_matches(match_history.read_history(self.match_history_path()))
+        self.dashboard.refresh_screen_overlay()
+        if self.pages.currentWidget() is self.group:
+            self.group.load()
 
     def deliver_saved_match(self, match):
         if self.group_role != "host":

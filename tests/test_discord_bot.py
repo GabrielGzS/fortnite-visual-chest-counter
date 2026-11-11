@@ -607,6 +607,8 @@ def test_bot_presence_uses_fresh_shared_session_and_throttles_updates(tmp_path, 
         monkeypatch.setattr(discord_bot.time, "monotonic", lambda: clock[1])
         current = []
         saved = []
+        cfg = dict(discord_bot.settings.DEFAULTS["app"])
+        monkeypatch.setattr(discord_bot.settings, "load_config", lambda *_: ({"app": cfg}, "", []))
         monkeypatch.setattr(store, "sessions", lambda: tuple(current))
         monkeypatch.setattr(store, "board", lambda: (saved, discord_group.TeamSummary(1) if saved else discord_group.TeamSummary()))
         calls = []
@@ -616,7 +618,7 @@ def test_bot_presence_uses_fresh_shared_session_and_throttles_updates(tmp_path, 
 
         monkeypatch.setattr(bot, "change_presence", change_presence)
         await bot.update_presence()
-        assert calls == [(discord.Status.online, discord.ActivityType.watching, "the group leaderboard")]
+        assert calls == [(discord.Status.online, discord.ActivityType.watching, "In lobby")]
         current.append(discord_group.TeamSession("a" * 64, (
             discord_group.SessionPlayer("Rin", 4, 8, 1.0, updated_at=1000.0),
             discord_group.SessionPlayer("Sam", 3, 6, 1.0, updated_at=1000.0),
@@ -627,27 +629,41 @@ def test_bot_presence_uses_fresh_shared_session_and_throttles_updates(tmp_path, 
         saved.append(discord_group.Player("Rin", 14, matches=1))
         clock[1] = 130.0
         await bot.update_presence()
-        assert calls[-1][2] == "2 players · 14 chests"
+        assert calls[-1][2] == "2 players · 14 chests · Token 0.010181%"
 
         clock[1] = 160.0
         await bot.update_presence()
-        assert calls[-1][2] == "Team token chance · 0.010181%"
-        clock[1] = 190.0
-        await bot.update_presence()
-        assert calls[-1][2] == "Group · 14 chests · 1 matches"
+        assert len(calls) == 2
+        assert calls[-1][2] == "2 players · 14 chests · Token 0.010181%"
         current[0] = discord_group.TeamSession("a" * 64, (
             discord_group.SessionPlayer("Rin", 4, 8, 1.0, True, updated_at=1000.0),
             discord_group.SessionPlayer("Sam", 3, 6, 1.0, True, updated_at=1000.0),
         ))
         clock[1] = 220.0
         await bot.update_presence()
-        assert calls[-1][2] == "Group · 14 chests · 1 matches"
+        assert calls[-1][2] == "In lobby · Group history · 14 chests · 1 matches · Token 0.010181%"
 
         clock[0], clock[1] = 1201.0, 250.0
         current[0] = discord_group.TeamSession("a" * 64, (
             discord_group.SessionPlayer("Rin", 4, 8, 1.0, updated_at=1000.0),
             discord_group.SessionPlayer("Sam", 3, 6, 1.0, updated_at=1000.0),
         ))
+        await bot.update_presence()
+        assert len(calls) == 3
+
+        async def fail_publication():
+            raise OSError("board unavailable")
+
+        monkeypatch.setattr(bot, "publish_board", fail_publication)
+        bot._feed_ready = True
+        current.append(discord_group.TeamSession("b" * 64, (
+            discord_group.SessionPlayer("Rin", 1, 3, 1.0, updated_at=1201.0),
+        )))
+        await bot.refresh_board.coro(bot)
+        assert calls[-1][2] == "In match · 3 chests · Token 0.002182%"
+        assert "Could not update" in bot.publication_status
+
+        clock[1] = 280.0
         await bot.update_presence()
         assert len(calls) == 4
         await bot.close()
@@ -713,13 +729,13 @@ def test_custom_bot_branding_validates_before_discord_request(tmp_path):
     asyncio.run(verify())
 
 
-def test_custom_presence_templates_activity_rotation_and_disable(tmp_path, monkeypatch):
+def test_custom_presence_templates_activity_and_disable(tmp_path, monkeypatch):
     async def verify():
         store = discord_group.GroupStore(WEBHOOK.id, tmp_path / "group.db")
         bot = discord_bot.GuildBot(CONFIG, store, lambda *_: None, WEBHOOK)
         bot._connection.user = SimpleNamespace(id=456)
         clock = [100.0]
-        config = {"discord_presence_enabled": True, "discord_presence_rotate": False,
+        config = {"discord_presence_enabled": True,
                   "discord_presence_interval": 10, "discord_presence_activity": "playing",
                   "discord_presence_team_text": "{players} players / {total} opened / {chance}"}
         monkeypatch.setattr(discord_bot.settings, "load_config", lambda *_: ({"app": config}, "", []))
@@ -785,3 +801,33 @@ def test_custom_bot_banner_validates_before_discord_request(tmp_path):
         await bot.close()
 
     asyncio.run(verify())
+
+@pytest.mark.parametrize("verified_first", [False, True])
+def test_replay_updates_one_group_contribution(tmp_path, monkeypatch, verified_first):
+    from dataclasses import replace
+
+    host = discord_group.GroupStore(WEBHOOK.id, tmp_path / "host.db")
+    guest = discord_group.GroupStore(WEBHOOK.id, tmp_path / "guest.db")
+    match = match_history.Match("match", "2026-11-10 10:00", "default", "Capture", "Duo",
+                                4, 3, "1%", session_fingerprint="a" * 64)
+    messages = []
+
+    def publish(webhook, event, name, count, certain, types, fingerprint, boost, *, verified=False):
+        footer = SimpleNamespace(text=discord_group._SESSION_PREFIX + json.dumps([fingerprint, boost]))
+        embed = SimpleNamespace(title=discord_group._VERIFIED_TITLE if verified else "", footer=footer)
+        payload = json.dumps([event, name, count, certain, types])
+        messages.append(SimpleNamespace(id=len(messages)+1, channel=SimpleNamespace(id=int(CONFIG.channel)),
+                                        webhook_id=int(webhook.id), content=f"||FCC1 {payload}||", embeds=[embed]))
+
+    monkeypatch.setattr(discord_group, "_publish", publish)
+    assert guest.queue(match, "Rin")
+    assert guest.flush(WEBHOOK) == 1
+    guest.queue_verified(replace(match, certain=9, estimated=0, chest_types={"buried": 2}), "Rin")
+    assert guest.flush(WEBHOOK) == 1
+    if verified_first:
+        messages.reverse()
+    assert host.ingest(messages[0])
+    assert host.ingest(messages[1]) is not verified_first
+    assert not host.ingest(messages[0])
+    row, = host.leaderboard()
+    assert (row.matches, row.recorded, row.certain, row.chest_types) == (1, 9, 9, {"buried": 2})

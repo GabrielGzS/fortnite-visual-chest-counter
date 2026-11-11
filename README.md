@@ -27,6 +27,8 @@ Current app version **v0.2.3 public beta**. The features below describe the curr
 
 The tray menu opens the window or quits the app. Closing the window can keep counting in the tray. These behaviours are configurable in Settings.
 
+Open **Setup** above Dashboard for shortcuts to capture, match detection, overlay and Group configuration.
+
 ## Features
 
 ### Your counter, live
@@ -40,6 +42,8 @@ The tray menu opens the window or quits the app. Closing the window can keep cou
 - Use one capture per app. Each teammate runs their own capture and shares their results through the group feed.
 
 ### Match history and squad stats
+
+- [Verify matches with Fortnite replays](docs/guides/matches-and-discord.md#automatic-replay-verification) and optionally remove verified local replays.
 
 - Save manually with **Finish match**, or use new warmup and lobby entries from Fortnite's local log to start and finish automatically.
 - Detect the Battle Royale mode from the log or choose it manually. Automatic mode detection also works with manual start and finish.
@@ -95,6 +99,11 @@ The webhook receives submissions in its feed channel. The public bot leaderboard
 - Check for packaged updates and configure the download limit. See [the updater guide](docs/maintenance/UPDATER.md).
 
 ## Previews
+
+<table>
+<tr><td><a href="docs/previews/setup.png"><img src="docs/previews/setup.png" alt="Setup guide in the application" width="1080"></a></td></tr>
+<tr><td align="center">Setup guide for capture, matches, overlay and Discord</td></tr>
+</table>
 
 The screenshots show the application with sample data.
 

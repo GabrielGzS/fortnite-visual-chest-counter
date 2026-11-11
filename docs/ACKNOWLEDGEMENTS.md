@@ -30,3 +30,5 @@ The Pirate Token estimate can be compared with the [independent calculator](http
 The upstream commit history credits [Claude Opus 5.5](https://github.com/GabrielGzS/fortnite-visual-chest-counter/commit/032df3b4ebdaea57e49dbc54ba6496d9c2e0364b) as a co-author. Development on this branch used Codex assistance, including GPT-6.1 Sol at medium reasoning effort. Validation notes distinguish automated checks and replay evidence from live verification. See [changes and validation](CHANGES.md).
 
 Fortnite is a trademark of Epic Games, Inc. This independent project has no Epic Games affiliation or approval.
+
+Automatic replay verification can use [LED-N’s Fortnite ChestCounter](https://github.com/LED-N/Fortnite-ChestCounter) and its licensed replay-reading dependencies.

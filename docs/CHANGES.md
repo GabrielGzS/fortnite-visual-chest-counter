@@ -1,5 +1,7 @@
 # Change and validation notes
 
+The **Setup** page guides capture, automatic match detection, overlay and Discord configuration. Replay verification is enabled by default and can be turned off in Settings. See the [setup guides](guides/index.md).
+
 This is the living implementation and review document for the desktop pull request. Update this page when the branch
 changes; the pull request links here. Versioned release notes describe published releases.
 

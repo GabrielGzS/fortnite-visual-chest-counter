@@ -35,13 +35,17 @@ _COOLDOWN_LOCK = threading.Lock()
 _WEBHOOK_COOLDOWNS = {}
 _CLIENT_STAGGER = random.uniform(0.0, 2.0)
 
-GROUP_TYPE_LABELS = {**LABELS, "unclassified": "Not classified"}
+GROUP_TYPE_LABELS = {**LABELS, "unclassified": "Not classified", "buried": "Buried chest", "poster": "Spirit poster chest"}
 _WEBHOOK_NAME = "Chest Counter"
 _WEBHOOK_AVATAR = ("https://raw.githubusercontent.com/NEVARLeVrai/fortnite-visual-chest-counter/"
                    "ui/chest-tracker-dashboard/docs/previews/logo.png")
 
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS replay_revisions (
+    webhook TEXT NOT NULL, event TEXT NOT NULL, incoming INTEGER NOT NULL,
+    PRIMARY KEY (webhook, event, incoming)
+);
 CREATE TABLE IF NOT EXISTS session_states (
     webhook TEXT NOT NULL, fingerprint TEXT NOT NULL, player TEXT NOT NULL, name TEXT NOT NULL,
     revision INTEGER NOT NULL, certain INTEGER NOT NULL, total INTEGER NOT NULL, boost REAL NOT NULL,
@@ -241,13 +245,26 @@ class Player:
     adjustment: int = 0
     confirmed_total: int = 0
     matches: int = 0
+    recorded_log_no_drop: float = 0.0
+
+    @property
+    def log_no_drop(self):
+        # Manual additions have no saved boost. Reductions have no chest identity,
+        # so scale the recorded exposure by the fraction of chests retained.
+        base = math.log1p(-1 / PIRATE_TOKEN_RATE)
+        recorded = self.recorded_log_no_drop or self.recorded * base
+        if self.total < self.recorded:
+            return recorded * max(0, self.total) / self.recorded
+        return recorded + (self.total - self.recorded) * base
 
 
 def _combine(name, players, adjustment=0):
     kinds = Counter()
     recorded = confirmed_total = certain = matches = 0
     has_details = False
+    recorded_odds = []
     for player in players:
+        recorded_odds.append(player.recorded_log_no_drop)
         recorded += player.recorded
         confirmed_total += player.confirmed_total
         certain += player.certain or 0
@@ -256,7 +273,7 @@ def _combine(name, players, adjustment=0):
         kinds.update(player.chest_types)
         adjustment += player.adjustment
     return Player(name, recorded + adjustment, certain if has_details else None, dict(kinds),
-                  recorded, adjustment, confirmed_total, matches)
+                  recorded, adjustment, confirmed_total, matches, math.fsum(recorded_odds))
 
 
 @dataclass(frozen=True)
@@ -360,21 +377,22 @@ class GroupStore:
     def _players(self, db):
         rows = db.execute("""
             SELECT m.player, m.name, m.count, d.certain, d.chest_types,
-                   COALESCE(c.amount, 0), m.rowid > COALESCE(c.reset_row, 0)
+                   COALESCE(c.amount, 0), m.rowid > COALESCE(c.reset_row, 0), COALESCE(s.boost, 1.0)
             FROM contributions AS m
             LEFT JOIN corrections AS c ON c.webhook = m.webhook AND c.player = m.player
             LEFT JOIN event_details AS d ON d.webhook = m.webhook AND d.event = m.event
+            LEFT JOIN event_sessions AS s ON s.webhook = m.webhook AND s.event = m.event
             WHERE m.webhook = ?
             ORDER BY m.rowid
         """, (self.webhook_id,))
         groups = {}
         identities = {}
-        for key, name, count, certain, chest_types, amount, included in rows:
+        for key, name, count, certain, chest_types, amount, included, boost in rows:
             identities[key] = name, amount
             if included:
                 groups.setdefault(key, []).append(Player(name, count, certain, json.loads(chest_types or "{}"),
                                                           count, confirmed_total=count if certain is not None else 0,
-                                                          matches=1))
+                                                          matches=1, recorded_log_no_drop=count * math.log1p(-boost / PIRATE_TOKEN_RATE)))
         return {key: _combine(name, groups.get(key, ()), amount) for key, (name, amount) in identities.items()}
 
     def _leaderboard(self, db):
@@ -584,13 +602,15 @@ class GroupStore:
         if str(message.webhook_id) != self.webhook_id:
             return False
         contribution = _parse_event(message.content)
+        verified = any(getattr(embed, "title", None) == _VERIFIED_TITLE
+                       for embed in getattr(message, "embeds", ()))
         live = _parse_live(message.content)
         channel = str(message.channel.id)
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             cursor = db.execute("SELECT message FROM cursors WHERE webhook=? AND channel=?",
                                 (self.webhook_id, channel)).fetchone()
-            if cursor and int(cursor[0]) >= message.id and live is None:
+            if cursor and int(cursor[0]) >= message.id and live is None and not verified:
                 return False
             inserted = False
             if live:
@@ -605,12 +625,29 @@ class GroupStore:
                 result = db.execute("INSERT OR IGNORE INTO contributions VALUES (?, ?, ?, ?, ?)",
                                     (self.webhook_id, event, name.casefold(), name, count))
                 inserted = bool(result.rowcount)
+                session = _message_session(message)
+                if verified and not inserted:
+                    existing = db.execute(
+                        "SELECT c.player, s.fingerprint, s.boost FROM contributions c "
+                        "LEFT JOIN event_sessions s ON s.webhook=c.webhook AND s.event=c.event "
+                        "WHERE c.webhook=? AND c.event=?", (self.webhook_id, event)).fetchone()
+                    if existing == (name.casefold(), *(session or (None, None))):
+                        inserted = bool(db.execute("INSERT OR IGNORE INTO replay_revisions VALUES (?, ?, 1)",
+                                                   (self.webhook_id, event)).rowcount)
+                        if inserted:
+                            db.execute("UPDATE contributions SET count=? WHERE webhook=? AND event=?",
+                                       (count, self.webhook_id, event))
                 if inserted:
+                    if verified:
+                        db.execute("INSERT OR IGNORE INTO replay_revisions VALUES (?, ?, 1)",
+                                   (self.webhook_id, event))
                     db.execute("INSERT OR REPLACE INTO event_details VALUES (?, ?, ?, ?)",
                                (self.webhook_id, event, certain, json.dumps(chest_types)))
-                    session = _message_session(message)
                     self._save_session(db, event, session)
                     if session:
+                        if verified:
+                            db.execute("DELETE FROM session_states WHERE webhook=? AND fingerprint=? AND player=?",
+                                       (self.webhook_id, session[0], name.casefold()))
                         self._save_player_state(db, session[0],
                                                 SessionPlayer(name, certain or 0, count, session[1], True,
                                                               updated_at=time.time()))
@@ -649,18 +686,40 @@ class GroupStore:
                                (self.webhook_id, session[0], validate_player(player).casefold()))
             return bool(result.rowcount)
 
+    def queue_verified(self, match, player):
+        certain, types = _validate_breakdown(match.total, match.certain, match.chest_types)
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT event, name FROM outbox WHERE webhook=? AND snapshot=?",
+                             (self.webhook_id, match.snapshot)).fetchone()
+            if row is None or row[1] != validate_player(player):
+                raise ValueError("The original contribution is missing.")
+            event = row[0]
+            revision = db.execute("INSERT OR IGNORE INTO replay_revisions VALUES (?, ?, 0)",
+                                  (self.webhook_id, event))
+            if not revision.rowcount:
+                return
+            db.execute("UPDATE outbox SET count=?, sent=0 WHERE webhook=? AND event=?",
+                       (match.total, self.webhook_id, event))
+            db.execute("INSERT OR REPLACE INTO event_details VALUES (?, ?, ?, ?)",
+                       (self.webhook_id, event, certain, json.dumps(types)))
+
     def flush(self, webhook):
         with _FLUSH_LOCK, self.connection() as db:
             rows = db.execute("""
-                SELECT o.event, o.name, o.count, d.certain, d.chest_types, s.fingerprint, s.boost
+                SELECT o.event, o.name, o.count, d.certain, d.chest_types, s.fingerprint, s.boost,
+                    EXISTS(SELECT 1 FROM replay_revisions r WHERE r.webhook=o.webhook AND r.event=o.event AND r.incoming=0)
                 FROM outbox AS o LEFT JOIN event_details AS d ON d.webhook = o.webhook AND d.event = o.event
                 LEFT JOIN event_sessions AS s ON s.webhook = o.webhook AND s.event = o.event
                 WHERE o.webhook=? AND o.sent=0 ORDER BY o.rowid
             """, (self.webhook_id,)).fetchall()
-            for event, name, count, certain, chest_types, fingerprint, boost in rows:
+            for event, name, count, certain, chest_types, fingerprint, boost, verified in rows:
                 session = (fingerprint, boost) if fingerprint else ()
-                _publish(webhook, event, name, count, certain, json.loads(chest_types or "{}"), *session)
-                db.execute("UPDATE outbox SET sent=1 WHERE webhook=? AND event=?", (self.webhook_id, event))
+                _publish(webhook, event, name, count, certain, json.loads(chest_types or "{}"), *session,
+                         **({"verified": True} if verified else {}))
+                db.execute("""UPDATE outbox SET sent=1 WHERE webhook=? AND event=? AND ? =
+                    EXISTS(SELECT 1 FROM replay_revisions r WHERE r.webhook=outbox.webhook
+                           AND r.event=outbox.event AND r.incoming=0)""", (self.webhook_id, event, verified))
                 db.commit()
             live_rows = db.execute(
                 "SELECT fingerprint, player, name, revision, certain, total, boost, message FROM live_outbox "
@@ -725,11 +784,14 @@ def _message_session(message):
         return None
 
 
-def _publish(webhook, event, name, count, certain, chest_types, fingerprint=None, boost=None):
+_VERIFIED_TITLE = "Replay-verified chest contribution"
+
+
+def _publish(webhook, event, name, count, certain, chest_types, fingerprint=None, boost=None, *, verified=False):
     check_webhook_cooldown(webhook)
     payload = json.dumps([event, name, count, certain, chest_types], ensure_ascii=True,
                          separators=(",", ":")).replace("|", "\\u007c")
-    embed = {"title": "Group chest contribution", "author": {"name": name},
+    embed = {"title": _VERIFIED_TITLE if verified else "Group chest contribution", "author": {"name": name},
              "description": f"{count:,} chests", "color": 0x5865F2}
     session = _validate_session(fingerprint, boost)
     if session:
@@ -801,6 +863,10 @@ def queue_live(webhook, fingerprint, player, certain, total, boost):
 
 def queue_match(webhook, match, player):
     return GroupStore(webhook.id).queue(match, player)
+
+
+def queue_verified(webhook, match, player):
+    GroupStore(webhook.id).queue_verified(match, player)
 
 
 def flush(webhook):

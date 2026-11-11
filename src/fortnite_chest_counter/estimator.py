@@ -561,6 +561,12 @@ class ChestEstimator:
             if recovered is not None:
                 ry, rx, kind, confirmed = recovered
                 recovered = (round(ry / s), round(rx / s), kind, confirmed)
+            elif 0.62 <= score < SCALED_TRIGGER:
+                # A weak resized word can beat the native word even when only the
+                # native plane has three aligned readings of the full XP header.
+                recovered = self._recover_french_line(t, roi, mask, 0.0, 0, 0)
+                if recovered is not None:
+                    plane = None
         else:
             recovered = self._recover_french_line(t, roi, mask, score, cy, cx) if "fr:COFFRE" in self.scaled_templates else None
         if recovered is not None:

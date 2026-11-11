@@ -387,7 +387,7 @@ def audit(app_root):
     print("Release audit passed: no samples, logs, saved counts, scripts or unexpected executables; OBS files start at 0.")
 
 
-def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_launcher=None):
+def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_launcher=None, replay_reader=None):
     key_problems = check_update_keys(TRUSTED_PUBLIC_KEYS)
     if key_problems:
         raise SystemExit("Refusing to build a release that could never accept an update:\n  " + "\n  ".join(key_problems))
@@ -541,6 +541,14 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
     (obs / "chest_counter.txt").write_text("CERTAIN OPENED CHESTS: 0\nAPPROX. OPENED CHESTS: 0\n", encoding="utf-8")
     (obs / "last_chest.txt").write_text("NO CHESTS YET\n", encoding="utf-8")
 
+    if replay_reader:
+        reader = runtime / "replay-reader"
+        required = ("ChestCounter.dll", "ChestCounter.deps.json", "ChestCounter.runtimeconfig.json", "LICENSE")
+        if not all((replay_reader / filename).is_file() for filename in required):
+            raise SystemExit("The replay reader folder must include the .NET build and its upstream license.")
+        shutil.copytree(replay_reader, reader,
+                        ignore=shutil.ignore_patterns("*.exe", "*.pdb", "*.replay", "data.json"))
+
     summary, listing = signature_report(app_root)
     provenance += summary
     (runtime / "PROVENANCE.txt").write_text("\n".join(provenance) + "\n", encoding="utf-8")
@@ -577,6 +585,7 @@ if __name__ == "__main__":
     ap.add_argument("--launcher-only", action="store_true", help="only compile the launcher (seconds of work), to use with --prebuilt-launcher elsewhere")
     ap.add_argument("--development-launcher", action="store_true", help="with --launcher-only, launch the checkout's .venv")
     ap.add_argument("--prebuilt-launcher", help="use this launcher instead of compiling one, on a PC that cannot run the compiler")
+    ap.add_argument("--replay-reader", type=Path, help="LED-N .NET reader build with dependency licenses")
     a = ap.parse_args()
     if a.development_launcher and not a.launcher_only:
         ap.error("--development-launcher requires --launcher-only")
@@ -590,4 +599,4 @@ if __name__ == "__main__":
         sys.exit(0)
     if not (a.python_embed and a.ffmpeg_zip and a.ffmpeg_source):
         ap.error("--python-embed, --ffmpeg-zip and --ffmpeg-source are required to build")
-    build(Path(a.out), Path(a.python_embed), Path(a.ffmpeg_zip), Path(a.ffmpeg_source), a.mingw, a.prebuilt_launcher)
+    build(Path(a.out), Path(a.python_embed), Path(a.ffmpeg_zip), Path(a.ffmpeg_source), a.mingw, a.prebuilt_launcher, a.replay_reader)

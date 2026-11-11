@@ -420,8 +420,8 @@ def test_token_odds_use_total_and_separate_estimated_chests():
             win.overlay.apply()
             assert "Odds" not in overlay.plain_text and "Lifetime odds" not in overlay.plain_text
             assert "Opened 3" in overlay.plain_text and "Lifetime 3" in overlay.plain_text
-            assert overlay._parts[1] == ""  # A team section needs a verified shared session.
-            assert overlay._parts[2] == "Lifetime 3\nGames 1"
+            assert win.overlay.section_titles["team"].text() not in overlay.plain_text.splitlines()
+            assert overlay.plain_text.splitlines()[-3:] == ["All games", "Lifetime 3", "Games 1"]
             check_shared_output()
             win.overlay.show_screen_overlay.setChecked(False)
             assert overlay.isHidden()
