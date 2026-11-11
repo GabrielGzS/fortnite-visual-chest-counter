@@ -46,6 +46,9 @@ QToolTip {{ background: {SURFACE_3}; color: {TEXT}; border: 1px solid {BORDER}; 
 #countLabel {{ color: {MUTED}; font-size: 9pt; font-weight: 600; letter-spacing: 1px; }}
 #countValue {{ font-size: 40pt; font-weight: 700; }}
 #countSub {{ color: {MUTED}; font-size: 9pt; }}
+#statCard {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px; }}
+#statValue {{ font-size: 18pt; font-weight: 600; }}
+#gameStatus {{ font-size: 15pt; font-weight: 600; }}
 
 #pill {{ border-radius: 11px; padding: 3px 12px; font-size: 9pt; font-weight: 600; }}
 #banner {{ background: #3a1d22; border: 1px solid #6b2a33; border-radius: 8px; }}
@@ -65,6 +68,9 @@ QPushButton#danger {{ background: {DANGER}; border: 1px solid {DANGER}; color: w
 QPushButton#danger:hover {{ background: #f05a5a; }}
 QPushButton#toggle {{ background: transparent; border: 1px solid {BORDER}; border-radius: 14px; padding: 5px 14px; color: {MUTED}; }}
 QPushButton#toggle:checked {{ background: {SURFACE_2}; color: {TEXT}; border-color: {ACCENT}; }}
+QPushButton#segment {{ background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 16px; color: {MUTED}; font-weight: 600; }}
+QPushButton#segment:hover {{ background: transparent; color: {TEXT}; }}
+QPushButton#segment:checked {{ color: {TEXT}; border-bottom-color: {ACCENT}; }}
 QPushButton#link {{ background: transparent; border: none; color: {ACCENT}; padding: 0; }}
 QPushButton#link:hover {{ color: {ACCENT_HOVER}; text-decoration: underline; }}
 

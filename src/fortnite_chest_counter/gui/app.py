@@ -211,6 +211,10 @@ def types_text(breakdown):
 
 MATCH_SCREENS = {"LOBBY": "In the lobby", "LOADING": "Loading", "PRE_GAME": "Waiting for the match to start"}
 MATCH_STALE_SECONDS = 5                     # the worker reports once a second of video: this long without one means no video
+UNKNOWN_VALUE = "—"
+OVERVIEW_VIEW, GAME_VIEW, CONSOLE_VIEW = range(3)
+DASHBOARD_VIEWS = (("Overview", "Your counts and the video source"), ("Game", "What match tracking sees right now, and the live preview"),
+                   ("Console", "The activity log, warnings and diagnostic recording"))
 
 
 def match_clock(seconds):
@@ -443,6 +447,27 @@ class CountCard(QFrame):
             self.setStyleSheet(f"#countCard {{ border: 1px solid {self.color}; background: {theme.rgba(self.color, 0.08)}; }}")
             self._flash.start(900)
         self.value.setText(text)
+
+
+class StatTile(QFrame):
+    """One compact figure. A value that is not known shows as a dash, never as zero."""
+
+    def __init__(self, title, sub=""):
+        super().__init__()
+        self.setObjectName("statCard")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(2)
+        layout.addWidget(label(title, "countLabel"))
+        self.value = label(UNKNOWN_VALUE, "statValue")
+        layout.addWidget(self.value)
+        self.sub = label(sub, "countSub", wrap=True)
+        layout.addWidget(self.sub)
+
+    def set_value(self, value, sub=None):
+        self.value.setText(UNKNOWN_VALUE if value is None else str(value))
+        if sub is not None:
+            self.sub.setText(sub)
 
 
 class PreviewPanel(QFrame):
@@ -855,6 +880,33 @@ class Dashboard(QWidget):
         self.notice.hide()
         layout.addWidget(self.notice)
 
+        # three views of one session (v0.3.0). The status pill, banner and notice above stay visible in all of them.
+        segments = QHBoxLayout()
+        segments.setSpacing(4)
+        self.view_buttons = QButtonGroup(self)
+        self.views = QStackedWidget()
+        pages = []
+        for index, (name, tip) in enumerate(DASHBOARD_VIEWS):
+            view_button = button(name, "segment", tip=tip)
+            view_button.setCheckable(True)
+            self.view_buttons.addButton(view_button, index)
+            segments.addWidget(view_button)
+            page = QWidget()
+            page.setObjectName("page")
+            page_box = QVBoxLayout(page)
+            page_box.setContentsMargins(0, 4, 0, 0)
+            page_box.setSpacing(14)
+            self.views.addWidget(page)
+            pages.append(page_box)
+        overview, game, console = pages
+        segments.addStretch(1)
+        layout.addLayout(segments)
+        layout.addWidget(hline())
+        layout.addWidget(self.views, 1)
+        self.view_buttons.button(OVERVIEW_VIEW).setChecked(True)
+        self.view_buttons.idClicked.connect(self.show_view)
+        self._unread_warnings = 0
+
         # count profile (v0.2.2): whose chests these are. One profile counts at a time.
         prow = QHBoxLayout()
         prow.setSpacing(8)
@@ -874,7 +926,7 @@ class Dashboard(QWidget):
                                                       "file)", on_click=win.delete_profile)
         for widget in (self.profile_new, self.profile_rename, self.profile_delete):
             prow.addWidget(widget)
-        layout.addLayout(prow)
+        overview.addLayout(prow)
 
         # the two numbers
         counts = QHBoxLayout()
@@ -890,8 +942,8 @@ class Dashboard(QWidget):
         actions.addWidget(button("Reset...", tip="Set both counts to 0", on_click=win.reset_counts))
         actions.addStretch(1)
         counts.addLayout(actions)
-        layout.addLayout(counts)
-        types = QHBoxLayout()                                 # v0.2.2: read-only chest-type split of the APPROX total
+        overview.addLayout(counts)
+        types = QHBoxLayout()                                # v0.2.2: read-only chest-type split of the APPROX total
         types.addWidget(label("Chest types:", "hint"), 0, Qt.AlignTop)
         self.types = label("", "hint", wrap=True)
         self.types.setToolTip("How the counted chests split by type (APPROX, the total). Read from each chest's pop-up "
@@ -899,8 +951,8 @@ class Dashboard(QWidget):
                               "'Not classified' = chests counted before v0.2.2, or set with Edit counts. "
                               "OBS still shows only the two totals.")
         types.addWidget(self.types, 1)
-        layout.addLayout(types)
-        self.match_row = QWidget()                            # v0.3.0: read-only, and only while match tracking is on
+        overview.addLayout(types)
+        self.match_row = QWidget()                           # v0.3.0: read-only, and only while match tracking is on
         match_layout = QHBoxLayout(self.match_row)
         match_layout.setContentsMargins(0, 0, 0, 0)
         match_layout.addWidget(label("Match (experimental):", "hint"), 0, Qt.AlignTop)
@@ -909,17 +961,17 @@ class Dashboard(QWidget):
                               "\"Partial\" means part of the match was not seen, so it will not count as a complete match.")
         match_layout.addWidget(self.match, 1)
         self.match_row.hide()
-        layout.addWidget(self.match_row)
+        overview.addWidget(self.match_row)
         viewers = QHBoxLayout()
         viewers.addWidget(label("Viewers see:", "hint"), 0, Qt.AlignTop)
         self.viewers = label("", "hint", wrap=True)
         self.viewers.setStyleSheet(f"color: {theme.TEXT};")
         viewers.addWidget(self.viewers, 1)
-        viewers.addWidget(button("Change what viewers see", "link", on_click=lambda: win.go_to(1)))
-        layout.addLayout(viewers)
+        viewers.addWidget(button("Change what viewers see", "link", on_click=lambda: win.show_page(win.overlay)))
+        overview.addLayout(viewers)
         self.obs_line = label("", "hint", wrap=True)          # OBS WebSocket output status (only while it is on)
         self.obs_line.hide()
-        layout.addWidget(self.obs_line)
+        overview.addWidget(self.obs_line)
 
         # source + start
         box, box_layout = card()
@@ -977,6 +1029,46 @@ class Dashboard(QWidget):
                               on_click=win.analyse_video)
         row.addWidget(self.analyse)
         box_layout.addLayout(row)
+        overview.addWidget(box)
+        overview.addStretch(1)
+        self._build_game(win, game)
+        self._build_console(win, console)
+
+    def _build_game(self, win, game):
+        box, box_layout = card("Match status (experimental)")
+        self.game_status = label("", "gameStatus", wrap=True)
+        box_layout.addWidget(self.game_status)
+        self.game_hint = label("", "hint", wrap=True)
+        box_layout.addWidget(self.game_hint)
+        row = QHBoxLayout()
+        self.game_settings = button("Open Settings", "link", on_click=lambda: win.show_page(win.settings_page))
+        row.addWidget(self.game_settings)
+        row.addStretch(1)
+        box_layout.addLayout(row)
+        game.addWidget(box)
+        tiles = QHBoxLayout()
+        tiles.setSpacing(12)
+        self.game_active = StatTile("ACTIVE PLAY", "Alive on the map")
+        self.game_seen = StatTile("SEEN SO FAR", "This match, on screen")
+        self.game_unclear = StatTile("UNCLEAR", "Black, frozen or missing")
+        self.game_start = StatTile("START SEEN", "From before the bus")
+        self.game_language = StatTile("LANGUAGE", "From text on screen")
+        for tile in (self.game_active, self.game_seen, self.game_unclear, self.game_start, self.game_language):
+            tiles.addWidget(tile, 1)
+        game.addLayout(tiles)
+        row = QHBoxLayout()
+        self.show_preview = button("Live preview", "toggle", tip="The video the counter is analysing")
+        self.show_preview.setCheckable(True)
+        row.addWidget(self.show_preview)
+        row.addStretch(1)
+        game.addLayout(row)
+        self.preview = PreviewPanel()
+        game.addWidget(self.preview, 1)
+        game.addStretch(0)
+        self.show_preview.toggled.connect(self._panels)
+
+    def _build_console(self, win, console):
+        box, box_layout = card()
         row = QHBoxLayout()
         row.addWidget(label("Diagnostic recording"))
         self.rec_mode = QComboBox()
@@ -990,16 +1082,10 @@ class Dashboard(QWidget):
         box_layout.addLayout(row)
         self.rec_status = label("", "hint", wrap=True)
         box_layout.addWidget(self.rec_status)
-        layout.addWidget(box)
+        console.addWidget(box)
 
-        # optional panels
         row = QHBoxLayout()
-        self.show_log = button("Activity", "toggle", tip="What the counter sees and decides, live")
-        self.show_log.setCheckable(True)
-        self.show_preview = button("Live preview", "toggle", tip="The video the counter is analysing")
-        self.show_preview.setCheckable(True)
-        row.addWidget(self.show_log)
-        row.addWidget(self.show_preview)
+        row.addWidget(label("Activity", "cardTitle"))
         row.addStretch(1)
         self.detail = QComboBox()
         self.detail.addItem("Normal detail", "normal")
@@ -1011,9 +1097,8 @@ class Dashboard(QWidget):
         self.open_logs = button("Logs folder", tip="Session logs (send these when reporting a problem)",
                                 on_click=win.open_logs)
         row.addWidget(self.open_logs)
-        layout.addLayout(row)
+        console.addLayout(row)
 
-        self.split = QSplitter(Qt.Horizontal)
         self.log = QPlainTextEdit()
         self.log.setObjectName("log")
         self.log.setReadOnly(True)
@@ -1021,24 +1106,50 @@ class Dashboard(QWidget):
         self.log.setPlaceholderText("Chests appear here as they are counted: green = certain, yellow = estimated only, "
                                     "red = looked like a chest but was not counted.")
         self.log.setMinimumHeight(220)
-        self.preview = PreviewPanel()
-        self.split.addWidget(self.log)
-        self.split.addWidget(self.preview)
-        self.split.setStretchFactor(0, 3)
-        self.split.setStretchFactor(1, 2)
-        layout.addWidget(self.split, 1)
-
-        self.show_log.toggled.connect(self._panels)
-        self.show_preview.toggled.connect(self._panels)
+        console.addWidget(self.log, 1)
         self.detail.currentIndexChanged.connect(lambda _: win.render_log())
 
     def _panels(self):
-        self.log.setVisible(self.show_log.isChecked())
         self.preview.setVisible(self.show_preview.isChecked())
-        for widget in (self.detail, self.clear):
-            widget.setVisible(self.show_log.isChecked())
-        self.split.setVisible(self.show_log.isChecked() or self.show_preview.isChecked())
         self.win.preview_visibility_changed()
+
+    def show_view(self, index):
+        """Only changes what is on screen: counting, recognition and history do not know about it."""
+        self.views.setCurrentIndex(index)
+        self.view_buttons.button(index).setChecked(True)
+        if index == CONSOLE_VIEW:
+            self._unread_warnings = 0
+            self._label_console()
+        self.win.preview_visibility_changed()
+
+    def note_warning(self):
+        """The log is out of sight on the other views, so its tab says when something needs reading."""
+        if self.views.currentIndex() != CONSOLE_VIEW:
+            self._unread_warnings += 1
+            self._label_console()
+
+    def _label_console(self):
+        self.view_buttons.button(CONSOLE_VIEW).setText(f"Console ({self._unread_warnings})" if self._unread_warnings else "Console")
+
+    def show_game(self, message, text, color):
+        match = message.get("match") or {}
+        self.game_status.setText(text)
+        self.game_status.setStyleSheet(f"color: {color};")
+        self.game_hint.setText("Followed from the screen once a second. It only reports: it never changes your counts or what OBS shows.")
+        self.game_settings.hide()
+        self.game_active.set_value(match_clock(match.get("active_seconds")))
+        self.game_seen.set_value(match_clock(match.get("observed_seconds")))
+        self.game_unclear.set_value(match_clock(match.get("uncertain_seconds")))
+        self.game_start.set_value({True: "Yes", False: "No"}.get(match.get("observed_from_start")))
+        self.game_language.set_value({True: "English", False: "Not confirmed"}.get(match.get("english_confirmed")))
+
+    def show_game_idle(self, text, hint, offer_settings):
+        self.game_status.setText(text)
+        self.game_status.setStyleSheet(f"color: {theme.MUTED};")
+        self.game_hint.setText(hint)
+        self.game_settings.setVisible(offer_settings)
+        for tile in (self.game_active, self.game_seen, self.game_unclear, self.game_start, self.game_language):
+            tile.set_value(None)
 
     def set_pill(self, text, color):
         self.pill.setText(f"●  {text}")
@@ -1395,8 +1506,8 @@ class SettingsPage(QWidget):
 
         box, box_layout = card("Diagnostic recording (advanced)",
                                "Keeps exactly what the counter analyses, so a missed or wrong chest can be replayed and "
-                               "checked later - and every future version can be tested on it. Turn it on and off on the "
-                               "Dashboard, also while counting; press Ctrl+Alt+M while you play when the counter misses a chest.")
+                               "checked later - and every future version can be tested on it. Turn it on and off in the "
+                               "Dashboard's Console view, also while counting; press Ctrl+Alt+M while you play when the counter misses a chest.")
         self.lossless = QCheckBox("Lossless: the replay sees exactly what the counter saw (about twice the disk space)")
         box_layout.addWidget(self.lossless)
         row = QHBoxLayout()
@@ -1552,6 +1663,7 @@ class SettingsPage(QWidget):
             return
         self.saved.setText("Saved." + (" Stop and start counting to use the new settings."
                                        if self.win.worker.running() else ""))
+        self.win.update_game_idle()
 
     def _open_captures(self):
         cfg, _ = load_cfg()
@@ -1789,6 +1901,7 @@ class MainWindow(QMainWindow):
         self.recording = None                   # the worker's current capture ("capture" message), None = not recording
         self.stream_state = None                # Livestream URL connection state ("stream" messages), None = not a stream
         self.match_seen_at = None               # when the last match status arrived, while one is being reported
+        self.session_match_mode = "off"         # [match] mode when counting started: a change only applies to the next session
         self.marks_this_session = 0
         self.hotkey = None
         self.sources = []
@@ -1826,7 +1939,6 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.pages, 1)
         self.setCentralWidget(root)
 
-        self.dashboard.show_log.setChecked(True)
         self.dashboard.show_preview.setChecked(False)
         self.dashboard._panels()
         self.fill_profiles()
@@ -1887,11 +1999,15 @@ class MainWindow(QMainWindow):
     def go_to(self, index):
         self.nav.setCurrentRow(index)
 
+    def show_page(self, page):
+        self.go_to(self.pages.indexOf(page))
+
     def _page_changed(self, index):
         self.pages.setCurrentIndex(index)
-        if index == 1:
+        page = self.pages.widget(index)
+        if page is self.overlay:
             self.overlay.load()
-        elif index == 2:
+        elif page is self.settings_page:
             self.settings_page.load()
 
     # ---- sources
@@ -2162,6 +2278,7 @@ class MainWindow(QMainWindow):
         self.error_seen = False
         self.connected = None
         self.last_status = None
+        self.session_match_mode = cfg["match"]["mode"]
         try:
             self.worker.start(argv)
         except OSError as error:
@@ -2215,6 +2332,8 @@ class MainWindow(QMainWindow):
             d.match.setText("")
             d.match_row.hide()
             d.metrics.setText("Not counting.")
+        self.update_game_idle()
+        if not running:
             d.preview.view.setStyleSheet("")
             d.preview.clear()
         self.preview_visibility_changed()
@@ -2481,13 +2600,30 @@ class MainWindow(QMainWindow):
         d.match.setText(text)
         d.match.setStyleSheet(f"color: {color};")
         d.match_row.show()
+        d.show_game(message, text, color)
         self.match_seen_at = None if message.get("failed") or message.get("unavailable") else time.monotonic()
 
     def _check_match_video(self):
         """The worker reports once a second of video, so silence means no video is arriving."""
         if self.match_seen_at is not None and time.monotonic() - self.match_seen_at >= MATCH_STALE_SECONDS:
-            self.dashboard.match.setText("No video right now")
-            self.dashboard.match.setStyleSheet(f"color: {theme.MUTED};")
+            for line in (self.dashboard.match, self.dashboard.game_status):
+                line.setText("No video right now")
+                line.setStyleSheet(f"color: {theme.MUTED};")
+
+    def update_game_idle(self):
+        """What the Game view says while no match status is coming in."""
+        d = self.dashboard
+        if not d.match_row.isHidden():
+            return
+        running = self.mode in ("connecting", "counting", "stopping")
+        mode = self.session_match_mode if running else load_cfg()[0]["match"]["mode"]
+        if mode == "on":
+            d.show_game_idle("Waiting for the first picture" if running else "Not counting", "Match status appears here while counting.", False)
+        elif running:
+            d.show_game_idle("Match tracking is off for this session", "It can be turned on in Settings, for the next time you start counting.", True)
+        else:
+            d.show_game_idle("Match tracking is off", "Turn it on in Settings to follow your matches here and build a match history. "
+                                                      "It never changes your counts or what OBS shows.", True)
 
     def show_stream_state(self, state):
         """Livestream URL: the Dashboard pill and the preview say when the stream is not delivering video."""
@@ -2571,6 +2707,8 @@ class MainWindow(QMainWindow):
 
     # ---- activity log
     def add_log(self, message):
+        if message.get("type") in ("warn", "error"):
+            self.dashboard.note_warning()
         for debug_only, html in log_entries(message):
             self.entries.append((debug_only, html))
             if not debug_only or self.verbosity() == "debug":
@@ -2600,7 +2738,7 @@ class MainWindow(QMainWindow):
     # ---- preview
     def preview_visibility_changed(self):
         wanted = (self.preview_reader is not None and self.dashboard.show_preview.isChecked()
-                  and self.mode in ("connecting", "counting"))
+                  and self.dashboard.views.currentIndex() == GAME_VIEW and self.mode in ("connecting", "counting"))
         if self.preview_reader is not None:
             self.preview_reader.set_wanted(wanted)
         if wanted:
