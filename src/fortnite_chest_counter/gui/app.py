@@ -1896,7 +1896,7 @@ class AnalyticsPage(QWidget):
         to nothing in a narrow window, and its own sizing ignores buttons. If the window is too narrow for all of it, the table scrolls sideways."""
         table, header, last = self.table, self.table.horizontalHeader(), len(self.COLUMNS) - 1
         needed = [max(header.sectionSizeHint(column), table.sizeHintForColumn(column)) + 4 for column in range(last)]
-        needed.append(max([table.cellWidget(row, last).sizeHint().width() for row in range(table.rowCount()) if table.cellWidget(row, last)] + [0]) + 12)
+        needed.append(max([table.cellWidget(row, last).sizeHint().width() for row in range(table.rowCount()) if table.cellWidget(row, last)] + [0]) + 24)     # a button's size hint comes before its style sheet padding
         spare = max(table.viewport().width() - sum(needed), 0) // last
         for column, width in enumerate(needed):
             table.setColumnWidth(column, width + (spare if column < last else 0))

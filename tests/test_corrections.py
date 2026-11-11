@@ -723,7 +723,8 @@ def fits(page):
     table, header, last = page.table, page.table.horizontalHeader(), len(page.COLUMNS) - 1
     for column in range(last):
         assert table.columnWidth(column) >= max(header.sectionSizeHint(column), table.sizeHintForColumn(column)), (column, table.columnWidth(column))
-    assert all(table.columnWidth(last) >= action(page, row).sizeHint().width() for row in range(table.rowCount())), table.columnWidth(last)
+    # a button's size hint comes before its style sheet padding: with less room than this, the last letter was cut off on screen
+    assert all(table.columnWidth(last) >= action(page, row).sizeHint().width() + 24 for row in range(table.rowCount())), table.columnWidth(last)
 
 
 def test_the_longest_labels_are_not_cut_off():
