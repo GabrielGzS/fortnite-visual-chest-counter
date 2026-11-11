@@ -437,9 +437,24 @@ def test_the_hud_on_the_island_is_not_play():
     assert s.state == S.PRE_GAME and s.machine.open_match_number is None
 
 
-def test_no_picture_is_not_also_counted_as_out_of_view():
+def test_a_still_page_inside_a_switch_does_not_restart_it():
+    """The real browser page: 10 s with nothing of the game, 2 s that read as a frozen picture, 6 s more. Before this was handled it split in two and
+    neither part reached the limit, so all of it counted as play."""
+    s = played_match()
+    active, before = s.machine.snapshot()["active_seconds"], s.t
+    r = s.show(10, hud=False).show(2, frozen=True).show(6, hud=False).show(10, health=HP, hud=True).finish().records[0]
+    assert S.OUT_OF_VIEW_REASON in r.reasons and abs(r.active_seconds - (active + 10)) <= 1.01 and abs(r.uncertain_seconds - 18) <= 1.01, (r.active_seconds, r.uncertain_seconds)
+
+
+def test_no_moment_is_counted_twice():
     r = played_match().show(6, hud=False).show(2, black=True).show(6, hud=False).show(10, health=HP, hud=True).finish().records[0]
-    assert S.OUT_OF_VIEW_REASON not in r.reasons
+    assert S.OUT_OF_VIEW_REASON in r.reasons and abs(r.uncertain_seconds - 14) <= 1.01, r.uncertain_seconds
+    assert abs(r.observed_seconds + r.uncertain_seconds - (r.closed_t - r.opened_t)) < 0.01 and r.active_seconds <= r.observed_seconds
+
+
+def test_a_long_black_picture_still_restarts_the_count():
+    r = played_match().show(6, hud=False).show(4, black=True).show(6, hud=False).show(10, health=HP, hud=True).finish().records[0]
+    assert S.OUT_OF_VIEW_REASON not in r.reasons and r.discontinuity           # the break already makes it partial; nothing more is claimed
 
 
 def test_a_counted_chest_means_it_was_not_the_island():

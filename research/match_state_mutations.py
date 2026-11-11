@@ -34,14 +34,17 @@ MUTATIONS = [
     # is the game on screen at all?
     ("if lost_for >= GAME_OUT_OF_VIEW and not self._out_of_view:", "if lost_for >= 0 and not self._out_of_view:", "test_a_short_loss_of_the_hud_changes_nothing"),
     ("if lost_for >= GAME_OUT_OF_VIEW and not self._out_of_view:", "if False:", "test_time_with_the_game_out_of_view_is_not_play"),
-    ("            moved = min(lost_for, match.active)\n", "            moved = 0\n", "test_time_with_the_game_out_of_view_is_not_play"),
+    ("            moved = match.active - self._active_at_unseen", "            moved = 0", "test_time_with_the_game_out_of_view_is_not_play"),
+    ("            self._unseen_since, self._active_at_unseen = observation.t, match.active", "            self._unseen_since, self._active_at_unseen = observation.t, 0.0", "test_no_moment_is_counted_twice"),
     ("            match.observed -= moved\n", "", "test_time_with_the_game_out_of_view_is_not_play"),
     ("        if self._out_of_view:\n            match.uncertain += elapsed\n            return\n", "", "test_time_with_the_game_out_of_view_is_not_play"),
     ("observation.hud_in_view is False and observation.health_bar_pixels", "not observation.hud_in_view and observation.health_bar_pixels", "test_a_recording_without_hud_evidence_is_never_called_out_of_view"),
     ("observation.hud_in_view is False and observation.health_bar_pixels < HEALTH_BAR_MIN_PIXELS\n", "observation.hud_in_view is False\n", "test_the_health_bar_alone_is_still_the_game"),
     ("                  and not observation.chests and not any(hit.values()))", "                  and not any(hit.values()))", "test_text_or_a_chest_is_still_the_game"),
     ("        if hud or observation.hud_in_view or observation.chests or any(hit.values()):", "        if hud or observation.chests or any(hit.values()):", "test_the_hud_keeps_a_match_alive_without_a_health_bar"),
-    ("        self._unseen_since, self._out_of_view = None, False\n        if self._match is not None:\n            self._match.uncertain += elapsed", "        if self._match is not None:\n            self._match.uncertain += elapsed", "test_no_picture_is_not_also_counted_as_out_of_view"),
+    ("        if self._match is not None:\n            self._match.uncertain += elapsed\n        if self._countdown", "        self._unseen_since, self._out_of_view = None, False\n        if self._match is not None:\n            self._match.uncertain += elapsed\n        if self._countdown", "test_a_still_page_inside_a_switch_does_not_restart_it"),
+    ("            moved = match.active - self._active_at_unseen", "            moved = min(lost_for, match.active)", "test_no_moment_is_counted_twice"),
+    ("        self._unseen_since, self._out_of_view = None, False\n        self._loading_english_continuous = False\n", "        self._loading_english_continuous = False\n", "test_a_long_black_picture_still_restarts_the_count"),
     ("            match.reasons.append(OUT_OF_VIEW_REASON)\n", "            match.discontinuity = True\n            match.reasons.append(OUT_OF_VIEW_REASON)\n", "test_the_game_out_of_view_is_not_an_ending_and_does_not_decide_quality"),
 ]
 

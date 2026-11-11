@@ -190,6 +190,7 @@ class MatchStateMachine:
         self._last_closed_t = float("-inf")
         self._loading_english_continuous = False
         self._unseen_since = None
+        self._active_at_unseen = 0.0
         self._out_of_view = False
 
     @property
@@ -279,8 +280,8 @@ class MatchStateMachine:
             self._go(t, UNKNOWN, "no_evidence", events)
 
     def _no_picture(self, t, elapsed, events):
-        """Black or frozen: the frame says nothing, so no decision is made and the time counts as uncertain."""
-        self._unseen_since, self._out_of_view = None, False
+        """Black or frozen: the frame says nothing, so no decision is made and the time counts as uncertain. It is no sign of the game either, so
+        a stretch with the game out of view carries on through it: a still browser page reads as a frozen picture now and then."""
         if self._match is not None:
             self._match.uncertain += elapsed
         if self._countdown is not None:
@@ -346,11 +347,11 @@ class MatchStateMachine:
             self._unseen_since, self._out_of_view = None, False
             return
         if self._unseen_since is None:
-            self._unseen_since = observation.t
+            self._unseen_since, self._active_at_unseen = observation.t, match.active
         lost_for = observation.t - self._unseen_since
         if lost_for >= GAME_OUT_OF_VIEW and not self._out_of_view:
             self._out_of_view = True
-            moved = min(lost_for, match.active)
+            moved = match.active - self._active_at_unseen      # only what was counted as play: a black or frozen moment already went to uncertain
             match.active -= moved
             match.observed -= moved
             match.uncertain += moved
