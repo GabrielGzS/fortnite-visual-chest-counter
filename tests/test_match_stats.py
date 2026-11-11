@@ -15,6 +15,9 @@ def test_team_and_cumulative_count_each_session_once_and_preserve_solo():
         SimpleNamespace(snapshot="two", certain=5, total=5, boost=1, session_fingerprint="solo",
                         group_webhook_id="", player="Alex"),
     ]
+    team = match_stats.team(session, "alex", current=(11, 12, 1))
+    assert team.member_totals == (("alex", 12), ("Sam", 20))
+    assert sum(count for _, count in team.member_totals) == team.total
     sessions = {"shared": session}
     result = match_stats.cumulative(rows, sessions, "group", snapshot="one", total=10)
     assert result.total == 35

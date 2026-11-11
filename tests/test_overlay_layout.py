@@ -26,11 +26,19 @@ def display():
 def test_same_context_renders_identically_in_obs_and_graphical_sections(tmp_path):
     value = context()
     value["profile_path"] = str(tmp_path / "state.json")
+    value["personal"]["names"] = "Alex"
+    value["team"]["member_totals"] = [("Alex", 5), ("Sam", 4)]
     (tmp_path / "overlay_context.json").write_text(json.dumps(value), encoding="utf-8")
-    expected = overlay_layout.format_text(display(), overlay_layout.render_sections(display(), value))
-    counter.write_obs_files(value["state"], tmp_path, display(), state_path=value["profile_path"])
+    state = {**value["state"], "approximate": 7}
+    advanced = overlay_layout.reconcile_context(value, state)
+    sections = overlay_layout.render_sections(display(), advanced)
+    assert sections[1].splitlines()[:3] == ["Chests · 11", "Alex · 7", "Sam · 4"]
+    styled = overlay_layout.render_sections(display(), advanced, styled=True)
+    assert styled[1].startswith("<b>Chests · 11</b><br>Alex · 7<br>Sam · 4")
+    expected = overlay_layout.format_text(display(), sections)
+    counter.write_obs_files(state, tmp_path, display(), state_path=value["profile_path"])
     assert (tmp_path / "chest_counter.txt").read_text(encoding="utf-8") == expected + "\n"
-    assert (tmp_path / "approximate_chests.txt").read_text().endswith("5\n")
+    assert (tmp_path / "approximate_chests.txt").read_text().endswith("7\n")
 
 
 def test_worker_delta_updates_each_section_once_with_personal_boost():
@@ -90,9 +98,9 @@ def test_templates_respect_scope_and_optional_token_controls():
     value = context()
     value["team"] = None
     options = display()
-    options.update(screen_personal_template="{total} chests\nChance {chance}\nGames {matches}\n{types}\n{name_unknown}",
+    options.update(screen_personal_template="**{total}** chests\n\nChance {chance}\nGames {matches}\n{types}\n{name_unknown}",
                    screen_cumulative_enabled=False, screen_show_token=False, screen_show_matches=False, screen_show_types=False)
-    assert overlay_layout.render_sections(options, value) == ("5 chests\n{name_unknown}", "", "")
+    assert overlay_layout.render_sections(options, value) == ("5 chests\n\n{name_unknown}", "", "")
 
 
 def test_wrong_profile_or_invalid_context_falls_back_to_legacy_obs_output(tmp_path):

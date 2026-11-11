@@ -25,6 +25,7 @@ Each on-screen section has its own heading and multiline content editor. You can
 | `{chance}` | Estimated Pirate Token percentage. |
 | `{players}` | Submitted players in the verified team. |
 | `{names}` | Names of the submitted players. |
+| `{member_totals}` | One line per team member with their chest count for the current match. |
 | `{matches}` | Match count for the cumulative section. |
 | `{types}` | Available chest-type breakdown. |
 
@@ -35,7 +36,9 @@ For example, an All matches heading can use the content below.
 Pirate Token · {chance}
 ```
 
-The Personal section shows your live counter. The Team section appears when a teammate has contributed to the same verified session. The All matches section combines the known history and current counter. Use the preview to check the text before applying it. Applying the templates refreshes both the floating overlay and `chest_counter.txt`.
+The Personal section shows your live counter. The Team section appears when a teammate has contributed to the same verified session. Its default template shows **Chests** first, followed by each member’s count and then the Pirate Token odds. The All matches section combines the known history and current counter. Use the preview to check the text before applying it. Applying the templates refreshes both the floating overlay and `chest_counter.txt`.
+
+Use `**…**` around any part of a template to make it bold in the floating overlay and preview. For example, `Chests · **{total}**` bolds only the number. Leave a blank line between statistics to add vertical space. OBS receives the same text and spacing as plain text.
 
 The cumulative estimate preserves the boost used in each match. For `nᵢ` chests at per-chest probability `pᵢ`, it uses `1 − ∏(1 − pᵢ)ⁿᵢ`. Solo matches use your personal counts. Verified shared sessions use received team counts once, including your own contribution. A delayed result updates that session's total.
 

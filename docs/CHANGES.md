@@ -5,6 +5,10 @@ changes; the pull request links here. Versioned release notes describe published
 
 ## Changes
 
+- Start each overlay section with its chest total, followed by details and Pirate Token odds. The Team section
+  includes each member’s count through `{member_totals}`. Section templates support inline `**bold**` in the
+  graphical overlay and blank lines in both the graphical and OBS outputs. Previous default templates upgrade automatically.
+
 - Add French HUD detection and multi-frame classification for normal, Rare and Sprite chests. Deduplicate
   overlapping readings and retain an unknown type for ambiguous openings.
 - Follow French qualified lines when notifications reflow around ammo/upgrade messages. Keep the XP gate and three

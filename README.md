@@ -55,7 +55,7 @@ The tray menu opens the window or quits the app. Closing the window can keep cou
 | **Team** | Submitted openings from players in the same verified session. It appears when a teammate has contributed. |
 | **All matches** | Your saved matches and the current counter, with their match count and each matching shared session counted once. |
 
-The chest illustration changes with the detected type. Give each Personal, Team and All matches section its own heading and multiline template, including cumulative match count. Configure transparency and screen-share visibility, then preview the same overlay in the app. You can also display token odds, chest types and your saved match count.
+The chest illustration changes with the detected type. Give each Personal, Team and All matches section its own heading and multiline template, including cumulative match count. Configure transparency and screen-share visibility, then preview the same overlay in the app. Each section starts with its chest total. Team member counts follow the team total. Wrap any text or placeholder in `**` for bold in the on-screen overlay and add blank lines to space out the statistics. You can also display token odds, chest types and your saved match count.
 
 OBS can read `obs_output\chest_counter.txt` with **Text (GDI+)**, or receive direct updates through OBS WebSocket. The app writes the same enabled custom sections to that file and the floating overlay. Separate legacy CLI output files retain their original count conventions. See the [overlay guide](docs/guides/obs-overlay.md).
 

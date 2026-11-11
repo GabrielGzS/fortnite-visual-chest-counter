@@ -1,6 +1,8 @@
 """Render the shared on-screen and OBS sections from one validated context."""
 
+from html import escape
 import math
+import re
 
 from fortnite_chest_counter import settings
 from fortnite_chest_counter.detection import chest_types
@@ -27,7 +29,17 @@ def _summary(value):
     log_no_drop = value.get("log_no_drop")
     if type(log_no_drop) not in (int, float) or not math.isfinite(log_no_drop) or log_no_drop > 0:
         log_no_drop = total * math.log1p(-boost / RATE)
+    rows = value.get("member_totals")
+    member_totals = []
+    if isinstance(rows, (list, tuple)):
+        for row in rows:
+            if not isinstance(row, (list, tuple)) or len(row) != 2:
+                continue
+            name, count = row
+            if isinstance(name, str) and name.strip():
+                member_totals.append((" ".join(name.splitlines()).strip(), _count(count)))
     return {
+        "member_totals": tuple(member_totals),
         "certain": certain, "total": total, "log_no_drop": float(log_no_drop), "boost": boost,
         "matches": _count(value.get("matches")), "players": _count(value.get("players")),
         "names": value.get("names") if isinstance(value.get("names"), str) else "",
@@ -40,7 +52,7 @@ def _personal(state, *, boost=1.0, active=False):
     total = max(_count(state.get("approximate")), _count(state.get("certain")))
     return {"certain": _count(state.get("certain")), "total": total,
             "log_no_drop": total * math.log1p(-boost / RATE), "boost": boost,
-            "matches": int(bool(total or active)), "players": 1, "names": "", "types": ""}
+            "matches": int(bool(total or active)), "players": 1, "names": "", "types": "", "member_totals": ()}
 
 
 def valid_context(value):
@@ -80,6 +92,10 @@ def reconcile_context(context, state):
             summary["total"] = max(0, summary["total"] + total_delta)
             summary["certain"] = min(summary["total"], max(0, summary["certain"] + certain_delta))
             summary["log_no_drop"] = min(0.0, summary["log_no_drop"] + total_delta * rate)
+        if team is not None:
+            own = personal["names"].strip().casefold()
+            team["member_totals"] = tuple((name, total if name.casefold() == own else count)
+                                          for name, count in team["member_totals"])
         previous_matches = personal["matches"]
         personal["matches"] = max(previous_matches, int(total > 0 or context.get("active") is True))
         cumulative["matches"] += personal["matches"] - previous_matches
@@ -121,8 +137,8 @@ def _types_text(state, thousands):
     return "Chest types · " + (" · ".join(kinds) or "no chests yet")
 
 
-def render_sections(display, context):
-    """Return personal, team and cumulative text using the same templates for every output."""
+def render_sections(display, context, *, styled=False):
+    """Render templates as plain text, or as escaped rich text for the Qt overlay."""
     context = context if isinstance(context, dict) else {}
     state = context.get("state") if isinstance(context.get("state"), dict) else {}
     personal = _summary(context.get("personal")) or _personal(state)
@@ -149,15 +165,24 @@ def render_sections(display, context):
                 values["types"] = current_types
         template = display.get(f"screen_{scope}_template", settings.DEFAULTS["display"][f"screen_{scope}_template"])
         template = template if isinstance(template, str) else ""
+        values["member_totals"] = "\n".join(
+            f"{name} · {settings.format_count(count, thousands)}" for name, count in summary["member_totals"])
         lines = []
         for line in template.replace("\\n", "\n").splitlines():
-            if any("{" + token + "}" in line for token in hidden) or "{types}" in line and not values["types"]:
+            if any("{" + token + "}" in line for token in hidden) or any("{" + token + "}" in line and not values[token]
+                           for token in ("types", "member_totals")):
                 continue
-            for key, value in values.items():
-                line = line.replace("{" + key + "}", value)
-            if line.strip():
-                lines.append(line)
-        rendered.append("\n".join(lines))
+            parts = re.split(r"\*\*(.+?)\*\*", line)
+            for index, part in enumerate(parts):
+                part = re.sub(r"\{(\w+)\}", lambda match: values.get(match[1], match[0]), part)
+                if styled:
+                    part = re.sub(r" {2,}", lambda match: "&nbsp;" * len(match[0]), escape(part))
+                    if index % 2:
+                        part = f"<b>{part}</b>"
+                parts[index] = part
+            lines.append("".join(parts).rstrip())
+        text = "\n".join(lines).strip()
+        rendered.append(text.replace("\n", "<br>") if styled else text)
     return tuple(rendered)
 
 

@@ -14,6 +14,7 @@ class Summary:
     log_no_drop: float = 0.0
     players: tuple[str, ...] = ()
     matches: int = 0
+    member_totals: tuple[tuple[str, int], ...] = ()
 
     @property
     def chance(self):
@@ -46,7 +47,9 @@ def team(session, player, *, current=None):
             result += personal(member.certain, member.total, member.boost)
     if current is not None:
         result += personal(*current)
-    return Summary(result.certain, result.total, result.log_no_drop, tuple(names.values()), 1)
+    member_totals = tuple((name, current[1] if key == own and current is not None else members[key].total)
+                          for key, name in names.items())
+    return Summary(result.certain, result.total, result.log_no_drop, tuple(names.values()), 1, member_totals)
 
 
 def saved_team(match, sessions, webhook_id):

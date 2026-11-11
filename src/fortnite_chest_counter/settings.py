@@ -18,6 +18,13 @@ from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
 
+LEGACY_SECTION_TEMPLATES = {
+    "personal": ("Chests · {total}\nConfirmed · {certain}    Estimated · {approx}\nPirate Token · {chance}\n{types}",),
+    "team": ("{member_totals}\nChests · {total}\nPirate Token · {chance}",
+             "Chests · {total}    Players · {players}\nPirate Token · {chance}"),
+    "cumulative": ("Chests · {total}\nMatches · {matches}\nPirate Token · {chance}",),
+}
+
 DEFAULTS = {
     "detector": {
         "process_fps": 15,                      # detector cadence; 15 is what the detectors were developed at
@@ -48,9 +55,9 @@ DEFAULTS = {
         "screen_personal_title": "PERSONAL · CURRENT MATCH",
         "screen_team_title": "TEAM · CURRENT MATCH",
         "screen_cumulative_title": "ALL MATCHES",
-        "screen_personal_template": "Chests · {total}\nConfirmed · {certain}    Estimated · {approx}\nPirate Token · {chance}\n{types}",
-        "screen_team_template": "Chests · {total}    Players · {players}\nPirate Token · {chance}",
-        "screen_cumulative_template": "Chests · {total}\nMatches · {matches}\nPirate Token · {chance}",
+        "screen_personal_template": "**Chests · {total}**\nConfirmed · {certain}    Estimated · {approx}\n{types}\nPirate Token · {chance}",
+        "screen_team_template": "**Chests · {total}**\n{member_totals}\nPirate Token · {chance}",
+        "screen_cumulative_template": "**Chests · {total}**\nMatches · {matches}\nPirate Token · {chance}",
         "screen_team_text": "Team · # chests · {chance}",
         "screen_cumulative_text": "All matches · # chests · {chance}",
         # v0.1.0 names, still understood: a config that sets only these gets "<label>: {count}" as its text.
@@ -351,4 +358,8 @@ def load_config(path=None, overrides=None):
             cfg[section][key] = value
         else:
             warnings.append(f"command line: {key} = {value!r} {problem}; keeping {cfg[section][key]!r}")
+    for scope, previous in LEGACY_SECTION_TEMPLATES.items():
+        key = f"screen_{scope}_template"
+        if cfg["display"][key].replace("\\n", "\n") in previous:
+            cfg["display"][key] = DEFAULTS["display"][key]
     return cfg, origin, warnings

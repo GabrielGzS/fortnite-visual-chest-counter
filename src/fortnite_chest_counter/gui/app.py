@@ -26,7 +26,7 @@ from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QEasingCurve, QPoint, QRect, QRectF, QSize, Qt, Signal, QTimer, QUrl, QUrlQuery, QVariantAnimation
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPalette, QPixmap, QRegion
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPalette, QPixmap, QRegion
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
                                QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QMenu, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
@@ -632,25 +632,31 @@ class ScreenOverlayCard(QFrame):
         self.caption = self.sections[0][1]
         layout.addLayout(content, 1)
 
-    def set_text(self, text, *, sections=None, titles=None):
+    def set_text(self, text, *, sections=None, titles=None, styled_sections=None):
         if titles is not None:
             for heading, title in zip(self.headings, titles):
                 heading.setText(title)
         parts = tuple(sections) if sections is not None else (text, "", "")
-        if text == self.plain_text and parts == getattr(self, "_parts", None):
-            return
+        presentation = tuple(styled_sections) if styled_sections is not None else parts
+        if text == self.plain_text and (parts, presentation) == getattr(self, "_parts", None):
+            return False
         self.plain_text = text
-        self._parts = parts
-        for (group, value), part in zip(self.sections, parts):
+        self._parts = (parts, presentation)
+        for (group, value), part, shown in zip(self.sections, parts, presentation):
             group.setVisible(bool(part))
-            value.setText(part)
+            value.setTextFormat(Qt.RichText if styled_sections is not None else Qt.PlainText)
+            value.setText(shown)
             if self._floating:
                 value.ensurePolished()
-                metrics = value.fontMetrics()
+                font = value.font()
+                if styled_sections is not None and "<b>" in shown:
+                    font.setBold(True)
+                metrics = QFontMetrics(font)
                 width = max((metrics.horizontalAdvance(line) for line in part.splitlines()), default=0) + 4
                 limit = value.maximumWidth()
                 value.setWordWrap(width > limit)
                 value.setMinimumWidth(min(limit, width))
+        return True
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1609,7 +1615,7 @@ class Dashboard(QWidget):
                 return None
             return {"certain": value.certain, "total": value.total, "log_no_drop": value.log_no_drop,
                     "boost": boost, "matches": value.matches, "players": len(value.players),
-                    "names": " · ".join(value.players), "types": ""}
+                    "names": " · ".join(value.players), "types": "", "member_totals": value.member_totals}
         own = summary(personal)
         own.update(players=1, names=cfg["app"]["group_player"], types=f"Chest types · {self.types.text()}")
         try:
@@ -1659,10 +1665,11 @@ class Dashboard(QWidget):
             return
         context = self.overlay_context()
         sections = overlay_layout.render_sections(self.screen_overlay_display, context)
+        styled = overlay_layout.render_sections(self.screen_overlay_display, context, styled=True)
         text = overlay_layout.format_text(self.screen_overlay_display, sections)
         self.write_overlay_context(self.screen_overlay_display, context)
         titles = tuple(self.screen_overlay_display[f"screen_{scope}_title"] for scope in ("personal", "team", "cumulative"))
-        self.overlay_preview.set_text(text, sections=sections, titles=titles)
+        self.overlay_preview.set_text(text, sections=sections, titles=titles, styled_sections=styled)
         if self.screen_overlay is None or not page.show_screen_overlay.isChecked():
             return
         if not text:
@@ -1671,8 +1678,7 @@ class Dashboard(QWidget):
         self.screen_overlay.setWindowOpacity(self.screen_overlay_display["screen_opacity"] / 100)
         if not self.screen_overlay.isVisible():
             self.screen_overlay.show()
-        if text != self.screen_overlay.plain_text:
-            self.screen_overlay.set_text(text, sections=sections, titles=titles)
+        if self.screen_overlay.set_text(text, sections=sections, titles=titles, styled_sections=styled):
             self.screen_overlay.adjustSize()
             self.position_screen_overlay()
 
@@ -1752,7 +1758,9 @@ class OverlayPage(QWidget):
         layout.addWidget(box)
 
         box, box_layout = card("Custom sections for screen and OBS", "Edit each section independently. Use {total}, {certain}, {approx}, "
-                               "{chance}, {matches}, {players}, {names} and {types}. Team appears only for a verified shared match.")
+                               "{chance}, {matches}, {players}, {names}, {member_totals} and {types}. "
+                               "Wrap text in ** to make it bold. Leave a blank line to separate stats. "
+                               "Team appears only for a verified shared match.")
         self.section_enabled = {}
         self.section_titles = {}
         self.section_templates = {}
@@ -2009,11 +2017,12 @@ class OverlayPage(QWidget):
 
     def refresh_preview(self):
         display = {**self.display, **self.changes()}
-        render = self.win.dashboard.screen_overlay_text
-        preview_text = render(display)
+        context = self.win.dashboard.overlay_context()
+        sections = overlay_layout.render_sections(display, context)
+        styled = overlay_layout.render_sections(display, context, styled=True)
         self.preview_opacity.setOpacity(display["screen_opacity"] / 100)
-        self.preview.set_text(preview_text, sections=self.win.dashboard.screen_overlay_sections(display),
-                              titles=tuple(display[f"screen_{scope}_title"] for scope in ("personal", "team", "cumulative")))
+        self.preview.set_text(overlay_layout.format_text(display, sections), sections=sections, styled_sections=styled,
+                              titles=tuple(display[f"screen_{scope}_title"] for scope in overlay_layout.SCOPES))
     def _defaults(self):
         d = settings.DEFAULTS["display"]
         for scope in self.section_enabled:
