@@ -12,6 +12,7 @@ config.toml / state file as the command line, so the two always agree.
 import ctypes
 import json
 import os
+import queue
 import sys
 import threading
 import time
@@ -24,13 +25,13 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-                               QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+                               QFrame, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
-                               QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QVBoxLayout, QWidget)
+                               QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
-from fortnite_chest_counter import paths, profiles, settings
+from fortnite_chest_counter import match_analytics, paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -1682,6 +1683,174 @@ class SettingsPage(QWidget):
         open_path(path)
 
 
+QUALITY_LOOK = {"complete": ("Complete", theme.CERTAIN), "partial": ("Partial", theme.APPROX), "unconfirmed": ("Unconfirmed", theme.MUTED)}
+
+
+def rate_tile(tile, rate, label_text, missing):
+    if rate is None:
+        tile.set_value(None, missing)
+    else:
+        tile.set_value(f"{rate.certain_per_minute:.2f} / {rate.approx_per_minute:.2f}", f"CERTAIN / APPROX per minute · {label_text(rate)}")
+
+
+def plural(count, word):
+    return f"{fmt(count)} {word}{'' if count == 1 else 'es' if word.endswith('ch') else 's'}"
+
+
+def analytics_notes(summary):
+    """Plain sentences for whatever a reader needs to know before trusting the numbers."""
+    notes = []
+    if summary.unfinished:
+        notes.append(f"{plural(summary.unfinished, 'match')} not finished yet, so not counted.")
+    if summary.excluded:
+        notes.append(f"{plural(summary.excluded, 'match')} marked as not a match, left out of every statistic.")
+    if summary.matches_left_out_of_rates:
+        notes.append(f"{plural(summary.matches_left_out_of_rates, 'match')} left out of the chest rates: history lost chests during them, or their play time is unknown.")
+    if summary.missing_approx or summary.missing_certain:
+        notes.append(f"History is missing {fmt(summary.missing_approx)} chests that your totals include ({fmt(summary.missing_certain)} CERTAIN).")
+    if summary.damaged_rows:
+        notes.append(f"{plural(summary.damaged_rows, 'damaged row')} skipped.")
+    if summary.newer_rows:
+        notes.append(f"{plural(summary.newer_rows, 'row')} from a newer version skipped.")
+    return "   ".join(notes)
+
+
+class AnalyticsPage(QWidget):
+    """What the recorded matches show. Read-only, and worked out away from this window's thread so a huge history cannot freeze it."""
+
+    COLUMNS = ("Started", "Duration", "CERTAIN", "APPROX", "Quality", "Ending")
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        layout = page_layout(self, "Analytics", "What your recorded matches show, from match history only. The numbers on the Dashboard stay your official totals.")
+        row = QHBoxLayout()
+        self.profile_line = label("", "hint")
+        row.addWidget(self.profile_line)
+        self.status = label("", "hint")
+        row.addWidget(self.status, 1)
+        self.refresh_button = button("Refresh", tip="Read the match history again", on_click=self.refresh)
+        row.addWidget(self.refresh_button)
+        layout.addLayout(row)
+        self.empty, empty_layout = card("No matches recorded yet")
+        self.empty_hint = label("", "hint", wrap=True)
+        empty_layout.addWidget(self.empty_hint)
+        erow = QHBoxLayout()
+        self.empty_settings = button("Open Settings", "link", on_click=lambda: win.show_page(win.settings_page))
+        erow.addWidget(self.empty_settings)
+        erow.addStretch(1)
+        empty_layout.addLayout(erow)
+        self.empty.hide()
+        layout.addWidget(self.empty)
+
+        self.matches = StatTile("MATCHES")
+        self.observed = StatTile("OBSERVED MATCH TIME", "On screen, complete and partial matches")
+        self.confirmed = StatTile("CONFIRMED PLAY", "Alive on the map, complete matches only")
+        self.session = StatTile("TIME COUNTING")
+        self.certain = StatTile("CERTAIN CHESTS", "In recorded history")
+        self.approx = StatTile("APPROX CHESTS", "In recorded history, includes CERTAIN")
+        self.per_match = StatTile("PER COMPLETE MATCH")
+        self.complete_rate = StatTile("COMPLETE-MATCH RATE")
+        self.observed_rate = StatTile("OBSERVED RATE")
+        for tiles in ((self.matches, self.observed, self.confirmed, self.session), (self.certain, self.approx, self.per_match), (self.complete_rate, self.observed_rate)):
+            line = QHBoxLayout()
+            line.setSpacing(12)
+            for tile in tiles:
+                line.addWidget(tile, 1)
+            layout.addLayout(line)
+        self.notes = label("", "hint", wrap=True)
+        layout.addWidget(self.notes)
+        self.recent_title = label("Recent matches", "cardTitle")
+        layout.addWidget(self.recent_title)
+        self.table = QTableWidget(0, len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.table.verticalHeader().hide()
+        self.table.setShowGrid(False)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.table.setFocusPolicy(Qt.NoFocus)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setMinimumHeight(170)
+        layout.addWidget(self.table, 1)
+
+        self._generation = 0
+        self._done = queue.SimpleQueue()
+        self._thread = None
+        self._collector = QTimer(self)
+        self._collector.timeout.connect(self._collect)
+
+    def refresh(self):
+        cfg, _ = load_cfg()
+        profile = cfg["profile"]
+        self.profile_line.setText(f"Profile: {profile['name']}")
+        self.status.setText("Reading your match history...")
+        self._generation += 1
+        folder = paths.APP_DIR / profiles.history_folder(profile["state_base"], profile["id"])
+        self._thread = threading.Thread(target=self._read, args=(self._generation, folder), daemon=True, name="analytics")
+        self._thread.start()
+        self._collector.start(40)
+
+    def _read(self, generation, folder):
+        try:
+            self._done.put((generation, match_analytics.load(folder)))
+        except Exception as error:
+            self._done.put((generation, error))
+
+    def _collect(self):
+        while True:
+            try:
+                generation, result = self._done.get_nowait()
+            except queue.Empty:
+                return
+            if generation != self._generation:                # an older request: a newer one, or another profile, replaced it
+                continue
+            self._collector.stop()
+            if isinstance(result, Exception):
+                self.status.setText(f"The match history could not be read ({result}). Your counts are not affected.")
+            else:
+                self.status.setText("")
+                self.show_summary(result)
+
+    def show_summary(self, s):
+        duration = match_analytics.duration_text
+        self.empty.setVisible(s.empty)
+        self.recent_title.setVisible(not s.empty)
+        self.table.setVisible(not s.empty)
+        if s.empty:
+            tracking = load_cfg()[0]["match"]["mode"] == "on"
+            self.empty_hint.setText("Matches appear here after you count with match tracking on." if tracking else
+                                    "Turn on match tracking in Settings, then count a game. Your matches and statistics will appear here.")
+            self.empty_settings.setVisible(not tracking)
+        self.matches.set_value(fmt(s.matches), f"{fmt(s.complete)} complete · {fmt(s.partial)} partial · {fmt(s.unconfirmed)} unconfirmed")
+        self.observed.set_value(duration(s.observed_seconds))
+        self.confirmed.set_value(duration(s.confirmed_seconds))
+        known = duration(s.session_seconds)
+        self.session.set_value(known, ("At least: " if s.sessions_cut_short and known else "") + plural(s.sessions, "session") + ", in or out of matches")
+        self.certain.set_value(fmt(s.certain_chests) if not s.empty else None)
+        self.approx.set_value(fmt(s.approx_chests) if not s.empty else None)
+        per = s.per_complete_match
+        self.per_match.set_value(f"{per.certain:.1f} / {per.approx:.1f}" if per else None, f"CERTAIN / APPROX chests · {plural(per.matches, 'match')}" if per else "Not enough complete match data")
+        rate_tile(self.complete_rate, s.complete_rate, lambda r: plural(r.matches, "complete match"), "Not enough complete match data")
+        rate_tile(self.observed_rate, s.observed_rate, lambda r: f"over {duration(r.minutes * 60)} seen, partial matches included. Not comparable with the complete-match rate",
+                  f"Needs at least {match_analytics.MIN_OBSERVED_RATE_SECONDS // 60} minutes of confirmed play")
+        self.notes.setText(analytics_notes(s))
+        self.notes.setVisible(bool(self.notes.text()))
+        self.table.setRowCount(len(s.recent))
+        for row, match in enumerate(s.recent):
+            seen = duration(match.duration_seconds)
+            more = "+" if match.chests_may_be_missing else ""
+            quality, color = QUALITY_LOOK[match.quality]
+            cells = (match.started_at.strftime("%b %d, %H:%M") if match.started_at else UNKNOWN_VALUE,
+                     UNKNOWN_VALUE if seen is None else seen if match.duration_is_full else f"{seen} seen",
+                     f"{fmt(match.certain)}{more}", f"{fmt(match.approx)}{more}", quality + (" (interrupted)" if match.interrupted else ""), match.ending)
+            for column, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                if column == 4:
+                    item.setForeground(QColor(color))
+                self.table.setItem(row, column, item)
+
+
 class HelpPage(QWidget):
     def __init__(self, win):
         super().__init__()
@@ -1931,10 +2100,11 @@ class MainWindow(QMainWindow):
         outer.addWidget(self._sidebar())
         self.pages = QStackedWidget()
         self.dashboard = Dashboard(self)
+        self.analytics = AnalyticsPage(self)
         self.overlay = OverlayPage(self)
         self.settings_page = SettingsPage(self)
         self.help = HelpPage(self)
-        for page in (self.dashboard, self.overlay, self.settings_page, self.help):
+        for page in (self.dashboard, self.analytics, self.overlay, self.settings_page, self.help):
             self.pages.addWidget(page)
         outer.addWidget(self.pages, 1)
         self.setCentralWidget(root)
@@ -1983,7 +2153,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(brand)
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
-        for name in ("Dashboard", "Overlay", "Settings", "Help & diagnostics"):
+        for name in ("Dashboard", "Analytics", "Overlay", "Settings", "Help & diagnostics"):
             QListWidgetItem(name, self.nav)
         self.nav.setCurrentRow(0)
         self.nav.currentRowChanged.connect(self._page_changed)
@@ -2009,6 +2179,8 @@ class MainWindow(QMainWindow):
             self.overlay.load()
         elif page is self.settings_page:
             self.settings_page.load()
+        elif page is self.analytics:
+            self.analytics.refresh()
 
     # ---- sources
     def refresh_sources(self):
@@ -2582,6 +2754,8 @@ class MainWindow(QMainWindow):
                 self.error_seen = True
             self.set_mode("error" if self.error_seen else "stopped")
             self.read_state(force=True)
+            if self.pages.currentWidget() is self.analytics:
+                self.analytics.refresh()                # this session's matches have just been saved
             if self._install_pending:
                 if code in (0, None):                  # stopped and saved normally
                     self._install_pending = False

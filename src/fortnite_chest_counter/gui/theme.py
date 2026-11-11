@@ -91,6 +91,10 @@ QProgressBar {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radi
                 color: {TEXT}; font-size: 8.5pt; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 5px; }}
 
+QTableWidget {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 8px; gridline-color: transparent; outline: none; }}
+QTableWidget::item {{ padding: 4px 8px; border: none; }}
+QHeaderView::section {{ background: {SURFACE}; color: {MUTED}; border: none; border-bottom: 1px solid {BORDER}; padding: 6px 8px; font-size: 9pt; font-weight: 600; }}
+
 QScrollArea {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
 QScrollBar::handle:vertical {{ background: {SURFACE_3}; border-radius: 4px; min-height: 30px; }}

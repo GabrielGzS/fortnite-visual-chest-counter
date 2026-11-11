@@ -1,0 +1,212 @@
+"""
+Descriptive statistics from match history (v0.3.0, M8). Pure: it takes what match_history.read returned and gives back numbers. It writes nothing,
+and history never replaces the counter's totals, which stay the official numbers.
+
+What it will not do:
+  * Invent a value. Anything unknown is None, which the app shows as a dash; zero always means a real zero.
+  * Average what cannot be compared. Complete, partial and unconfirmed matches are counted apart, and unconfirmed ones stay out of every statistic.
+  * Mix the two chest rates. The complete rate uses complete matches only and is the comparable figure. The observed rate also includes partial
+    matches, measures only what was seen, and needs enough play to mean anything.
+  * Use a match whose history lost chests in either rate: its count would be too low.
+  * Add CERTAIN to APPROX. APPROX is the total and already includes CERTAIN.
+  * Claim an outcome. An ending is reported only as it was observed; placement numbers are not read.
+
+Rates are total chests divided by total active minutes, not an average of per-match rates, so a short match cannot outweigh a long one.
+Which chests belong to which match comes from match_history.attribute: only chests during active play are credited.
+"""
+
+import math
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+
+from fortnite_chest_counter import match_history as H
+
+COMPLETE, PARTIAL, UNCONFIRMED = "complete", "partial", "unconfirmed"
+QUALITIES = (COMPLETE, PARTIAL, UNCONFIRMED)
+MIN_OBSERVED_RATE_SECONDS = 300            # under five minutes of play, a chest more or less would swing the rate wildly
+RECENT_MATCHES = 25
+READ_KINDS = H.MATCH_KINDS | {"transition", "counter_change", "chest", "chest_type"}      # everything but the heartbeats, which are most of the file
+ENDINGS = {"placed": "Placed", "victory": "Victory Royale", "left_or_unknown": "Left or not seen", "stopped": "Counting stopped", "lost": "Video lost",
+           "discontinuity": "Video jumped", H.INTERRUPTED: "App closed unexpectedly"}
+
+
+@dataclass
+class Rate:
+    certain_per_minute: float
+    approx_per_minute: float
+    matches: int
+    minutes: float
+
+
+@dataclass
+class PerMatch:
+    certain: float
+    approx: float
+    matches: int
+
+
+@dataclass
+class RecentMatch:
+    started_at: object                     # a datetime, or None when the run's start is not known
+    duration_seconds: object
+    duration_is_full: bool                 # True: the whole match, start to ending. False: only what was seen of it
+    certain: int
+    approx: int
+    chests_may_be_missing: bool
+    quality: str
+    interrupted: bool
+    ending: str
+
+
+@dataclass
+class Summary:
+    complete: int = 0
+    partial: int = 0
+    unconfirmed: int = 0
+    excluded: int = 0                      # marked "Not a match"
+    unfinished: int = 0                    # opened and never closed, so not counted yet
+    observed_seconds: object = None        # complete and partial matches: on screen, from first evidence to the close
+    confirmed_seconds: object = None       # complete matches: alive on the map
+    unconfirmed_seconds: object = None     # left out of observed_seconds
+    session_seconds: object = None         # time spent counting, in or out of matches
+    sessions: int = 0
+    sessions_cut_short: int = 0            # their time is only known up to the last checkpoint
+    certain_chests: int = 0                # every chest in history, credited or not
+    approx_chests: int = 0
+    credited_certain: int = 0              # during active play in complete and partial matches
+    credited_approx: int = 0
+    per_complete_match: object = None
+    complete_rate: object = None
+    observed_rate: object = None
+    matches_left_out_of_rates: int = 0     # history lost chests during them, or no active time is known
+    missing_certain: int = 0               # gap rows: chests the totals have and history does not
+    missing_approx: int = 0
+    damaged_rows: int = 0
+    newer_rows: int = 0
+    recent: list = field(default_factory=list)
+
+    @property
+    def matches(self):
+        return self.complete + self.partial + self.unconfirmed
+
+    @property
+    def empty(self):
+        return not (self.matches or self.sessions or self.certain_chests or self.approx_chests)
+
+
+def _number(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
+
+
+def _usable(match):
+    return (match.get("completion") in QUALITIES and all(_number(match.get(key)) is not None for key in ("opened_t", "played_from_t", "closed_t"))
+            and (match.get("ended_t") is None or _number(match.get("ended_t")) is not None))
+
+
+def _total(rows, key):
+    """A sum, or None when there is nothing known to add: no value is not the same as zero."""
+    values = [_number(row.get(key)) for row in rows]
+    known = [value for value in values if value is not None and value >= 0]
+    return sum(known) if known else None
+
+
+def _started_at(run, match):
+    try:
+        return datetime.fromisoformat(run["start"]["at"]) + timedelta(seconds=match["opened_t"])
+    except (TypeError, KeyError, ValueError, OverflowError):
+        return None
+
+
+def _rate(matches, credited, enough_seconds=0):
+    """Total chests over total active minutes, or None when no match qualifies or there is too little play."""
+    seconds = sum(match["active_seconds"] for match in matches)
+    if not matches or seconds <= 0 or seconds < enough_seconds:
+        return None
+    minutes = seconds / 60
+    keys = [(match["run_id"], match["match_number"]) for match in matches]
+    return Rate(sum(credited[key][0] for key in keys) / minutes, sum(credited[key][1] for key in keys) / minutes, len(matches), minutes)
+
+
+def summarize(history, recent=RECENT_MATCHES):
+    usable = [match for match in history.matches if _usable(match)]
+    chests = [chest for chest in history.chests if _number(chest.get("t")) is not None]
+    transitions = [row for row in history.transitions if _number(row.get("t")) is not None and "state" in row and "match_number" in row]
+    summary = Summary(unfinished=len(history.open_matches), newer_rows=history.newer_rows,
+                      damaged_rows=history.bad_lines + len(history.matches) - len(usable) + len(history.chests) - len(chests) + len(history.transitions) - len(transitions))
+
+    credited = {(match["run_id"], match["match_number"]): [0, 0] for match in usable}
+    for chest in H.attribute(H.History(matches=usable, chests=chests, transitions=transitions)):
+        certain, approx = bool(chest.get("certain_counted")), bool(chest.get("approx_counted") or chest.get("certain_counted"))
+        summary.certain_chests += certain
+        summary.approx_chests += approx
+        if chest["credited"]:
+            totals = credited[chest["run_id"], chest["match_number"]]
+            totals[0] += certain
+            totals[1] += approx
+
+    kept = [match for match in usable if not match["not_a_match"]]
+    summary.excluded = len(usable) - len(kept)
+    complete = [match for match in kept if match["completion"] == COMPLETE]
+    partial = [match for match in kept if match["completion"] == PARTIAL]
+    unconfirmed = [match for match in kept if match["completion"] == UNCONFIRMED]
+    summary.complete, summary.partial, summary.unconfirmed = len(complete), len(partial), len(unconfirmed)
+    summary.observed_seconds = _total(complete + partial, "observed_seconds")
+    summary.confirmed_seconds = _total(complete, "active_seconds")
+    summary.unconfirmed_seconds = _total(unconfirmed, "observed_seconds")
+
+    for match in complete + partial:
+        totals = credited[match["run_id"], match["match_number"]]
+        summary.credited_certain += totals[0]
+        summary.credited_approx += totals[1]
+
+    def rate_ready(match):
+        active = _number(match.get("active_seconds"))
+        return active is not None and active > 0 and not match["history_incomplete"]
+
+    complete_ready, seen_ready = [m for m in complete if rate_ready(m)], [m for m in complete + partial if rate_ready(m)]
+    summary.matches_left_out_of_rates = len(complete + partial) - len(seen_ready)
+    summary.complete_rate = _rate(complete_ready, credited)
+    summary.observed_rate = _rate(seen_ready, credited, MIN_OBSERVED_RATE_SECONDS)
+    if complete_ready:
+        keys = [(match["run_id"], match["match_number"]) for match in complete_ready]
+        summary.per_complete_match = PerMatch(sum(credited[key][0] for key in keys) / len(keys), sum(credited[key][1] for key in keys) / len(keys), len(keys))
+
+    known_sessions = []
+    for run in history.runs.values():
+        if run["start"] is None:
+            continue
+        summary.sessions += 1
+        end = run["end"] or {}
+        seconds = _number(end.get("elapsed_seconds"))
+        if seconds is None:
+            summary.sessions_cut_short += 1
+            seconds = _number(end.get("t"))
+        if seconds is not None and seconds >= 0:
+            known_sessions.append(seconds)
+    summary.session_seconds = sum(known_sessions) if known_sessions else None
+
+    for gap in history.gaps:
+        summary.missing_certain += max(_number(gap.get("missing_certain")) or 0, 0)
+        summary.missing_approx += max(_number(gap.get("missing_approximate")) or 0, 0)
+
+    for match in reversed(kept[-recent:]):
+        run = history.runs.get(match["run_id"]) or {"start": None}
+        full = match["completion"] == COMPLETE and _number(match.get("complete_duration_seconds")) is not None
+        totals = credited[match["run_id"], match["match_number"]]
+        summary.recent.append(RecentMatch(_started_at(run, match), _number(match.get("complete_duration_seconds" if full else "observed_seconds")), full, totals[0], totals[1],
+                                          bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ENDINGS.get(match.get("ended_by"), "Not seen")))
+    return summary
+
+
+def load(folder):
+    """The summary of one profile's history. Slow on a very large history, so the app calls it off its window's thread."""
+    return summarize(H.read(folder, only=READ_KINDS))
+
+
+def duration_text(seconds):
+    """"7h 42m", "12m 30s", "45s", or a dash for an unknown time."""
+    if _number(seconds) is None or seconds < 0:
+        return None
+    seconds = int(seconds)
+    hours, minutes, rest = seconds // 3600, seconds // 60 % 60, seconds % 60
+    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m {rest:02d}s" if minutes else f"{rest}s"

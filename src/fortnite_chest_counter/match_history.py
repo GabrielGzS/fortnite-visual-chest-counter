@@ -31,6 +31,7 @@ Nothing here may reach the counter: every writer call contains its own errors an
 
 import functools
 import json
+from bisect import bisect_right
 import os
 import uuid
 from collections import deque
@@ -277,15 +278,17 @@ def attribute(history):
     """Each chest with the match it belongs to, worked out from its own time, so correcting a match never rewrites a chest. -> new dicts with
     match_number (None outside every match), spectating (after the player was out), and credited (during this player's active play)."""
     by_run, out_at = {}, {}
-    for match in history.matches:
+    for match in sorted(history.matches, key=lambda m: m["opened_t"]):
         by_run.setdefault(match["run_id"], []).append(match)
+    starts = {run_id: [m["opened_t"] for m in matches] for run_id, matches in by_run.items()}
     for row in history.transitions:
         if row["state"] == "ELIMINATED" and row["match_number"] is not None:
             out_at.setdefault((row["run_id"], row["match_number"]), row["t"])
     result = []
     for chest in history.chests:
-        t = chest["t"]
-        match = next((m for m in by_run.get(chest["run_id"], ()) if m["opened_t"] <= t < m["closed_t"]), None)
+        t, run_id = chest["t"], chest["run_id"]
+        index = bisect_right(starts.get(run_id, ()), t) - 1                # matches in a run never overlap: only the latest to open can hold it
+        match = by_run[run_id][index] if index >= 0 and t < by_run[run_id][index]["closed_t"] else None
         if match is None:
             result.append({**chest, "match_number": None, "spectating": False, "credited": False})
             continue

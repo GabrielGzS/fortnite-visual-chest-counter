@@ -1125,13 +1125,13 @@ def test_history_depends_only_on_the_standard_library():
             imported |= {alias.name for alias in node.names}
         elif isinstance(node, ast.ImportFrom):
             imported.add(node.module)
-    assert imported == {"functools", "json", "os", "uuid", "collections", "dataclasses", "datetime", "pathlib"}, imported
+    assert imported == {"bisect", "functools", "json", "os", "uuid", "collections", "dataclasses", "datetime", "pathlib"}, imported
 
 
 def test_only_the_counter_opens_history_and_only_lazily():
     src = ROOT / "src/fortnite_chest_counter"
     for file in src.rglob("*.py"):
-        if file.name not in ("match_history.py", "counter.py", "match_tracker.py"):
+        if file.name not in ("match_history.py", "counter.py", "match_tracker.py", "match_analytics.py"):
             assert "match_history" not in file.read_text(encoding="utf-8"), file.name
     tree = ast.parse((src / "counter.py").read_text(encoding="utf-8"))
     for node in tree.body:

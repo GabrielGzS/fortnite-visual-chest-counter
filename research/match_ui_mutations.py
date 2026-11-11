@@ -44,7 +44,7 @@ MUTATIONS = [
     ("A", "time.monotonic() - self.match_seen_at >= MATCH_STALE_SECONDS", "False", "test_silence_means_no_video"),
     ("A", "        d.match.setText(text)\n", "        d.match.setText(text); self.set_counts(99, 99)\n", "test_the_line_is_read_only"),
     ("A", "        d.match.setText(text)\n", "        d.match.setText(text); self.worker.send(\"stop\")\n", "test_the_line_is_read_only"),
-    ("A", "        layout.addLayout(types)\n        self.match_row = QWidget()", "        self.match_row = QWidget()", "test_the_layout_keeps_its_pages_and_order"),
+    ("A", "        overview.addLayout(types)\n        self.match_row = QWidget()", "        self.match_row = QWidget()", "test_the_layout_keeps_its_pages_and_order"),
     # Settings
     ("A", "self.match_on.setChecked(self._match_mode == \"on\")", "self.match_on.setChecked(self._match_mode != \"off\")", "test_shadow_is_kept_unless_the_user_turns_tracking_on"),
     ("A", "mode = \"on\" if self.match_on.isChecked() else \"shadow\" if self._match_mode == \"shadow\" else \"off\"", "mode = \"on\" if self.match_on.isChecked() else \"off\"", "test_shadow_is_kept_unless_the_user_turns_tracking_on"),
