@@ -38,7 +38,7 @@ MUTATIONS = [
     ("            for line in (self.dashboard.match, self.dashboard.game_status):\n", "            for line in (self.dashboard.match,):\n", "test_silence_reaches_the_game_view"),
     ("mode = self.session_match_mode if running else load_cfg()[0][\"match\"][\"mode\"]", "mode = load_cfg()[0][\"match\"][\"mode\"]", "test_a_session_keeps_the_mode_it_started_with"),
     ("        if mode == \"on\":\n            d.show_game_idle(", "        if mode != \"off\":\n            d.show_game_idle(", "test_shadow_counts_as_off_in_the_app"),
-    ("        self.update_game_idle()\n        if not running:\n", "        if not running:\n", "test_stopping_resets_the_game_view"),
+    ("        self.update_game_idle()\n        self.update_correction_buttons()\n", "        self.update_correction_buttons()\n", "test_stopping_resets_the_game_view"),
     ("        self.game_settings.setVisible(offer_settings)\n", "", "test_tracking_on_but_not_counting"),
     ("on_click=lambda: win.show_page(win.settings_page)", "on_click=lambda: None", "test_the_links_open_their_pages"),
     ("        if page is self.overlay:\n            self.overlay.load()\n", "        if False:\n            pass\n", "test_opening_a_page_still_reloads_it"),

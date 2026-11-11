@@ -25,7 +25,7 @@ COMPLETE, PARTIAL, UNCONFIRMED = "complete", "partial", "unconfirmed"
 QUALITIES = (COMPLETE, PARTIAL, UNCONFIRMED)
 MIN_OBSERVED_RATE_SECONDS = 300            # under five minutes of play, a chest more or less would swing the rate wildly
 RECENT_MATCHES = 25
-READ_KINDS = H.MATCH_KINDS | {"transition", "counter_change", "chest", "chest_type"}      # everything but the heartbeats, which are most of the file
+READ_KINDS = H.MATCH_KINDS | H.CORRECTION_KINDS | {"transition", "counter_change", "chest", "chest_type"}      # everything but the heartbeats, which are most of the file
 ENDINGS = {"placed": "Placed", "victory": "Victory Royale", "left_or_unknown": "Left or not seen", "stopped": "Counting stopped", "lost": "Video lost",
            "discontinuity": "Video jumped", H.INTERRUPTED: "App closed unexpectedly"}
 
@@ -56,6 +56,9 @@ class RecentMatch:
     quality: str
     interrupted: bool
     ending: str
+    run_id: object = None
+    match_number: object = None
+    excluded: bool = False                 # marked "Not a match": shown so it can be restored, left out of every statistic
 
 
 @dataclass
@@ -81,6 +84,8 @@ class Summary:
     matches_left_out_of_rates: int = 0     # history lost chests during them, or no active time is known
     missing_certain: int = 0               # gap rows: chests the totals have and history does not
     missing_approx: int = 0
+    manual_added: int = 0                  # the user's +1s and -1s still standing: on the counter, and in none of these statistics
+    manual_removed: int = 0
     damaged_rows: int = 0
     newer_rows: int = 0
     recent: list = field(default_factory=list)
@@ -189,12 +194,16 @@ def summarize(history, recent=RECENT_MATCHES):
         summary.missing_certain += max(_number(gap.get("missing_certain")) or 0, 0)
         summary.missing_approx += max(_number(gap.get("missing_approximate")) or 0, 0)
 
-    for match in reversed(kept[-recent:]):
+    manual = H.correction_totals(history.chest_corrections)
+    summary.manual_added, summary.manual_removed = manual["added"], manual["removed"]
+
+    for match in reversed(usable[-recent:]):
         run = history.runs.get(match["run_id"]) or {"start": None}
         full = match["completion"] == COMPLETE and _number(match.get("complete_duration_seconds")) is not None
         totals = credited[match["run_id"], match["match_number"]]
         summary.recent.append(RecentMatch(_started_at(run, match), _number(match.get("complete_duration_seconds" if full else "observed_seconds")), full, totals[0], totals[1],
-                                          bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ENDINGS.get(match.get("ended_by"), "Not seen")))
+                                          bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ENDINGS.get(match.get("ended_by"), "Not seen"),
+                                          match["run_id"], match["match_number"], bool(match["not_a_match"])))
     return summary
 
 

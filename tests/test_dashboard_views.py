@@ -50,7 +50,7 @@ def test_there_are_three_views_starting_on_overview():
 def test_every_control_is_on_its_view():
     with G.window() as w:
         d, A = w.win.dashboard, ui()
-        placed = {A.OVERVIEW_VIEW: ("profile", "profile_new", "profile_rename", "profile_delete", "certain", "approx", "types", "match_row", "viewers", "obs_line", "source", "refresh", "start", "url_row", "url", "stability", "stability_hint", "source_hint", "metrics", "analyse"),
+        placed = {A.OVERVIEW_VIEW: ("profile", "profile_new", "profile_rename", "profile_delete", "certain", "approx", "plus", "minus", "correction_row", "types", "match_row", "viewers", "obs_line", "source", "refresh", "start", "url_row", "url", "stability", "stability_hint", "source_hint", "metrics", "analyse"),
                   A.GAME_VIEW: ("game_status", "game_hint", "game_settings", "game_active", "game_seen", "game_unclear", "game_start", "game_language", "show_preview", "preview"),
                   A.CONSOLE_VIEW: ("rec_mode", "mark", "rec_status", "detail", "clear", "open_logs", "log")}
         for view, names in placed.items():

@@ -50,6 +50,10 @@ MATCH_FIELDS = ("match_number", "completion", "english_confirmed", "ended_by", "
 SNAPSHOT_FIELDS = ("match_number", "opened_t", "played_from_t", "observed_seconds", "active_seconds", "spectating_seconds", "uncertain_seconds", "english_confirmed")
 RUN_KINDS = frozenset({"run_start", "run_end"})
 MATCH_KINDS = RUN_KINDS | {"match_opened", "match_closed", "correction", "gap"}     # enough to list matches, without the bulk
+CORRECTION_KINDS = frozenset({"chest_correction", "chest_correction_undone", "chest_correction_reason"})
+# Why a chest count was corrected. Only "missed" and "false_positive" are claims about the detector: Fortnite can count a chest with nothing
+# on screen to detect (a broken chest, say), so "not_visible" is no failure, and "manual" means the reason is not known.
+MISSED, NOT_VISIBLE, FALSE_POSITIVE, MANUAL = "missed", "not_visible", "false_positive", "manual"
 
 
 def _now():
@@ -299,6 +303,49 @@ def attribute(history):
     return result
 
 
+def append_chest_correction(folder, correction_id, run_id, delta, reason, counter_token, certain, approximate, detector_approximate):
+    """A +1 or -1 the user made to the total, after the total was saved. Raises OSError if it cannot be saved."""
+    _append_line(Path(folder) / CHESTS, _encode({"kind": "chest_correction", "schema": SCHEMA, "id": correction_id, "run_id": run_id, "at": _now(), "delta": delta, "reason": reason, "counter_token": counter_token,
+                                                 "certain_total": certain, "approximate_total": approximate, "detector_approximate": detector_approximate}))
+
+
+def append_correction_undone(folder, undo_id, run_id, undoes, certain, approximate):
+    """Undoing keeps the original row and adds this one, so the history of what was corrected is never lost."""
+    _append_line(Path(folder) / CHESTS, _encode({"kind": "chest_correction_undone", "schema": SCHEMA, "id": undo_id, "run_id": run_id, "at": _now(), "undoes": undoes, "certain_total": certain, "approximate_total": approximate}))
+
+
+def set_correction_reason(folder, correction_id, reason):
+    """Say why after the fact. A new row: the latest wins, and no total changes."""
+    _append_line(Path(folder) / CHESTS, _encode({"kind": "chest_correction_reason", "schema": SCHEMA, "id": f"reason:{uuid.uuid4().hex}", "at": _now(), "corrects": correction_id, "reason": reason}))
+
+
+def _merge_corrections(rows):
+    merged = {}
+    for row in rows:
+        if row["kind"] == "chest_correction" and row.get("delta") in (1, -1):
+            merged.setdefault(row["id"], {**row, "undone": False})
+    for row in rows:
+        if row["kind"] == "chest_correction_undone" and row.get("undoes") in merged:
+            merged[row["undoes"]]["undone"] = True
+        elif row["kind"] == "chest_correction_reason" and row.get("corrects") in merged:
+            merged[row["corrects"]]["reason"] = row.get("reason")
+    return list(merged.values())
+
+
+def read_chest_corrections(folder):
+    """Every correction ever made in this profile, oldest first, with its latest reason and whether it was undone."""
+    return _merge_corrections(list(_rows(Path(folder) / CHESTS, CORRECTION_KINDS, History())))
+
+
+def correction_totals(corrections, counter_token=None):
+    """What still stands. Given a token, only this life of the counter: a Reset or Edit counts replaces the total, and with it earlier corrections."""
+    standing = [c for c in corrections if not c["undone"] and (counter_token is None or c.get("counter_token") == counter_token)]
+    reasons = [c.get("reason") for c in standing]
+    return {"net": sum(c["delta"] for c in standing), "added": sum(c["delta"] == 1 for c in standing), "removed": sum(c["delta"] == -1 for c in standing), "standing": standing,
+            "reversed": sum(c["undone"] for c in corrections), "detector_misses": reasons.count(MISSED), "detector_false_positives": reasons.count(FALSE_POSITIVE),
+            "not_visible": reasons.count(NOT_VISIBLE), "unknown": len(reasons) - reasons.count(MISSED) - reasons.count(FALSE_POSITIVE) - reasons.count(NOT_VISIBLE)}
+
+
 def correct_match(folder, run_id, match_number, not_a_match=True):
     """Mark a match as "Not a match", or undo it. A new row: the latest wins, and no chest row or total changes. Raises OSError if it cannot be saved."""
     _append_line(Path(folder) / MATCHES, _encode({"kind": "correction", "schema": SCHEMA, "id": f"correction:{uuid.uuid4().hex}", "run_id": run_id, "at": _now(),
@@ -316,6 +363,7 @@ class History:
     transitions: list = field(default_factory=list)
     counter_changes: list = field(default_factory=list)
     gaps: list = field(default_factory=list)
+    chest_corrections: list = field(default_factory=list)     # the user's +1 and -1, with their latest reason
     bad_lines: int = 0
     newer_rows: int = 0
 
@@ -395,7 +443,11 @@ def read(folder, only=None, warn=None):
                 corrections[run_id, row["match_number"]] = row["not_a_match"]
         except (KeyError, TypeError, ValueError, AttributeError):
             history.bad_lines += 1
+    correction_rows = []
     for row in _rows(folder / CHESTS, only, history):
+        if row["kind"] in CORRECTION_KINDS:
+            correction_rows.append(row)
+            continue
         try:
             key = row["run_id"], row["counter_epoch"], row["event_id"]
             if row["kind"] == "chest":
@@ -409,6 +461,7 @@ def read(folder, only=None, warn=None):
     history.matches = [{**row, "not_a_match": corrections.get(key, False), "history_incomplete": bool(row.get("history_incomplete")) or key in incomplete} for key, row in closed.items()]
     history.open_matches = [row for key, row in opened.items() if key not in closed]
     history.chests = list(chests.values())
+    history.chest_corrections = _merge_corrections(correction_rows)
     if history.newer_rows and warn is not None:
         warn(f"{history.newer_rows} match history rows were written by a newer version; they were left alone and skipped")
     return history

@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
                                QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
-from fortnite_chest_counter import match_analytics, paths, profiles, settings
+from fortnite_chest_counter import match_analytics, match_history, paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -214,6 +214,9 @@ MATCH_SCREENS = {"LOBBY": "In the lobby", "LOADING": "Loading", "PRE_GAME": "Wai
 MATCH_STALE_SECONDS = 5                     # the worker reports once a second of video: this long without one means no video
 UNKNOWN_VALUE = "—"
 OVERVIEW_VIEW, GAME_VIEW, CONSOLE_VIEW = range(3)
+# Why a count was corrected. A +1 does not mean the detector failed: Fortnite can count a chest with nothing on screen to detect.
+CORRECTION_WHY = {1: (("manual", "Not sure / balance fix"), ("not_visible", "Fortnite counted it, nothing to see (a broken chest, say)"), ("missed", "A visible chest the counter missed")),
+                  -1: (("manual", "Not sure / balance fix"), ("false_positive", "Counted something that was not a chest"))}
 DASHBOARD_VIEWS = (("Overview", "Your counts and the video source"), ("Game", "What match tracking sees right now, and the live preview"),
                    ("Console", "The activity log, warnings and diagnostic recording"))
 
@@ -941,9 +944,33 @@ class Dashboard(QWidget):
         actions.addWidget(button("Edit counts...", tip="Start from the chests you already opened, or correct the counter",
                                  on_click=win.edit_counts))
         actions.addWidget(button("Reset...", tip="Set both counts to 0", on_click=win.reset_counts))
+        adjust = QHBoxLayout()
+        adjust.setSpacing(6)
+        self.minus = button("−1", tip="Take one chest off APPROX", on_click=lambda: win.correct_chest(-1))
+        self.plus = button("+1", tip="Add one chest to APPROX. CERTAIN does not change, because the counter did not confirm it.", on_click=lambda: win.correct_chest(1))
+        adjust.addWidget(self.minus)
+        adjust.addWidget(self.plus)
+        actions.addLayout(adjust)
         actions.addStretch(1)
         counts.addLayout(actions)
         overview.addLayout(counts)
+        self.correction_row = QWidget()                       # only while corrections stand on this counter
+        correction_layout = QHBoxLayout(self.correction_row)
+        correction_layout.setContentsMargins(0, 0, 0, 0)
+        correction_layout.addWidget(label("Corrections:", "hint"))
+        self.correction_text = label("", "hint")
+        self.correction_text.setStyleSheet(f"color: {theme.TEXT};")
+        correction_layout.addWidget(self.correction_text)
+        correction_layout.addStretch(1)
+        correction_layout.addWidget(label("Why?", "hint"))
+        self.correction_reason = QComboBox()
+        self.correction_reason.setToolTip("Optional. Only \"a visible chest the counter missed\" and \"counted something that was not a chest\" say anything about the detector.")
+        self.correction_reason.activated.connect(win.correction_reason_chosen)
+        correction_layout.addWidget(self.correction_reason)
+        self.correction_undo = button("Undo", "link", tip="Undo the last correction. It stays in the history as undone.", on_click=win.undo_correction)
+        correction_layout.addWidget(self.correction_undo)
+        self.correction_row.hide()
+        overview.addWidget(self.correction_row)
         types = QHBoxLayout()                                # v0.2.2: read-only chest-type split of the APPROX total
         types.addWidget(label("Chest types:", "hint"), 0, Qt.AlignTop)
         self.types = label("", "hint", wrap=True)
@@ -1704,6 +1731,8 @@ def analytics_notes(summary):
         notes.append(f"{plural(summary.unfinished, 'match')} not finished yet, so not counted.")
     if summary.excluded:
         notes.append(f"{plural(summary.excluded, 'match')} marked as not a match, left out of every statistic.")
+    if summary.manual_added or summary.manual_removed:
+        notes.append(f"Manual chest corrections are not part of these statistics (+{fmt(summary.manual_added)}, −{fmt(summary.manual_removed)}).")
     if summary.matches_left_out_of_rates:
         notes.append(f"{plural(summary.matches_left_out_of_rates, 'match')} left out of the chest rates: history lost chests during them, or their play time is unknown.")
     if summary.missing_approx or summary.missing_certain:
@@ -1718,7 +1747,7 @@ def analytics_notes(summary):
 class AnalyticsPage(QWidget):
     """What the recorded matches show. Read-only, and worked out away from this window's thread so a huge history cannot freeze it."""
 
-    COLUMNS = ("Started", "Duration", "CERTAIN", "APPROX", "Quality", "Ending")
+    COLUMNS = ("Started", "Duration", "CERTAIN", "APPROX", "Quality", "Ending", "")
 
     def __init__(self, win):
         super().__init__()
@@ -1771,6 +1800,8 @@ class AnalyticsPage(QWidget):
         self.table.setSelectionMode(QAbstractItemView.NoSelection)
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        for column in (4, 5, 6):                                # Quality, Ending and the action: their text must never be cut off
+            self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)
         self.table.setMinimumHeight(170)
         layout.addWidget(self.table, 1)
 
@@ -1836,11 +1867,15 @@ class AnalyticsPage(QWidget):
                   f"Needs at least {match_analytics.MIN_OBSERVED_RATE_SECONDS // 60} minutes of confirmed play")
         self.notes.setText(analytics_notes(s))
         self.notes.setVisible(bool(self.notes.text()))
+        for row in range(self.table.rowCount()):                # replaced buttons wait to be deleted: they must not stay on screen until then
+            old = self.table.cellWidget(row, len(self.COLUMNS) - 1)
+            if old is not None:
+                old.hide()
         self.table.setRowCount(len(s.recent))
         for row, match in enumerate(s.recent):
             seen = duration(match.duration_seconds)
             more = "+" if match.chests_may_be_missing else ""
-            quality, color = QUALITY_LOOK[match.quality]
+            quality, color = ("Not a match", theme.DIM) if match.excluded else QUALITY_LOOK[match.quality]
             cells = (match.started_at.strftime("%b %d, %H:%M") if match.started_at else UNKNOWN_VALUE,
                      UNKNOWN_VALUE if seen is None else seen if match.duration_is_full else f"{seen} seen",
                      f"{fmt(match.certain)}{more}", f"{fmt(match.approx)}{more}", quality + (" (interrupted)" if match.interrupted else ""), match.ending)
@@ -1849,6 +1884,21 @@ class AnalyticsPage(QWidget):
                 if column == 4:
                     item.setForeground(QColor(color))
                 self.table.setItem(row, column, item)
+            action = button("Restore" if match.excluded else "Not a match", "link",
+                            tip="Put this match back in your statistics" if match.excluded else "Leave this out of your statistics. Nothing is deleted, and you can restore it.",
+                            on_click=lambda _checked=False, m=match: self.set_not_a_match(m, not m.excluded))
+            self.table.setCellWidget(row, len(self.COLUMNS) - 1, action)
+
+    def set_not_a_match(self, match, flag):
+        """A new correction row: the match itself, its chests and your totals are not touched, and it can always be restored."""
+        cfg, _ = load_cfg()
+        profile = cfg["profile"]
+        try:
+            match_history.correct_match(paths.APP_DIR / profiles.history_folder(profile["state_base"], profile["id"]), match.run_id, match.match_number, flag)
+        except OSError as error:
+            show_error(self, f"The correction could not be saved ({error}).")
+            return
+        self.refresh()
 
 
 class HelpPage(QWidget):
@@ -2071,6 +2121,8 @@ class MainWindow(QMainWindow):
         self.stream_state = None                # Livestream URL connection state ("stream" messages), None = not a stream
         self.match_seen_at = None               # when the last match status arrived, while one is being reported
         self.session_match_mode = "off"         # [match] mode when counting started: a change only applies to the next session
+        self.last_correction = None             # the newest correction still standing, which Undo and "Why?" act on
+        self.correction_memory = {1: "manual", -1: "manual"}      # the reason last chosen for each direction
         self.marks_this_session = 0
         self.hotkey = None
         self.sources = []
@@ -2279,6 +2331,7 @@ class MainWindow(QMainWindow):
             text += (" Virtual Camera busy, or the capture card used by OBS? In OBS right-click your gameplay source > "
                      "Windowed Projector (Source), then click Refresh.")
         self.dashboard.source_hint.setText(text)
+        self.dashboard.source_hint.setVisible(bool(text))
 
     def select_source(self, wanted):
         """Select the source list entry that matches `wanted` (a [live]-style dict). -> True if one was found."""
@@ -2505,6 +2558,7 @@ class MainWindow(QMainWindow):
             d.match_row.hide()
             d.metrics.setText("Not counting.")
         self.update_game_idle()
+        self.update_correction_buttons()
         if not running:
             d.preview.view.setStyleSheet("")
             d.preview.clear()
@@ -2699,6 +2753,8 @@ class MainWindow(QMainWindow):
             self.show_stream_state(message.get("state"))
         elif kind == "match":
             self.show_match(message)
+        elif kind == "correction":
+            self.correction_done(message)
         elif kind == "error":
             self.error_seen = True
             self.dashboard.show_banner(str(message.get("text", "")))
@@ -2819,6 +2875,7 @@ class MainWindow(QMainWindow):
         self.counts = (certain, approx)
         self.dashboard.certain.set_value(certain, flash=flash and changed)
         self.dashboard.approx.set_value(approx, flash=flash and changed)
+        self.update_correction_buttons()
         if changed:
             self.refresh_viewers()
 
@@ -2840,6 +2897,7 @@ class MainWindow(QMainWindow):
         counts = read_counts(path)
         self.set_counts(*(counts or (0, 0)))
         self.dashboard.types.setText(types_text(read_types(path) or C.type_breakdown(C.fresh_state())))
+        self.refresh_corrections()
 
     def write_obs_files(self, quiet=False):
         """The OBS text files from the saved counter (e.g. after an update replaced them with zero placeholders)."""
@@ -2953,9 +3011,90 @@ class MainWindow(QMainWindow):
             show_error(self, str(error))
             return
         self.set_counts(session.state["certain"], session.state["approximate"], flash=True)
+        self.refresh_corrections()
         what = "reset to 0" if action == "reset" else f"set to CERTAIN {fmt(certain)} / APPROX {fmt(approx)}"
         self.add_log({"type": "info", "text": f"Counter {what}."
                       + (" The running counter picks it up within a second." if self.worker.running() else "")})
+
+    # ---- chest corrections: +1 and -1 on APPROX. A +1 is not a claim that the detector failed.
+    def correct_chest(self, delta):
+        self._send_correction({"id": uuid.uuid4().hex, "delta": delta, "reason": self.correction_memory[delta]})
+
+    def undo_correction(self):
+        if self.last_correction is not None:
+            self._send_correction({"id": uuid.uuid4().hex, "undoes": self.last_correction["id"]})
+
+    def _send_correction(self, request):
+        """While counting, the worker makes the change, so only one program ever writes the counter file."""
+        if self.worker.running():
+            if not self.worker.send("correct " + json.dumps(request)):
+                self.add_log({"type": "warn", "text": "The correction could not be sent: the counter is stopping. Try again once it has stopped."})
+            return
+        try:
+            session, result = C.apply_chest_correction(self._cfg_for_actions(), request)
+        except (C.UserError, OSError) as error:
+            show_error(self, str(error))
+            return
+        self.set_counts(session.state["certain"], session.state["approximate"], flash=True)
+        self.dashboard.types.setText(types_text(C.type_breakdown(session.state)))
+        self.correction_done(result)
+
+    def correction_done(self, result):
+        if result.get("status") == "refused":
+            self.add_log({"type": "warn", "text": f"Correction not applied: {result.get('message', '')}"})
+        elif result.get("status") == "applied":
+            what = "undone" if result.get("undoes") else "applied"
+            self.add_log({"type": "info", "text": f"Manual correction {what}: APPROX {result.get('delta', 0):+d}."})
+        self.refresh_corrections()
+
+    def _history_folder(self):
+        profile = load_cfg()[0]["profile"]
+        return paths.APP_DIR / profiles.history_folder(profile["state_base"], profile["id"])
+
+    def refresh_corrections(self):
+        """The line under the counts: what the detector counted, what you changed, and the total."""
+        d = self.dashboard
+        try:
+            state = json.loads((paths.APP_DIR / load_cfg()[0]["state"]["path"]).read_text(encoding="utf-8"))
+            totals = match_history.correction_totals(match_history.read_chest_corrections(self._history_folder()), C.counter_token(state))
+            approx = state["approximate"]
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            totals, approx = {"standing": [], "net": 0}, 0
+        standing = totals["standing"]
+        self.last_correction = standing[-1] if standing else None
+        d.correction_row.setVisible(bool(standing))
+        if not standing:
+            return
+        d.correction_text.setText(f"Detector {fmt(approx - totals['net'])}   ·   Manual {totals['net']:+d}   ·   Total {fmt(approx)}")
+        last = self.last_correction
+        box = d.correction_reason
+        box.blockSignals(True)
+        box.clear()
+        for key, text in CORRECTION_WHY[last["delta"]]:
+            box.addItem(text, key)
+        box.setCurrentIndex(max(box.findData(last.get("reason")), 0))
+        box.blockSignals(False)
+
+    def correction_reason_chosen(self, _index=None):
+        last = self.last_correction
+        if last is None:
+            return
+        reason = self.dashboard.correction_reason.currentData()
+        self.correction_memory[last["delta"]] = reason
+        try:
+            match_history.set_correction_reason(self._history_folder(), last["id"], reason)
+        except OSError as error:
+            show_error(self, f"The reason could not be saved ({error}).")
+            return
+        self.refresh_corrections()
+
+    def update_correction_buttons(self):
+        d = self.dashboard
+        ready = self.mode != "stopping"
+        room = self.counts[1] > self.counts[0]
+        d.plus.setEnabled(ready)
+        d.minus.setEnabled(ready and room)
+        d.minus.setToolTip("Take one chest off APPROX" if room else "APPROX cannot go below CERTAIN. If a CERTAIN chest was wrong, use Edit counts.")
 
     def mark_available(self):
         return self.mode == "counting" and self.recording is not None

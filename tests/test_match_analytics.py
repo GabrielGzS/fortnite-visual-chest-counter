@@ -344,7 +344,8 @@ def test_not_a_match_removes_it_from_every_statistic_and_undo_restores_it():
         worked_example(f)
         H.correct_match(f, "run", 1)
         s = summary_of(f)
-        assert (s.complete, s.excluded, s.observed_seconds, s.confirmed_seconds) == (1, 1, 580.0, 300.0) and s.complete_rate.matches == 1 and len(s.recent) == 3
+        assert (s.complete, s.excluded, s.observed_seconds, s.confirmed_seconds) == (1, 1, 580.0, 300.0) and s.complete_rate.matches == 1
+        assert [r.excluded for r in s.recent] == [False, False, False, True]      # still listed, so it can be restored
         assert s.certain_chests == 6                                      # the chests themselves were still opened
         H.correct_match(f, "run", 1, not_a_match=False)
         assert summary_of(f).complete == 2

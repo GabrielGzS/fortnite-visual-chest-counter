@@ -133,6 +133,11 @@ def _valid_count(value):
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
+def counter_token(state):
+    """Identifies this life of the counter. Reset and Edit counts replace the total, so a correction made before them can no longer be undone."""
+    return f"{state.get('session_started_at')}#{state.get('counter_life', 0)}"
+
+
 def load_state(path, warn=print):
     """Read the counter file. A missing file is a fresh start. A damaged one is set aside (never
     deleted) and replaced by a fresh state, with a message, so a bad file can never stop the app.
@@ -297,6 +302,7 @@ class CounterSession:
         self.latencies = []
         self.recent = {}                      # event time -> (event id, chest type, certain, approx): for type updates
         self.history = None                   # a match history writer, only with [match] mode = "on"
+        self._corrections_done = set()        # correction ids applied by this session: the same request twice counts once
         self._warned = set()
         self._mtime = self._state_mtime()
 
@@ -405,6 +411,75 @@ class CounterSession:
         if applied:
             self.announce_types()
         return applied
+
+    def apply_correction(self, request):
+        """The user's +1 or -1 on APPROX, or undoing one. Never raises: a bad request must not stop counting. -> a result dict.
+
+        APPROX only. A chest the user adds was not confirmed by the detector, so it is never CERTAIN, and CERTAIN stays <= APPROX: a -1 that would
+        break that is refused. While counting, the running session makes the change, so it is the only writer of the counter file."""
+        try:
+            return self._apply_correction(request)
+        except Exception as error:
+            self._warn_once("correction", f"a chest correction could not be applied ({error}); counting is not affected")
+            return {"status": "refused", "message": f"The correction could not be applied ({error}).", "id": None}
+
+    def _apply_correction(self, request):
+        from fortnite_chest_counter import match_history as H
+
+        def refused(message):
+            return {"status": "refused", "message": message, "id": request.get("id"), "certain": st["certain"], "approx": st["approximate"]}
+
+        self.sync_external_changes()
+        st = self.state
+        correction_id = request.get("id")
+        if not isinstance(correction_id, str) or not correction_id:
+            return refused("The correction had no id.")
+        folder = _history_folder(self.cfg) if self.persist else None
+        known = H.read_chest_corrections(folder) if folder else []
+        token = counter_token(st)
+        undoes, reason = request.get("undoes"), request.get("reason", H.MANUAL)
+        if correction_id in self._corrections_done or any(c["id"] == correction_id for c in known):
+            return {"status": "already", "message": "", "id": correction_id, "certain": st["certain"], "approx": st["approximate"]}
+        if undoes is not None:
+            target = next((c for c in known if c["id"] == undoes), None)
+            if target is None:
+                return refused("That correction was not found.")
+            if target["undone"]:
+                return {"status": "already", "message": "", "id": correction_id, "certain": st["certain"], "approx": st["approximate"]}
+            if target.get("counter_token") != token:
+                return refused("The counter was reset or edited since that correction, so it can no longer be undone.")
+            delta = -target["delta"]
+        else:
+            delta = request.get("delta")
+            if type(delta) is not int or delta not in CORRECTION_REASONS:
+                return refused("A correction is +1 or -1.")
+            if reason not in CORRECTION_REASONS[delta]:
+                return refused(f"Unknown reason for a {delta:+d} correction.")
+        if delta < 0 and st["approximate"] - 1 < st["certain"]:
+            return refused("APPROX cannot go below CERTAIN. If a CERTAIN chest was wrong, use Edit counts.")
+        if delta > 0 and st["approximate"] >= MAX_STARTING_COUNT:
+            return refused("The counter is already at its maximum.")
+        net = H.correction_totals(known, token)["net"] + delta
+        st["approximate"] += delta
+        self._corrections_done.add(correction_id)
+        self.save()
+        self.write_obs()
+        self.log.write({"event": "chest_correction", "correction_id": correction_id, "undoes": undoes, "delta": delta, "reason": None if undoes else reason, "source": "manual",
+                        "counts_after": {"certain": st["certain"], "approximate": st["approximate"]}, "logged_at": now_iso()})
+        if self.history is not None:                 # so a crash later does not read the new total as chests missing from history
+            self.history.counter_changed("correction", st["certain"], st["approximate"])
+        recorded = folder is not None
+        if folder is not None:
+            run_id = self.history.run_id if self.history is not None else None
+            try:
+                if undoes is not None:
+                    H.append_correction_undone(folder, correction_id, run_id, undoes, st["certain"], st["approximate"])
+                else:
+                    H.append_chest_correction(folder, correction_id, run_id, delta, reason, token, st["certain"], st["approximate"], st["approximate"] - net)
+            except OSError as error:
+                recorded = False
+                self._warn_once("correction-history", f"a chest correction was applied to your counts but could not be added to the match history ({error})")
+        return {"status": "applied", "message": "", "id": correction_id, "delta": delta, "undoes": undoes, "recorded": recorded, "certain": st["certain"], "approx": st["approximate"]}
 
     def apply_type_updates(self, updates):
         """The detector read a counted chest's type better after counting it (estimator.take_type_updates): move that
@@ -922,6 +997,7 @@ class AppControl:
         self.on_request = None
         self._marks = deque()                   # "mark [label]" lines: the app's Mark button / hotkey
         self._captures = deque()                # "capture off|marks|events|session": the app's Recording choice
+        self._corrections = deque()             # "correct {json}": the app's +1, -1 and Undo
         self._stream = stream if stream is not None else sys.stdin
         threading.Thread(target=self._read, daemon=True, name="app-control").start()
 
@@ -937,6 +1013,12 @@ class AppControl:
             modes.append(self._captures.popleft())
         return modes
 
+    def take_corrections(self):
+        requests = []
+        while self._corrections:
+            requests.append(self._corrections.popleft())
+        return requests
+
     def _read(self):
         try:
             for line in self._stream:
@@ -947,6 +1029,13 @@ class AppControl:
                     self._marks.append(rest.strip() or "mark")
                 if command.lower() == "capture" and rest.strip().lower() in ("off", "marks", "events", "session"):
                     self._captures.append(rest.strip().lower())
+                if command.lower() == "correct":
+                    try:
+                        request = json.loads(rest)
+                    except ValueError:
+                        continue
+                    if isinstance(request, dict):
+                        self._corrections.append(request)
             else:
                 self.reason = "the app closed"
         except Exception:
@@ -1132,6 +1221,13 @@ def _open_capture(cfg, kind, label, res, in_fps, fps, mode=None):
     if not CONSOLE.machine:
         CONSOLE.info(f"Diagnostic recording ON ({what}) -> {capture.folder}. Press M to mark a chest the counter missed.")
     return capture
+
+
+def _apply_corrections(control, session):
+    """The app's +1, -1 and Undo, applied by the running session."""
+    for request in control.take_corrections():
+        CONSOLE.emit("correction", **session.apply_correction(request))
+        session.announce()
 
 
 def _history_folder(cfg):
@@ -1331,6 +1427,7 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                     capture = _switch_capture(capture, mode, cfg, kind, source.label, res, in_fps, fps, session,
                                                closing_threads)
                     capture_warned = False
+                _apply_corrections(control, session)
             marks = control.take_marks() if control is not None else []
             if control is None:
                 keys = console_keys()
@@ -1401,6 +1498,8 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
         # Persist first (the console may already be gone when the window was closed), print last.
         flushed = session.apply(est.flush(), source.elapsed(), quiet=closing)
         session.apply_type_updates(est.take_type_updates())
+        if control is not None:                            # pressed while no video was arriving, or just before stopping
+            _apply_corrections(control, session)
         session.save()
         session.write_obs()
         if tracker is not None:                            # after the counts are safe
@@ -1490,6 +1589,7 @@ def cmd_reset(args):
     preflight(cfg, needs_video=False)
     old = CounterSession(cfg)
     session = CounterSession(cfg, reset=True)
+    session.state["counter_life"] = old.state.get("counter_life", 0) + 1
     session.save()
     session.write_obs()
     session.log.write({"event_id": "MANUAL", "source": "manual", "action": "reset", "previous": {
@@ -1694,6 +1794,7 @@ def cmd_configure(args):
 
 
 MAX_STARTING_COUNT = 1_000_000
+CORRECTION_REASONS = {1: ("manual", "not_visible", "missed"), -1: ("manual", "false_positive")}
 
 
 def parse_count(text):
@@ -1746,6 +1847,7 @@ def cmd_set_count(args):
         raise UserError(f"--certain must be between 0 and {total:,} (CERTAIN is part of APPROX). Nothing was changed.")
     previous = {"certain": st["certain"], "approximate": st["approximate"]}
     st["certain"], st["approximate"] = certain, total
+    st["counter_life"] = st.get("counter_life", 0) + 1
     st["events_logged"] += 1
     session.save()
     session.write_obs()
@@ -1774,6 +1876,7 @@ def set_counts(cfg, certain, approx, action="set_count"):
     session = CounterSession(cfg, reset=(action == "reset"))
     st = session.state
     st["certain"], st["approximate"] = certain, approx
+    st["counter_life"] = old.state.get("counter_life", 0) + 1
     if action != "reset":
         st["events_logged"] += 1
     session.save()
@@ -1784,6 +1887,13 @@ def set_counts(cfg, certain, approx, action="set_count"):
         record["counts_after"] = {"certain": certain, "approximate": approx}
     session.log.write(record)
     return session
+
+
+def apply_chest_correction(cfg, request):
+    """The desktop app's +1, -1 and Undo while not counting. -> (session, result)."""
+    preflight(cfg, needs_video=False)
+    session = CounterSession(cfg)
+    return session, session.apply_correction(request)
 
 
 def short_path(path):
