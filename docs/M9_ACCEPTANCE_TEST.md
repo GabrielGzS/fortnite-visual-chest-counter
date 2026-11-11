@@ -72,6 +72,11 @@ and for test 14, compare each chest:
 Only one counter runs at a time, so two inputs cannot watch the same match live. To compare inputs, label each one's match
 separately and compare miss and false-positive rates, never just the totals.
 
+## Catching the waiting-island problem
+
+Keep **Whole session** recording on from the lobby through a few game starts. If a very short match appears right at a game start,
+keep that session's `captures\` folder: no recording of this has been caught yet, and it is the evidence the proposed fix needs.
+
 ## Not covered
 
 Portuguese matches, reboots, squads, other modes, and real livestream URLs during a whole match. After this test,

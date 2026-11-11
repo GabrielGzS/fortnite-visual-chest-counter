@@ -214,10 +214,24 @@ It is not a duplicate or a session boundary: it is mid-run, holds no chests, and
 At the other two game starts in this session the text was read first, so this is a race. It counted as Partial because the
 WAITING FOR PLAYERS text arrived just before it closed and supplied the English evidence.
 
-**Proposed fix, not implemented.** In `_maybe_joined_late`, when coming from LOADING, require a counted chest or about 30 s of
-health bar before opening a match, giving the countdown text time to appear. Cost: a real reconnect into a match opens up to
-30 s later, and is Partial anyway. It would need tests for this sequence, reconnects, back-to-back matches and lobby transitions,
-the replay scorecard and one full-video pass. Existing records would not change; **Not a match** handles this one.
+**Proposed fix, not implemented, awaiting review.** Use evidence, not a delay. WAITING FOR PLAYERS only appears before a game, so
+when it closes a match that opened on a health bar straight after a loading screen, with no chest counted in it, that record was the
+waiting island. It is marked Unconfirmed, which keeps it in history for diagnostics and out of every statistic. Nothing waits, so
+a real reconnect opens exactly when it does today. About 8 lines in `match_state.py`.
+
+Tried on a private copy of the code, against today's state machine:
+
+| Situation | Result |
+|---|---|
+| The recorded sequence (health bar 8 s before the text) | Partial becomes Unconfirmed; the real match that follows stays Complete |
+| Reconnect into a running game, with or without chests | Unchanged, same opening time |
+| A chest counted in it, then a countdown | Unchanged |
+| Normal start, quit to lobby, joined late with no loading screen | Unchanged |
+| 5 recorded timelines | Byte-identical |
+| Match state, audit, replay, tracker, recording, analytics, live match suites | All pass |
+
+**Limit.** None of the 5 recorded timelines contains this race, so the fix is proven only on a reconstruction of the timestamps
+from one real session. Existing records would not change; **Not a match** handles this one.
 
 **The 12-minute Complete match is genuine.** Countdown from 445.2, bus at 460.9, YOU PLACED read at 1186.5 (score 0.978), then
 ELIMINATED BY and CONNECTING. Duration 725.6 s, 53 English chests, no break.
@@ -258,8 +272,12 @@ the folder limit was found.
 | v0.2.3's own code reading rc4's layout | Accepted |
 | Release tests / sabotage of the new protections | 68 of 68 / 11 of 11 |
 
-The one failed check compared the last live number (5) with the final history (6). The sixth chest appears to have finished after the
-last status, which goes out once a second. That run's order was not kept, so the 46-status check above replaced it.
+The one failed check compared the last live number (5) with the final history (6), expecting them to be equal at shutdown. That
+expectation was wrong, and the discrepancy was then reproduced on purpose. Counting was stopped just after a chest, three ways, on
+rc4: by duration twice and by Stop once. Each time the chest finished after the last status (live 2 or 3, final 3 or 4), and all
+of these agreed event by event: the saved totals, the app's final message, the three OBS files, the session log, the history
+(no duplicates, no gaps, no damaged rows), the run's closing totals, Analytics, and the numbers after reopening. So a chest in the
+last second of a session can be missing from the final live status only, and is not lost or counted twice.
 
 **`START_HERE.md` is in `runtime\`, not the root.** Verified against v0.2.3's shipped code: a package with an unknown root file is
 refused as a whole ("Unexpected package contents: START_HERE.md"). The same text opens `README.html`, which is in the root.
