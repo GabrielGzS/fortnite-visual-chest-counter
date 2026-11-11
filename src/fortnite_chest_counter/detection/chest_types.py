@@ -153,6 +153,7 @@ class FrenchQualifiedPopups:
         self.missing_since = None
         self.missing_frames = 0
         self.rows = []
+        self.last_sprite_rows = []
         self.totals = Counter()
         self.candidate = None
         self.frames = 0
@@ -227,6 +228,7 @@ class FrenchQualifiedPopups:
         if self.frames < VOTES_MIN:
             return []
         self.rows = rows
+        self.last_sprite_rows = [row for row in rows if row[3] == SPRITE]
         added = []
         for kind, quantity in counts.items():
             delta = quantity - self.totals[kind]
@@ -235,6 +237,13 @@ class FrenchQualifiedPopups:
                 added.extend([row] * delta)
                 self.totals[kind] = quantity
         return added
+
+    def owns_fading_sprite(self, t, y, x):
+        # A bright background can erase the full suffix before the short word
+        # disappears. Only keep ownership of the same sprite row during its fade.
+        return (self.missing_since is not None and t - self.missing_since <= 1.5
+                and any(abs(row_y - y) <= 5 and abs(row_x - x) <= 7
+                        for _, row_y, row_x, _, _ in self.last_sprite_rows))
 
     def owns(self, y, x):
         # The short-word reader can lock onto the qualifier to the right of COFFRE.

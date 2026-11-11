@@ -131,3 +131,18 @@ def test_faint_french_pair_requires_three_aligned_xp_reads(monkeypatch, aligned)
     if aligned:
         assert counted[0]['chest_type'] == CT.NORMAL
         assert not counted[0]['certain_counted']
+
+def test_saturated_background_requires_three_aligned_header_and_word_reads():
+    est = E.ChestEstimator()
+    roi = np.full((V.ROI_H, V.ROI_W, 3), (190, 120, 240), dtype=np.uint8)
+    xp, dx = est.french_xp_templates[CT.NORMAL]
+    y, x = 55, 160
+    h, w = xp.shape
+    roi[y:y + h, x:x + w][xp > 0.5] = (230, 200, 250)
+    assert est._recover_saturated_french(0, roi, V.lavender_mask(roi)) is None
+    h, w = est.french_template.shape
+    roi[y + 14:y + 14 + h, x + dx:x + dx + w][est.french_template > 0.5] = (230, 200, 250)
+    mask = V.lavender_mask(roi)
+    assert est._recover_saturated_french(.1, roi, mask) is None
+    assert est._recover_saturated_french(.2, roi, mask) is None
+    assert est._recover_saturated_french(.3, roi, mask)[2:] == (CT.NORMAL, False)

@@ -147,3 +147,17 @@ def test_enlarged_qualified_popup_is_owned_in_capture_coordinates():
     assert reader.owns(round(103 / .70), round(176 / .70))
     assert sprite[1] > 140 and sprite[2] > 235
     assert reader.observe(.3, normalized) == []
+
+def test_fading_sprite_claim_is_limited_to_its_last_position():
+    reader = FrenchQualifiedPopups()
+    roi = notification()
+    rows = sum((reader.observe(t, roi) for t in (0, .1, .2)), [])
+    sprite = next(row for row in rows if row[3] == "sprite")
+    _, y, x, _, _ = sprite
+    blank = np.zeros_like(roi)
+    for t in (.3, .6, .9):
+        reader.observe(t, blank)
+    assert not reader.owns(y, x)
+    assert reader.owns_fading_sprite(1.1, y, x)
+    assert not reader.owns_fading_sprite(1.1, y + 10, x)
+    assert not reader.owns_fading_sprite(1.9, y, x)

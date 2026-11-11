@@ -245,6 +245,7 @@ class ChestEstimator:
         self.french_suffixes = chest_types.load_french_suffixes() if self.french_template is not None else {}
         self.french_reads = deque()
         self.french_faint_reads = {}
+        self.french_saturated_reads = deque()
         self.french_type_history = deque()
         self.french_scaled_reads = {}       # no votes shared between different glyph scales
         self.french_plane = None           # this frame's winning (scale, RGB ROI, mask)
@@ -262,6 +263,8 @@ class ChestEstimator:
         self.sprite = OnsetDetector(sprite_detector.EVENT_HIGH_THRESHOLD, sprite_detector.EVENT_LOW_THRESHOLD, False)
         self.pending_popups, self.pending_interactions = [], []
         self.sprite_events = []
+        if self.french_xp_templates:
+            self.french_normal_xp_blurred = V.blur_template(self.french_xp_templates[chest_types.NORMAL][0], ROBUST_SIGMA)
         self.prompt_series = deque()       # (t, score) every prompt sample
         self.prompt_obs = deque()          # (t, score, gold, gem, chest_like) for scores >= SUPPORT_MIN
         self.ammo_steps = deque()          # times of ammo-region steps
@@ -569,6 +572,12 @@ class ChestEstimator:
                     plane = None
         else:
             recovered = self._recover_french_line(t, roi, mask, score, cy, cx) if "fr:COFFRE" in self.scaled_templates else None
+        saturated_french = False
+        if recovered is None and score < 0.50 and "fr:COFFRE" in self.scaled_templates:
+            recovered = self._recover_saturated_french(t, roi, mask)
+            if recovered is not None:
+                plane = None
+                saturated_french = True
         if recovered is not None:
             cy, cx, kind, confirmed = recovered
             s, tid = (s if plane is not None else 1.0), "fr:COFFRE"
@@ -580,6 +589,8 @@ class ChestEstimator:
                            and abs(p["y"] - cy) <= th + 1 and abs(p["x"] - cx) <= tw]
         if self.scaled_onset.update(t, max(score, SCALED_TRIGGER) if recovered is not None else score, cy, cx):
             owned = self.french_group is not None and tid == "fr:COFFRE" and self.french_group.owns(cy, cx)
+            if tid == "fr:COFFRE" and self.french_group is not None and recovered is None:
+                owned = owned or self.french_group.owns_fading_sprite(t, cy, cx)
             # A normalized French tracker owns this visible group, including
             # fade/reflow. Only its XP-confirmed content changes add openings.
             tracked_french = (tid == "fr:COFFRE" and self.tracking in self.tracker_scales
@@ -593,6 +604,8 @@ class ChestEstimator:
                 if recovered is not None:
                     self.pending_scaled[-1]["confirmed"] = confirmed
                     self.pending_scaled[-1]["french_type"] = kind
+                    if saturated_french:
+                        self.pending_scaled[-1]["saturated_french"] = True
                 if SAVE_SNAPSHOTS:
                     self.pending_scaled[-1]["roi"] = roi.copy()
                 self.scaled_stats["onsets"] += 1
@@ -698,6 +711,29 @@ class ChestEstimator:
         if sum(votes.values()) < FRENCH_SCALED_CONFIRM_FRAMES:
             return None
         return y + th // 2, x + tw // 2, chest_types.decide(votes)[0], True
+
+    def _recover_saturated_french(self, t, roi, mask):
+        """Recover a bare French XP notification when the lavender mask is saturated."""
+        y0, x0 = 32, 108
+        if mask[y0:112, x0:236].mean() < 0.95:
+            return None
+        bright = (roi[y0:112, x0:236].min(axis=2) > 165).astype(np.float32)
+        xp_score, xp_y, xp_x = V.robust_correlation_at(bright, self.french_normal_xp_blurred, ROBUST_SIGMA)
+        if xp_score < 0.75:
+            return None
+        h, w = self.french_template.shape
+        y, x = xp_y + 14, xp_x + self.french_xp_templates[chest_types.NORMAL][1]
+        crop = bright[max(0, y - 2):y + h + 3, max(0, x - 4):x + w + 5]
+        word_score, _, _ = V.robust_correlation_at(crop, self.robust_templates["fr:COFFRE"], ROBUST_SIGMA)
+        if word_score < 0.55:
+            return None
+        reads = self.french_saturated_reads
+        while reads and t - reads[0][0] > 0.36:
+            reads.popleft()
+        reads.append((t, y, x))
+        if sum(abs(ry - y) <= 2 and abs(rx - x) <= 3 for _, ry, rx in reads) < FRENCH_SCALED_CONFIRM_FRAMES:
+            return None
+        return y0 + y + h // 2, x0 + x + w // 2, chest_types.NORMAL, False
 
     def _recover_faint_french(self, t, mask, score, cy, cx, scale, xp):
         """Three aligned bare COFFRE + XP pairs can start an estimated opening."""
@@ -825,6 +861,8 @@ class ChestEstimator:
             popup["french_type"] = p["french_type"]
         if "french_type_votes" in p:
             popup["french_type_votes"] = p["french_type_votes"]
+        if p.get("saturated_french"):
+            popup["saturated_french"] = True
         if p.get("run") is not None:
             popup["slot"] = (p.get("tracker_key", "small" if p.get("small") else "normal"), p["run"], "first")
         if "roi" in p:
@@ -974,6 +1012,8 @@ class ChestEstimator:
             adjusted, certain, approx = "MEDIUM", False, True
             reason = (f"scale-aware pop-up: blurred {p['template']} match {scaled['blur']:.2f} at x{scaled['scale']} "
                       f"(unscaled exact match {p['score']:.2f}) -> MEDIUM, counted approx only")
+            if p.get("saturated_french"):
+                reason = "French COFFRE and EXP header aligned across three frames on saturated background -> MEDIUM"
             if scaled.get("confirmed"):
                 adjusted = "HIGH"
                 certain = adjusted in CERTAIN_TIERS
