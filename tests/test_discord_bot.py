@@ -293,10 +293,14 @@ def test_team_summary_counts_first_submission_per_session_and_player(tmp_path, m
     assert store.team_summary() == shared
     submit("three", first, "rIN", 100, 1.5)
     assert store.team_summary() == shared
-    assert store.stats("Rin").matches == 2
+    assert (store.stats("Rin").matches, store.stats("Rin").total) == (1, 10)
     submit("four", "", "Rin", 200)
     submit("five", "1" * 32, "Sam", 40)
     assert store.team_summary() == shared
+    embed = discord_bot.public_leaderboard(store, None)
+    assert "**Synchronized totals** · 14 chests · 1 match" in embed["description"]
+    assert f"{chance:.6%}" in embed["description"]
+    assert (store.stats("Rin").matches, store.stats("Rin").total) == (2, 210)
     assert store.adjust("Sam", None) == ("Sam", 0)
     assert store.team_summary() == shared
 

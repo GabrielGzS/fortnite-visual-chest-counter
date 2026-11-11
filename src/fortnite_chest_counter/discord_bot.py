@@ -17,6 +17,24 @@ from fortnite_chest_counter import discord_scoreboard, match_stats, paths, setti
 from fortnite_chest_counter.discord_group import GroupStore, TeamSession
 
 
+def completed_matches(totals):
+    return [TeamSession(session.fingerprint, players) for session in totals.sessions()
+            if (players := tuple(player for player in session.players if player.finished))]
+
+
+def synchronized_totals(matches):
+    exposure = math.fsum(match_stats.chest_exposure(player.total, player.boost)
+                         for item in matches for player in item.players)
+    return match_stats.Summary(sum(item.certain for item in matches), sum(item.total for item in matches),
+                               exposure, matches=len(matches))
+
+
+def public_leaderboard(totals, settings):
+    players, team = totals.board()
+    history = synchronized_totals(completed_matches(totals))
+    return discord_scoreboard.make_public_embed(players, team, settings=settings, history=history)
+
+
 def register_commands(tree, guild, totals, ready, publish_board=None, board_settings=None):
     async def reply(interaction, title, detail):
         send = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
@@ -80,10 +98,8 @@ def register_commands(tree, guild, totals, ready, publish_board=None, board_sett
         await reply(interaction, "Chests opened", "\n".join(details))
 
     async def finished_matches():
-        sessions = await asyncio.to_thread(totals.sessions)
-        matches = [TeamSession(session.fingerprint, tuple(p for p in session.players if p.finished))
-                   for session in sessions]
-        return sorted((match for match in matches if match.players),
+        matches = await asyncio.to_thread(completed_matches, totals)
+        return sorted(matches,
                       key=lambda match: (match_time(match), match.fingerprint), reverse=True)
 
     def match_time(match):
@@ -129,10 +145,8 @@ def register_commands(tree, guild, totals, ready, publish_board=None, board_sett
             match_label = "match" if len(matches) == 1 else "matches"
             intro = f"**{len(matches):,}** synchronized {match_label} · Use `/match id:` to open a summary."
             if matches and page == 1:
-                exposure = math.fsum(match_stats.chest_exposure(player.total, player.boost)
-                                     for item in matches for player in item.players)
-                overall = match_totals(sum(item.certain for item in matches), sum(item.total for item in matches),
-                                       match_stats.token_chance(exposure))
+                summary = synchronized_totals(matches)
+                overall = match_totals(summary.certain, summary.total, summary.chance)
                 intro += f"\n\n**All shared matches**\n{overall}"
             rows = [f"`{item.fingerprint[:12]}` · {match_stamp(item)} · **{item.total:,}** chests · "
                     f"{len(item.players)} results" for item in matches]
@@ -171,9 +185,8 @@ def register_commands(tree, guild, totals, ready, publish_board=None, board_sett
             link = await publish_board(interaction.channel_id)
             await interaction.followup.send(f"Leaderboard published: {link}", ephemeral=True)
             return
-        players, team = await asyncio.to_thread(totals.board)
         settings = board_settings() if board_settings is not None else None
-        embed = discord_scoreboard.make_public_embed(players, team, settings=settings)
+        embed = await asyncio.to_thread(public_leaderboard, totals, settings)
         if interaction.app_permissions.embed_links:
             await interaction.followup.send(embed=discord.Embed.from_dict(embed),
                                             allowed_mentions=discord.AllowedMentions.none())
@@ -341,8 +354,7 @@ class GuildBot(discord.Client):
                 raise ValueError("Grant View Channel, Send Messages and Embed Links in the leaderboard channel.")
             if settings is not None:
                 self.board_settings = settings
-            players, team = await asyncio.to_thread(self.totals.board)
-            data = discord_scoreboard.make_public_embed(players, team, settings=self.board_settings)
+            data = await asyncio.to_thread(public_leaderboard, self.totals, self.board_settings)
             same_channel = prior is not None and prior[0] == target
             if channel_id is None and self._last_board == (prior, data):
                 return f"https://discord.com/channels/{guild_id}/{target}/{prior[1]}"

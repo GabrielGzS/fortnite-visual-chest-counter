@@ -118,7 +118,7 @@ your stream needs more (for example 1080p60 and a higher bitrate), that works to
 ## What to expect
 
 - **Counting works as on one PC.** The counter sees only the picture it receives, so the usual rules apply: 16:9 picture,
-  HUD visible, English or Portuguese (Brazil) pop-ups, CERTAIN and APPROX ([OBS counter definitions](../../README.md#overlay-and-obs)).
+  HUD visible, English or Portuguese (Brazil) pop-ups, CERTAIN and APPROX ([OBS counter definitions](obs-overlay.md)).
 - **A short delay.** The picture reaches the streaming PC slightly after it happens, so each chest is counted that much
   later too. In our test there was no noticeable lag.
 - **Picture quality matters.** A very low bitrate or an overloaded network blurs or breaks up the small pop-up text.

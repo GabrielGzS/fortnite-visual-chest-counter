@@ -382,7 +382,7 @@ class GroupStore:
     def _players(self, db):
         rows = db.execute("""
             SELECT m.player, m.name, m.count, d.certain, d.chest_types,
-                   COALESCE(c.amount, 0), m.rowid > COALESCE(c.reset_row, 0), COALESCE(s.boost, 1.0)
+                   COALESCE(c.amount, 0), m.rowid > COALESCE(c.reset_row, 0), COALESCE(s.boost, 1.0), s.fingerprint
             FROM contributions AS m
             LEFT JOIN corrections AS c ON c.webhook = m.webhook AND c.player = m.player
             LEFT JOIN event_details AS d ON d.webhook = m.webhook AND d.event = m.event
@@ -392,8 +392,14 @@ class GroupStore:
         """, (self.webhook_id,))
         groups = {}
         identities = {}
-        for key, name, count, certain, chest_types, amount, included, boost in rows:
+        seen = set()
+        for key, name, count, certain, chest_types, amount, included, boost, fingerprint in rows:
             identities[key] = name, amount
+            if fingerprint is not None:
+                identity = key, fingerprint
+                if identity in seen:
+                    continue
+                seen.add(identity)
             if included:
                 groups.setdefault(key, []).append(Player(name, count, certain, json.loads(chest_types or "{}"),
                                                           count, confirmed_total=count if certain is not None else 0,

@@ -358,11 +358,16 @@ def type_breakdown(chest_types):
                       for key, label in discord_group.GROUP_TYPE_LABELS.items() if chest_types.get(key))
 
 
-def make_public_embed(players, team=None, *, settings=None):
+def make_public_embed(players, team=None, *, settings=None, history=None):
     """Readable bot output, separate from the webhook payload read by clients."""
     players = players[:_MAX_RANKS]
     embed = make_embed((), settings=settings)
     embed["description"] = "Player totals across shared results." if players else "No matches shared yet."
+    if history is not None and history.matches:
+        label = "match" if history.matches == 1 else "matches"
+        embed["description"] = (f"**Synchronized totals** · {history.total:,} chests · {history.matches:,} {label}\n"
+                                f"Estimated Pirate Token chance · **{history.chance}**\n\n"
+                                "Player totals may also include older results without a match ID.")
     if settings is not None:
         mode, boost = settings
         embed["footer"]["text"] = f"Current group settings · {mode} ×{boost:g}"
@@ -375,8 +380,9 @@ def make_public_embed(players, team=None, *, settings=None):
         players_received = "player" if team.players == 1 else "players"
         chance = team.chance_percent or (f"about 1 in {team.one_in:,}" if team.one_in else "0%")
         value = (f"**{team.chests:,}** chests · Results received from {team.players:,} {players_received}\n"
-                 f"Estimated Pirate Token chance · **{chance}**\n"
-                 f"Matches synced in total · {team.matches:,}")
+                 f"Estimated Pirate Token chance · **{chance}**")
+        if history is None or not history.matches:
+            value += f"\nMatches synced in total · {team.matches:,}"
         embed["fields"].append({"name": "Latest synchronized match", "value": value, "inline": False})
     return embed
 

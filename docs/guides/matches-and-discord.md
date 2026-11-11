@@ -15,7 +15,7 @@ The Dashboard mode selector defaults to **Auto**. It reads the Battle Royale pla
 3. The Host starts the bot, chooses a **Leaderboard channel** and clicks **Publish leaderboard**. The dropdown lists text channels where the bot can view the channel, send messages and embed links.
 4. The Host uses **Copy sync ID**. Guests save that value under **Shared data message**. This feed message lets Guests read the same group data without receiving the bot token.
 
-The leaderboard ranks each player by the chests in their published results. Click a player name to open their stats. The public board and `/chests` show a cumulative Pirate Token estimate from each player’s shared chests, using the saved boosts. The board shows player totals first and a separate summary for the latest synchronized match. Use `/chests` for chest types and the confirmed/estimated breakdown. **Match history + live** in the overlay uses your local match history, linked teammate counts and the current counter.
+The leaderboard ranks each player by the chests in their published results. Click a player name to open their stats. The public board and `/chests` show a cumulative Pirate Token estimate from each player’s shared chests, using the saved boosts. The board starts with the same synchronized total and odds as `/match`, then shows the player ranking and the latest synchronized match. Linked results count once per player and match ID. The player ranking also includes older unlinked reports and honors administrator adjustments and resets. The synchronized total reflects the full linked history. Use `/chests` for chest types and the confirmed/estimated breakdown. **Match history + live** in the overlay uses your local match history, linked teammate counts and the current counter.
 
 The collection webhook and the public leaderboard have separate jobs. Submissions go to the webhook's feed channel. The bot can publish the visible board in a different channel. Publishing again in another channel moves the tracked board there. A channel permission failure leaves the previous publication available for retry.
 
@@ -56,14 +56,18 @@ Bot and webhook credentials are stored in Windows Credential Manager.
 |---|---|
 | `/chests` | Show shared totals, or a player's stats including chest types. |
 | `/match` | Browse completed shared matches by page. Choose an ID to see the chest counts, participating reports and estimated Pirate Token odds for one match. |
-| `/leaderboard` | Show the same full ranking format as the published board. |
+| `/leaderboard` | Show the synchronized total and the same ranking as the published board. |
 | `/leaderboard publish:true` | Publish or move the tracked live board to this channel. Requires Manage Server. |
 | `/add` | Correct a player's total. Requires Manage Server. |
 | `/reset` | Reset a player's standing. Requires Manage Server. |
 
 Commands work in the configured server wherever Discord allows them. From **Group**, the Host can also reset checked players or delete the published leaderboard. Saved local match history is managed separately.
 
+The first page shows the cumulative totals and estimated Pirate Token chance for all synchronized matches. Use `/match page:2` for older entries and `/match id:<ID>` to open one match. The ID suggestions list recent matches. The history includes completed reports linked to a match ID, and reflects replay corrections received by the bot. Dates indicate when reports were received or updated. Private matches and old reports without a match ID stay outside this view.
+
 [Chest Tracker setup reference](https://github.com/Xxoris190/chest-tracker#set-up-the-discord-bot)
+
+## Automatic replay verification
 
 Select a match in **Match history** and click **Compare replay…**. An automatically verified match opens its saved comparison immediately, including after replay cleanup. For an unverified match, choose the `data.json` report exported by LED-N.
 
@@ -78,9 +82,7 @@ In the 2026-11-11 HDR test, the replay identified normal, rare, rare sprite and 
 | Ammo box and food box | Check that chest counts stay unchanged | Both appear as separate interactions |
 | Fast stacked openings and different HUD sizes | Compare against the replay in HDR and SDR | Verify the count and types after returning to the lobby |
 
-#The first page shows the cumulative totals and estimated Pirate Token chance for all synchronized matches. Use `/match page:2` for older entries and `/match id:<ID>` to open one match. The ID suggestions list recent matches. The history includes completed reports linked to a match ID, and reflects replay corrections received by the bot. Dates indicate when reports were received or updated. Private matches and old reports without a match ID stay outside this view.
-
-## Automatic replay verification
+### Setup and runtime
 
 ![Match automation and replay settings](../previews/replay-settings.png)
 

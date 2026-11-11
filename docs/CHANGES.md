@@ -7,7 +7,8 @@ changes; the pull request links here. Versioned release notes describe published
 
 ## Changes
 
-- Simplify the Discord leaderboard, with cumulative player totals before the latest synchronized match. Add
+- Show synchronized chests, matches and Pirate Token odds above the Discord ranking. Count one result per
+  player and match ID in the ranking, and retain older unlinked results. Add
   `/match` for paginated shared history and per-match summaries. Chest types remain available in `/chests`.
 - Share the Pirate Token calculation across Dashboard, overlays and Discord. Keep the saved cumulative totals
   stable during OBS updates and synchronize verified match corrections to Guests without duplicating a result.

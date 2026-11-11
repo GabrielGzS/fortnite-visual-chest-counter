@@ -86,13 +86,13 @@ One person runs the **Host** bot. Other players use **Guest**, their own name an
 | Command | Action |
 |---|---|
 | `/chests` | Show shared totals or a player's counts and cumulative Pirate Token estimate. |
-| `/leaderboard` | Show player totals and the latest synchronized match. |
+| `/leaderboard` | Show the synchronized total, player rankings and the latest synchronized match. |
 | `/match` | Browse shared match history or open a specific match by ID. |
 | `/leaderboard publish:true` | Publish or move the auto-updating board to the current channel. Requires Manage Server. |
 | `/add` | Correct a player's total. Requires Manage Server. |
 | `/reset` | Reset a player's standing. Requires Manage Server. |
 
-The webhook receives submissions in its feed channel. The public bot leaderboard can live in another channel. See [setup, permissions and sharing](docs/guides/matches-and-discord.md).
+The synchronized total at the top of the board matches `/match`: one result per player and match ID. Player rankings can also include older results without a match ID and administrator adjustments. The webhook receives submissions in its feed channel. The public bot leaderboard can live in another channel. See [setup, permissions and sharing](docs/guides/matches-and-discord.md).
 
 ### Windows tools and diagnostics
 
