@@ -250,8 +250,8 @@ def test_simulate_counts_the_same_in_every_mode():
 
 
 def test_the_desktop_app_sees_no_difference():
-    def shape(messages):
-        return [(m["type"], sorted(m)) for m in messages if m["type"] != "status"]
+    def shape(messages):                                                  # "match" is the status line added on purpose in M7
+        return [(m["type"], sorted(m)) for m in messages if m["type"] not in ("status", "match")]
 
     with tempfile.TemporaryDirectory() as off, tempfile.TemporaryDirectory() as on:
         plain, _, plain_messages = T.run_app(off, "off")
@@ -659,7 +659,7 @@ def test_a_snapshot_reports_the_open_match_and_nothing_otherwise():
     script.machine = machine
     M2.played_match(script).show(2, black=True)
     snap = script.machine.snapshot()
-    assert snap["match_number"] == 1 and snap["active_seconds"] > 50 and snap["uncertain_seconds"] > 0 and snap["english_confirmed"] is True and set(snap) == set(H.SNAPSHOT_FIELDS)
+    assert snap["match_number"] == 1 and snap["active_seconds"] > 50 and snap["uncertain_seconds"] > 0 and snap["english_confirmed"] is True and set(H.SNAPSHOT_FIELDS) <= set(snap)
     (record,) = [e for e in script.machine.finish(script.t - 1) if isinstance(e, S.MatchRecord)]      # closing at the snapshot's own moment adds no time
     assert (snap["observed_seconds"], snap["active_seconds"], snap["spectating_seconds"], snap["uncertain_seconds"]) == (record.observed_seconds, record.active_seconds, record.spectating_seconds, record.uncertain_seconds)
     assert (snap["opened_t"], snap["played_from_t"]) == (record.opened_t, record.played_from_t) and snap["active_seconds"] < snap["observed_seconds"]

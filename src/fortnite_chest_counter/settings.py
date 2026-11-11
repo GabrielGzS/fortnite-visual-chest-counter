@@ -116,6 +116,7 @@ CAPTURE_MODES = ("off", "marks", "events", "session")
 CAPTURE_QUALITIES = ("standard", "lossless")
 MATCH_MODES = ("off", "shadow", "on")
 MATCH_HEARTBEATS = (30, 60, 300, 600)       # a fixed list: an arbitrary small value could write to the disk constantly
+HEARTBEAT_CHOICES = ((30, "30 seconds"), (60, "1 minute   (recommended)"), (300, "5 minutes"), (600, "10 minutes"))     # the app's Settings page
 # The app's language choice -> [detector] languages. "Both" is not automatic detection: it checks both words all the time.
 # (Real "Auto" - identify the language per match - needs match recognition first; see docs/ROADMAP.md.)
 LANGUAGE_CHOICES = (("English", ["en"]), ("Portuguese (Brazil)", ["pt"]), ("Both (English + Portuguese (Brazil))", ["en", "pt"]))

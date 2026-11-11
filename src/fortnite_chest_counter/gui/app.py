@@ -209,6 +209,56 @@ def types_text(breakdown):
     return "   ·   ".join(parts) if parts else "no chests yet"
 
 
+MATCH_SCREENS = {"LOBBY": "In the lobby", "LOADING": "Loading", "PRE_GAME": "Waiting for the match to start"}
+MATCH_STALE_SECONDS = 5                     # the worker reports once a second of video: this long without one means no video
+
+
+def match_clock(seconds):
+    """"12:34" or "1:02:03", or None when the time is not known: never a made-up 0:00."""
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 0 <= seconds < 10 ** 7:
+        return None
+    minutes, rest = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02d}:{rest:02d}" if hours else f"{minutes:02d}:{rest:02d}"
+
+
+def _match_doubt(match):
+    """Why this match cannot be taken at face value, or "" when its whole course has been seen so far."""
+    if not match.get("english_confirmed"):
+        return "not confirmed yet (no English game text seen)"
+    if not match.get("observed_from_start"):
+        return "partial: joined after the start"
+    if match.get("discontinuity"):
+        return "partial: part of it was not seen"
+    return ""
+
+
+def match_line(message):
+    """One worker "match" message -> (text, colour) for the Dashboard. It says only what the evidence supports: seeing play is not knowing
+    a whole match was seen, and an ending on screen does not make a match complete."""
+    if message.get("failed"):
+        return "Stopped for this session after an error. Counting is not affected.", theme.REJECT
+    if message.get("unavailable"):
+        return "Not available for this session. Counting is not affected.", theme.MUTED
+    state, match = message.get("state"), message.get("match") or {}
+    if state in MATCH_SCREENS:
+        text, color = MATCH_SCREENS[state], theme.TEXT
+    elif state == "IN_MATCH" and match:
+        doubt, clock = _match_doubt(match), match_clock(match.get("active_seconds"))
+        lead = "In match" if match.get("english_confirmed") else "Possibly in a match"
+        text = lead + (f", {clock}{' seen' if doubt else ''}" if clock else "") + (f"   ·   {doubt}" if doubt else "")
+        color = theme.APPROX if doubt else theme.CERTAIN
+    elif state == "ELIMINATED":
+        doubt = _match_doubt(match) if match else ""
+        text = ("Match over" if match.get("ended_by") in ("placed", "victory") else "Spectating or out of the match") + (f"   ·   {doubt}" if doubt else "")
+        color = theme.INFO
+    else:
+        return "Not sure yet", theme.MUTED
+    if message.get("picture") in ("black", "frozen"):
+        text += "   ·   no picture right now"
+    return text, color
+
+
 def label(text, name=None, wrap=False):
     widget = QLabel(text)
     if name:
@@ -850,6 +900,16 @@ class Dashboard(QWidget):
                               "OBS still shows only the two totals.")
         types.addWidget(self.types, 1)
         layout.addLayout(types)
+        self.match_row = QWidget()                            # v0.3.0: read-only, and only while match tracking is on
+        match_layout = QHBoxLayout(self.match_row)
+        match_layout.setContentsMargins(0, 0, 0, 0)
+        match_layout.addWidget(label("Match (experimental):", "hint"), 0, Qt.AlignTop)
+        self.match = label("", "hint", wrap=True)
+        self.match.setToolTip("What match tracking sees right now. It only reports: it never changes your counts or what OBS shows. "
+                              "\"Partial\" means part of the match was not seen, so it will not count as a complete match.")
+        match_layout.addWidget(self.match, 1)
+        self.match_row.hide()
+        layout.addWidget(self.match_row)
         viewers = QHBoxLayout()
         viewers.addWidget(label("Viewers see:", "hint"), 0, Qt.AlignTop)
         self.viewers = label("", "hint", wrap=True)
@@ -1348,6 +1408,24 @@ class SettingsPage(QWidget):
         box_layout.addLayout(row)
         layout.addWidget(box)
 
+        box, box_layout = card("Match tracking (experimental)",
+                               "Follows your matches while counting and keeps a history of them for future statistics. English "
+                               "games only for now. It never changes your counts or what OBS shows.")
+        self.match_on = QCheckBox("Track matches and keep a match history")
+        box_layout.addWidget(self.match_on)
+        row = QHBoxLayout()
+        row.addWidget(label("Save progress every"))
+        self.heartbeat = QComboBox()
+        for seconds, text in settings.HEARTBEAT_CHOICES:
+            self.heartbeat.addItem(text, seconds)
+        row.addWidget(self.heartbeat, 1)
+        box_layout.addLayout(row)
+        box_layout.addWidget(label("Matches are still followed once a second whatever you choose. A longer interval writes less to the disk, "
+                                   "but after a crash more of the last moments count as uncertain.", "hint", wrap=True))
+        self.match_on.toggled.connect(self.heartbeat.setEnabled)
+        self._match_mode = "off"
+        layout.addWidget(box)
+
         box, box_layout = card("Window")
         self.remember_window = QCheckBox("Remember window size and position (the app reopens the way you closed it)")
         box_layout.addWidget(self.remember_window)
@@ -1416,6 +1494,10 @@ class SettingsPage(QWidget):
         self.snapshots.setChecked(cfg["logging"]["save_snapshots"])
         self.snapshots.setEnabled(cfg["logging"]["enabled"])
         self.lossless.setChecked(cfg["capture"]["quality"] == "lossless")
+        self._match_mode = cfg["match"]["mode"]
+        self.match_on.setChecked(self._match_mode == "on")
+        self.heartbeat.setCurrentIndex(max(self.heartbeat.findData(cfg["match"]["heartbeat_seconds"]), 0))
+        self.heartbeat.setEnabled(self.match_on.isChecked())
         self.remember_window.setChecked(cfg["app"]["remember_window"])
         update = cfg["update"]
         self.update_auto.setChecked(update["check_automatically"])
@@ -1455,6 +1537,10 @@ class SettingsPage(QWidget):
             C.update_config_file(config_file(), "logging", {"enabled": self.logging.isChecked(),
                                                             "save_snapshots": self.snapshots.isChecked()})
             C.update_config_file(config_file(), "capture", {"quality": "lossless" if self.lossless.isChecked() else "standard"})
+            # "shadow" is a developer setting in config.toml: leaving the box unticked must not quietly replace it
+            mode = "on" if self.match_on.isChecked() else "shadow" if self._match_mode == "shadow" else "off"
+            C.update_config_file(config_file(), "match", {"mode": mode, "heartbeat_seconds": self.heartbeat.currentData()})
+            self._match_mode = mode
             C.update_config_file(config_file(), "app", {"remember_window": self.remember_window.isChecked()})
             C.update_config_file(config_file(), "update", {"check_automatically": self.update_auto.isChecked(),
                                                            "download_bandwidth": self.update_bandwidth.currentData(),
@@ -1702,6 +1788,7 @@ class MainWindow(QMainWindow):
         self.quit_when_stopped = False
         self.recording = None                   # the worker's current capture ("capture" message), None = not recording
         self.stream_state = None                # Livestream URL connection state ("stream" messages), None = not a stream
+        self.match_seen_at = None               # when the last match status arrived, while one is being reported
         self.marks_this_session = 0
         self.hotkey = None
         self.sources = []
@@ -2124,6 +2211,9 @@ class MainWindow(QMainWindow):
         if not running:
             self.started_at = None
             self.stream_state = None
+            self.match_seen_at = None
+            d.match.setText("")
+            d.match_row.hide()
             d.metrics.setText("Not counting.")
             d.preview.view.setStyleSheet("")
             d.preview.clear()
@@ -2316,6 +2406,8 @@ class MainWindow(QMainWindow):
             self.dashboard.types.setText(types_text(message.get("breakdown")))
         elif kind == "stream":
             self.show_stream_state(message.get("state"))
+        elif kind == "match":
+            self.show_match(message)
         elif kind == "error":
             self.error_seen = True
             self.dashboard.show_banner(str(message.get("text", "")))
@@ -2380,6 +2472,23 @@ class MainWindow(QMainWindow):
             if self.quit_when_stopped:
                 self.close()
 
+    def show_match(self, message):
+        """The Dashboard's match line. Read-only: it changes nothing but its own text."""
+        if self.mode not in ("connecting", "counting", "stopping"):
+            return
+        text, color = match_line(message)
+        d = self.dashboard
+        d.match.setText(text)
+        d.match.setStyleSheet(f"color: {color};")
+        d.match_row.show()
+        self.match_seen_at = None if message.get("failed") or message.get("unavailable") else time.monotonic()
+
+    def _check_match_video(self):
+        """The worker reports once a second of video, so silence means no video is arriving."""
+        if self.match_seen_at is not None and time.monotonic() - self.match_seen_at >= MATCH_STALE_SECONDS:
+            self.dashboard.match.setText("No video right now")
+            self.dashboard.match.setStyleSheet(f"color: {theme.MUTED};")
+
     def show_stream_state(self, state):
         """Livestream URL: the Dashboard pill and the preview say when the stream is not delivering video."""
         if state not in STREAM_STATES or STREAM_STATES[state][1] is None:
@@ -2439,6 +2548,7 @@ class MainWindow(QMainWindow):
                 self._result_watch_until = None
             else:
                 self.show_update_result()
+        self._check_match_video()
         if not self.worker.running():
             self.read_state()
         elif self.mode == "counting" and self.started_at is not None:

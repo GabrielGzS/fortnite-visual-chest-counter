@@ -1149,6 +1149,7 @@ def _open_history(cfg, session, source_type):
         return None
     if not session.persist:
         CONSOLE.warn("match history needs saving turned on ([state] persist); none is kept for this run")
+        CONSOLE.emit("match", unavailable=True)
         return None
     try:
         from fortnite_chest_counter.match_history import HistoryWriter
@@ -1157,6 +1158,7 @@ def _open_history(cfg, session, source_type):
                           session.state["approximate"], session.state["events_logged"], cfg["match"]["heartbeat_seconds"])
     except Exception as error:
         CONSOLE.warn(f"match history could not start ({error}); counting is not affected")
+        CONSOLE.emit("match", unavailable=True)
         return None
     session.history = history
     return history
@@ -1172,9 +1174,12 @@ def _open_tracker(cfg, session, history=None, source=None):
     try:
         from fortnite_chest_counter.match_tracker import MatchTracker
         return MatchTracker(lambda record: session.log.write({**record, "logged_at": now_iso()}), CONSOLE.warn, history=history,
-                            heartbeat_seconds=cfg["match"].get("heartbeat_seconds"), frames=(lambda: (source.frames_processed, source.frames_dropped)) if source is not None else None)
+                            heartbeat_seconds=cfg["match"].get("heartbeat_seconds"), frames=(lambda: (source.frames_processed, source.frames_dropped)) if source is not None else None,
+                            status=(lambda **fields: CONSOLE.emit("match", **fields)) if history is not None else None)
     except Exception as error:
         CONSOLE.warn(f"match tracking could not start ({error}); counting is not affected")
+        if history is not None:
+            CONSOLE.emit("match", unavailable=True)
         return None
 
 

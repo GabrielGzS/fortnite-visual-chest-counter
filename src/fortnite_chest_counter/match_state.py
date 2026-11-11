@@ -188,7 +188,7 @@ class MatchStateMachine:
             return None
         return {"match_number": match.number, "opened_t": match.opened_t, "played_from_t": match.played_from_t, "observed_seconds": round(match.observed, 3),
                 "active_seconds": round(match.active, 3), "spectating_seconds": round(match.spectating, 3), "uncertain_seconds": round(match.uncertain, 3),
-                "english_confirmed": bool(match.english)}
+                "english_confirmed": bool(match.english), "observed_from_start": match.observed_from_start, "discontinuity": match.discontinuity, "ended_by": match.ended_by}
 
     # ------------------------------------------------------------------ the two calls
     def update(self, observation):

@@ -41,10 +41,11 @@ SOURCE_LOST_REASONS = frozenset({"video source stopped"})
 
 
 class MatchTracker:
-    def __init__(self, write, warn, cues=M, machine=None, history=None, heartbeat_seconds=60, frames=None):
+    def __init__(self, write, warn, cues=M, machine=None, history=None, heartbeat_seconds=60, frames=None, status=None):
         """`write` takes one dict for the session log, `warn` one message for the user. Raises if the templates cannot be loaded.
-        `history` is a HistoryWriter in "on" mode; `frames` returns (frames processed, frames dropped) for its checkpoints."""
-        self._write, self._warn, self._cues = write, warn, cues
+        `history` is a HistoryWriter in "on" mode; `frames` returns (frames processed, frames dropped) for its checkpoints.
+        `status` receives what the app's status line shows, once per sample. It is read-only reporting."""
+        self._write, self._warn, self._cues, self._status = write, warn, cues, status
         self._history, self._beat_every, self._frames, self._last_beat_t = history, heartbeat_seconds, frames, None
         self._mode = MODE if history is None else "on"
         self._reader = cues.CueReader()
@@ -132,7 +133,17 @@ class MatchTracker:
         chests, self._pending = tuple(self._pending), []
         self._chests["no_picture" if picture.black or picture.frozen else "delivered"] += len(chests)
         self._checkpoint(t, self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests))))
+        self._tell(t, picture)
         return True
+
+    def _tell(self, t, picture):
+        """If the app cannot be told, only its status line stops: recording carries on."""
+        if self._status is None:
+            return
+        try:
+            self._status(state=self._machine.state, t=round(t, 1), picture="black" if picture.black else "frozen" if picture.frozen else "live", match=self._machine.snapshot())
+        except Exception:
+            self._status = None
 
     def _report(self, events):
         """-> True if a match opened or closed."""
@@ -173,7 +184,8 @@ class MatchTracker:
         self._pending.clear()
         detail = f"{type(error).__name__}: {error}"
         for report in (lambda: self._warn(f"match tracking stopped for this run ({detail}); counting is not affected"),
-                       lambda: self._log("tracker_disabled", where=where, error=detail, last_t=self._last_seen_t)):
+                       lambda: self._log("tracker_disabled", where=where, error=detail, last_t=self._last_seen_t),
+                       lambda: self._status is not None and self._status(failed=True)):
             try:
                 report()
             except Exception:
