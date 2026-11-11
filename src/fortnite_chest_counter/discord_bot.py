@@ -12,9 +12,9 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-from fortnite_chest_counter import discord_scoreboard, paths, settings
+from fortnite_chest_counter import discord_scoreboard, match_stats, paths, settings
 
-from fortnite_chest_counter.discord_group import GroupStore
+from fortnite_chest_counter.discord_group import GroupStore, TeamSession
 
 
 def register_commands(tree, guild, totals, ready, publish_board=None, board_settings=None):
@@ -78,6 +78,85 @@ def register_commands(tree, guild, totals, ready, publish_board=None, board_sett
         if row.adjustment:
             details.append(f"Manual adjustment: {row.adjustment:+,}")
         await reply(interaction, "Chests opened", "\n".join(details))
+
+    async def finished_matches():
+        sessions = await asyncio.to_thread(totals.sessions)
+        matches = [TeamSession(session.fingerprint, tuple(p for p in session.players if p.finished))
+                   for session in sessions]
+        return sorted((match for match in matches if match.players),
+                      key=lambda match: (match_time(match), match.fingerprint), reverse=True)
+
+    def match_time(match):
+        return max(player.updated_at for player in match.players)
+
+    def match_stamp(match):
+        stamp = int(match_time(match))
+        return f"<t:{stamp}:f>" if stamp else "Date unavailable"
+
+    def match_totals(certain, total, chance):
+        return (f"**{total:,}** chests · {certain:,} confirmed · {total - certain:,} estimated\n"
+                f"Estimated Pirate Token chance · **{chance}**")
+
+    async def match_choices(interaction, current):
+        if interaction.guild_id != guild.id or not ready():
+            return []
+        try:
+            matches = await finished_matches()
+        except (OSError, sqlite3.Error, ValueError):
+            return []
+        prefix = current.strip().casefold()
+        return [app_commands.Choice(
+            name=f"{match.fingerprint[:12]} · {match.total:,} chests · {len(match.players)} results",
+            value=match.fingerprint)
+            for match in matches if match.fingerprint.startswith(prefix)][:25]
+
+    @tree.command(guild=guild, description="Browse shared match history or view a specific match")
+    @app_commands.describe(id="Match ID from the history, or pick a suggestion",
+                           page="Page number, starting at 1")
+    @app_commands.autocomplete(id=match_choices)
+    async def match(interaction: discord.Interaction, id: str | None = None,
+                    page: app_commands.Range[int, 1] = 1):
+        if not await check(interaction):
+            return
+        await interaction.response.defer(thinking=True)
+        try:
+            matches = await finished_matches()
+        except (OSError, sqlite3.Error, ValueError):
+            await error(interaction, "Could not read shared match history. Try again in a moment.")
+            return
+        if id is None:
+            title = "Shared match history"
+            match_label = "match" if len(matches) == 1 else "matches"
+            intro = f"**{len(matches):,}** synchronized {match_label} · Use `/match id:` to open a summary."
+            if matches and page == 1:
+                exposure = math.fsum(match_stats.chest_exposure(player.total, player.boost)
+                                     for item in matches for player in item.players)
+                overall = match_totals(sum(item.certain for item in matches), sum(item.total for item in matches),
+                                       match_stats.token_chance(exposure))
+                intro += f"\n\n**All shared matches**\n{overall}"
+            rows = [f"`{item.fingerprint[:12]}` · {match_stamp(item)} · **{item.total:,}** chests · "
+                    f"{len(item.players)} results" for item in matches]
+        else:
+            prefix = id.strip().casefold()
+            found = [item for item in matches if prefix and item.fingerprint.startswith(prefix)]
+            if len(found) != 1:
+                await error(interaction, "Use a unique match ID from `/match` or choose a suggestion.")
+                return
+            item = found[0]
+            title = f"Match {item.fingerprint[:12]}"
+            result_label = "result" if len(item.players) == 1 else "results"
+            intro = f"{match_stamp(item)} · {len(item.players)} {result_label} received\n{match_totals(item.certain, item.total, item.chance_percent)}"
+            rows = [f"**{discord.utils.escape_markdown(player.name)}** · {player.total:,} chests · "
+                    f"{player.certain:,} confirmed · {player.total - player.certain:,} estimated"
+                    for player in item.players]
+        page_size = 8
+        pages = max(1, (len(rows) + page_size - 1) // page_size)
+        if page > pages:
+            await error(interaction, f"Choose a page from 1 to {pages:,}.")
+            return
+        first = (page - 1) * page_size
+        body = "\n".join(rows[first:first + page_size]) or "No matches shared yet."
+        await reply(interaction, title, f"{intro}\n\n{body}\n\nPage {page:,} / {pages:,}")
 
     @tree.command(guild=guild, description="Show the full leaderboard or publish it in this channel")
     @app_commands.describe(publish="Publish the auto-updating board here (Manage Server required)")
@@ -393,8 +472,8 @@ class GuildBot(discord.Client):
             text = idle
             if saved:
                 key = "discord_presence_group_text"
-                chance = -math.expm1(math.fsum(player.log_no_drop for player in players))
-                history = render(config.get(key, defaults[key]), players=len(players), chance=f"{chance:.6%}",
+                chance = match_stats.token_chance(math.fsum(player.log_no_drop for player in players))
+                history = render(config.get(key, defaults[key]), players=len(players), chance=chance,
                                  total=sum(player.total for player in players), matches=team.matches)
                 text = " · ".join(part for part in (idle, history) if part)[:128]
         activity_type = getattr(discord.ActivityType, config.get("discord_presence_activity", "watching"),

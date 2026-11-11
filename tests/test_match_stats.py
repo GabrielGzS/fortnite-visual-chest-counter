@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from fortnite_chest_counter import match_stats
+from fortnite_chest_counter import discord_group, match_stats, overlay_layout, settings
 
 
 def member(name, total, boost=1.0):
@@ -41,3 +41,21 @@ def test_private_match_and_unverified_solo_have_no_team():
     assert match_stats.team(shared, "Other") is None
     match = SimpleNamespace(session_fingerprint="x", group_webhook_id="", player="Alex")
     assert match_stats.saved_team(match, {"x": shared}, "group") is None
+
+
+def test_mixed_boost_odds_agree_across_history_overlay_and_discord():
+    players = (
+        discord_group.SessionPlayer("Alex", 5, 10, 1.0, finished=True),
+        discord_group.SessionPlayer("Sam", 12, 20, 2.0, finished=True),
+    )
+    session = discord_group.TeamSession("a" * 64, players)
+    team = match_stats.team(session, "Alex")
+    assert team is not None
+    expected = 1 - (1 - 1 / 137_500) ** 10 * (1 - 2 / 137_500) ** 20
+    assert team.chance == session.chance_percent == f"{expected:.6%}"
+    assert (team.total, team.certain) == (30, 17)
+    display = dict(settings.DEFAULTS["display"], use_custom_sections=True,
+                   screen_team_enabled=True, screen_team_template="{total} | {chance}")
+    context = {"team": {"certain": team.certain, "total": team.total,
+                        "log_no_drop": team.log_no_drop}}
+    assert overlay_layout.render_sections(display, context)[1] == f"30 | {team.chance}"

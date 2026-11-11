@@ -34,6 +34,8 @@ These are local renderings with sample data. The leaderboard uses the bot’s pu
 
 ![Simulated Discord leaderboard](discord-leaderboard.png)
 
+![Simulated shared match history and match summary](discord-match-history.png)
+
 ![Simulated bot profile and presence](discord-profile.png)
 
 ## Artwork

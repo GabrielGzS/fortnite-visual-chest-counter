@@ -133,7 +133,7 @@ def test_guild_registration_and_runtime_permission_check(tmp_path, monkeypatch):
         monkeypatch.setattr(bot.http, "upsert_guild_command", upsert)
         await bot.setup_hook()
         assert {(app, guild_id) for app, guild_id, _ in upserts} == {(456, 123)}
-        assert {payload["name"] for _, _, payload in upserts} == {"chests", "leaderboard", "add", "reset"}
+        assert {payload["name"] for _, _, payload in upserts} == {"chests", "leaderboard", "match", "add", "reset"}
         assert not bot.tree.get_commands()
         assert bot.feed_channel is feed
         assert bot.intents.message_content and not bot.intents.members
@@ -417,11 +417,41 @@ def test_leaderboard_command_reuses_rich_embed_and_checks_publish_permission(tmp
         assert actual["title"] == expected["title"]
         assert actual["fields"] == expected["fields"]
         assert "Pirate Token chance · **0.005818%**" in actual["fields"][0]["value"]
+        assert "Rare chest" not in actual["fields"][0]["value"]
+        assert actual["fields"][-1]["name"] == "Latest synchronized match"
+        assert "Results received from 1 player" in actual["fields"][-1]["value"]
         monkeypatch.setattr(store, "stats", lambda player: players[0])
         await tree.get_command("chests", guild=guild).callback(interaction, player="Rin")
         assert "Pirate Token chance · **0.005818%**" in calls[-1][1]["embed"].description
         assert actual["description"] == expected["description"]
         assert calls[0] == ("defer", {"thinking": True, "ephemeral": False})
+
+        fingerprint = "a" * 64
+        finished = discord_group.SessionPlayer("Rin", 5, 8, 1, finished=True, updated_at=100)
+        live = discord_group.SessionPlayer("Echo", 2, 10, 1, updated_at=200)
+        previous = discord_group.SessionPlayer("Other", 2, 3, 2, finished=True, updated_at=90)
+        monkeypatch.setattr(store, "sessions", lambda: (
+            discord_group.TeamSession(fingerprint, (finished, live)),
+            discord_group.TeamSession("b" * 64, (live,)),
+            discord_group.TeamSession("c" * 64, (previous,)),
+        ))
+        interaction.response.is_done = lambda: True
+        match = tree.get_command("match", guild=guild)
+        await match.callback(interaction)
+        history = calls[-1][1]["embed"].description
+        assert "2** synchronized matches" in history
+        assert "All shared matches" in history
+        assert "**11** chests · 7 confirmed · 4 estimated" in history
+        assert "0.010181%" in history
+        assert fingerprint[:12] in history and "bbbb" not in history
+        await match.callback(interaction, id=fingerprint[:12])
+        summary = calls[-1][1]["embed"].description
+        assert "**8** chests · 5 confirmed · 3 estimated" in summary
+        assert "0.005818%" in summary and "Echo" not in summary
+        await match.callback(interaction, page=2)
+        assert calls[-1][1]["ephemeral"]
+        assert "Choose a page from 1 to 1" in calls[-1][0][0]
+        interaction.response.is_done = lambda: False
 
         calls.clear()
         await command.callback(interaction, publish=True)
@@ -828,10 +858,18 @@ def test_replay_updates_one_group_contribution(tmp_path, monkeypatch, verified_f
     assert guest.flush(WEBHOOK) == 1
     guest.queue_verified(replace(match, certain=9, estimated=0, chest_types={"buried": 2}), "Rin")
     assert guest.flush(WEBHOOK) == 1
+    viewer = discord_group.GroupStore(WEBHOOK.id, tmp_path / "viewer.db")
     if verified_first:
         messages.reverse()
     assert host.ingest(messages[0])
+    first_snapshot = host.sessions()
+    viewer.merge_sessions(first_snapshot)
     assert host.ingest(messages[1]) is not verified_first
     assert not host.ingest(messages[0])
     row, = host.leaderboard()
     assert (row.matches, row.recorded, row.certain, row.chest_types) == (1, 9, 9, {"buried": 2})
+    viewer.merge_sessions(host.sessions())
+    viewer.merge_sessions(first_snapshot)
+    session, = viewer.sessions()
+    assert session.total == 9 and session.certain == 9
+    assert session.chance_percent == row.token_chance == host.team_summary().chance_percent

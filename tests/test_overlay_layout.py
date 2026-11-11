@@ -75,12 +75,23 @@ def test_new_match_removes_unsaved_current_counts_before_adding_new_counts():
     state = {"certain": 1, "approximate": 3, "session_started_at": "second"}
     advanced = overlay_layout.reconcile_context(original, state)
     assert advanced["team"] is None
-    assert advanced["cumulative"]["total"] == 18
-    assert advanced["cumulative"]["certain"] == 10
+    assert advanced["cumulative"]["total"] == 14
+    assert advanced["cumulative"]["certain"] == 8
+    assert math.isclose(advanced["cumulative"]["log_no_drop"], summary(8, 14)["log_no_drop"])
     assert advanced["cumulative"]["matches"] == 4
     state = {"certain": 0, "approximate": 0, "session_started_at": "second"}
     empty = overlay_layout.reconcile_context(original, state)
-    assert empty["cumulative"]["total"] == 15 and empty["cumulative"]["matches"] == 3
+    assert empty["cumulative"]["total"] == 11 and empty["cumulative"]["matches"] == 3
+
+
+def test_saved_match_worker_delta_does_not_rewrite_cumulative_totals():
+    original = context()
+    original["current_saved"] = True
+    state = {"certain": 4, "approximate": 7, "session_started_at": "first"}
+    advanced = overlay_layout.reconcile_context(original, state)
+    assert advanced["personal"]["total"] == 7
+    for key in ("total", "certain", "log_no_drop", "matches"):
+        assert advanced["cumulative"][key] == original["cumulative"][key]
 
 
 def test_first_chest_adds_current_match_count_once():

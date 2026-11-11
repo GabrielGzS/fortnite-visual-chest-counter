@@ -55,7 +55,6 @@ RECORDING_CHOICES = (("Off (stop diagnostic files)", "off"), ("Only around my ma
 RECORDING_TEXT = {"marks": "only around your marks", "events": "around chest decisions and your marks",
                   "session": "the whole session"}
 REPO_URL = "https://github.com/GabrielGzS/fortnite-visual-chest-counter"
-PIRATE_TOKEN_RATE = discord_group.PIRATE_TOKEN_RATE
 UPDATE_HEALTH_DELAY_MS = 2000                                  # the window must have been running this long before it counts as started
 AUTO_CHECK_DELAY_MS = 6000                                     # after the window is up, so a check never competes with starting
 INSTALL_STOP_DEADLINE_MS = 45000                               # longer than the worker's own 30 seconds to stop
@@ -296,8 +295,7 @@ def hline():
 
 
 def token_odds_text(total, boost):
-    probability = -math.expm1(total * math.log1p(-boost / PIRATE_TOKEN_RATE)) if total else 0
-    return f"{probability:.6%}"
+    return match_stats.personal(0, total, boost).chance
 
 
 def rounded_region(rect, radius):

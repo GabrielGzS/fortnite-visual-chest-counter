@@ -16,7 +16,7 @@ from urllib.request import Request, build_opener
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fortnite_chest_counter import paths, settings
+from fortnite_chest_counter import match_stats, paths, settings
 from fortnite_chest_counter.detection.chest_types import LABELS
 from fortnite_chest_counter.discord_summary import _NoRedirects
 from fortnite_chest_counter.obs import credentials
@@ -29,7 +29,7 @@ _PREFIX = "||FCC1 "
 _LIVE_PREFIX = "||FCCL1 "
 _SESSION_PREFIX = "FCC session v1 "
 _FINGERPRINT = re.compile(r"[a-f0-9]{64}")
-PIRATE_TOKEN_RATE = 137_500
+PIRATE_TOKEN_RATE = match_stats.RATE
 _FLUSH_LOCK = threading.Lock()
 _COOLDOWN_LOCK = threading.Lock()
 _WEBHOOK_COOLDOWNS = {}
@@ -251,7 +251,7 @@ class Player:
     def log_no_drop(self):
         # Manual additions have no saved boost. Reductions have no chest identity,
         # so scale the recorded exposure by the fraction of chests retained.
-        base = math.log1p(-1 / PIRATE_TOKEN_RATE)
+        base = match_stats.chest_exposure(1, 1)
         recorded = self.recorded_log_no_drop or self.recorded * base
         if self.total < self.recorded:
             return recorded * max(0, self.total) / self.recorded
@@ -260,7 +260,7 @@ class Player:
 
     @property
     def token_chance(self):
-        return f"{-math.expm1(self.log_no_drop) * 100:.6f}%" if self.total else "0.000000%"
+        return match_stats.token_chance(self.log_no_drop)
 
 
 def _combine(name, players, adjustment=0):
@@ -330,9 +330,9 @@ class TeamSession:
 
     @property
     def chance_percent(self):
-        no_drop = math.fsum(player.total * math.log1p(-player.boost / PIRATE_TOKEN_RATE)
+        no_drop = math.fsum(match_stats.chest_exposure(player.total, player.boost)
                             for player in self.players)
-        return f"{-math.expm1(no_drop) if no_drop else 0.0:.6%}"
+        return match_stats.token_chance(no_drop)
 
 
 def validate_sessions(values):
@@ -397,7 +397,7 @@ class GroupStore:
             if included:
                 groups.setdefault(key, []).append(Player(name, count, certain, json.loads(chest_types or "{}"),
                                                           count, confirmed_total=count if certain is not None else 0,
-                                                          matches=1, recorded_log_no_drop=count * math.log1p(-boost / PIRATE_TOKEN_RATE)))
+                                                          matches=1, recorded_log_no_drop=match_stats.chest_exposure(count, boost)))
         return {key: _combine(name, groups.get(key, ()), amount) for key, (name, amount) in identities.items()}
 
     def _leaderboard(self, db):
@@ -431,7 +431,7 @@ class GroupStore:
             return TeamSummary()
         submitted = sessions[latest]
         chests = sum(count for count, _ in submitted)
-        log_no_drop = math.fsum(count * math.log1p(-boost / PIRATE_TOKEN_RATE)
+        log_no_drop = math.fsum(match_stats.chest_exposure(count, boost)
                                 for count, boost in submitted)
         chance = -math.expm1(log_no_drop) if log_no_drop else 0.0
         return TeamSummary(len(sessions), len(submitted), chests, round(1 / chance) if chance else None,
@@ -498,9 +498,11 @@ class GroupStore:
             ON CONFLICT(webhook, fingerprint, player) DO UPDATE SET
                 name=excluded.name, revision=excluded.revision, certain=excluded.certain,
                 total=excluded.total, boost=excluded.boost, finished=excluded.finished,
-                updated_at=excluded.updated_at
-            WHERE session_states.finished=0
-              AND (excluded.finished=1 OR excluded.revision > session_states.revision)
+                updated_at=COALESCE(NULLIF(excluded.updated_at, 0), session_states.updated_at)
+            WHERE (session_states.finished=0
+                   AND (excluded.finished=1 OR excluded.revision > session_states.revision))
+               OR (session_states.finished=1 AND excluded.finished=1
+                   AND excluded.revision > session_states.revision)
         """, (self.webhook_id, fingerprint, player.name.casefold(), player.name, player.revision,
               player.certain, player.total, player.boost, int(player.finished), player.updated_at))
 
@@ -509,19 +511,20 @@ class GroupStore:
             db.execute("BEGIN IMMEDIATE")
             # Backfill verified results received before live sessions were introduced.
             records = db.execute("""
-                SELECT s.fingerprint, m.name, COALESCE(d.certain, 0), m.count, s.boost
+                SELECT s.fingerprint, m.name, COALESCE(d.certain, 0), m.count, s.boost, COALESCE(r.incoming, 0)
                 FROM contributions AS m
                 JOIN event_sessions AS s ON s.webhook=m.webhook AND s.event=m.event
                 LEFT JOIN event_details AS d ON d.webhook=m.webhook AND d.event=m.event
+                LEFT JOIN replay_revisions AS r ON r.webhook=m.webhook AND r.event=m.event AND r.incoming=1
                 WHERE m.webhook=? ORDER BY m.rowid
             """, (self.webhook_id,))
             first = set()
-            for fingerprint, name, certain, total, boost in records:
+            for fingerprint, name, certain, total, boost, revision in records:
                 key = fingerprint, name.casefold()
                 if key in first:
                     continue
                 first.add(key)
-                self._save_player_state(db, fingerprint, SessionPlayer(name, certain, total, boost, True))
+                self._save_player_state(db, fingerprint, SessionPlayer(name, certain, total, boost, True, revision))
             groups = {}
             for fingerprint, name, revision, certain, total, boost, finished, updated_at in db.execute(
                     "SELECT fingerprint, name, revision, certain, total, boost, finished, updated_at "
@@ -650,12 +653,9 @@ class GroupStore:
                                (self.webhook_id, event, certain, json.dumps(chest_types)))
                     self._save_session(db, event, session)
                     if session:
-                        if verified:
-                            db.execute("DELETE FROM session_states WHERE webhook=? AND fingerprint=? AND player=?",
-                                       (self.webhook_id, session[0], name.casefold()))
                         self._save_player_state(db, session[0],
                                                 SessionPlayer(name, certain or 0, count, session[1], True,
-                                                              updated_at=time.time()))
+                                                              revision=int(verified), updated_at=time.time()))
             db.execute("""
                 INSERT INTO cursors VALUES (?, ?, ?)
                 ON CONFLICT(webhook, channel) DO UPDATE SET message=excluded.message

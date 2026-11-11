@@ -77,6 +77,7 @@ One person runs the **Host** bot. Other players use **Guest**, their own name an
 
 - Show the ranking in the Dashboard and Group page, with totals, confidence, chest types and saved match counts where available.
 - Choose the public leaderboard's destination from the online bot's available Discord channels. Publish it from the app or from a Discord command.
+- Browse shared history with `/match`, choose a match ID for its summary, and use `/chests` for player breakdowns.
 - Send match summaries manually or automatically after saving. Start or stop the bot and choose whether it starts with the app.
 - Give the bot a name, local avatar and banner, and configure the webhook sender name and avatar URL separately. Customise its Discord activity text, type and rotation interval for team totals, token odds and saved group stats.
 - Reset selected players in the standings or remove the published board. Local match history is managed separately.
@@ -85,7 +86,8 @@ One person runs the **Host** bot. Other players use **Guest**, their own name an
 | Command | Action |
 |---|---|
 | `/chests` | Show shared totals or a player's counts and cumulative Pirate Token estimate. |
-| `/leaderboard` | Show the full current ranking. |
+| `/leaderboard` | Show player totals and the latest synchronized match. |
+| `/match` | Browse shared match history or open a specific match by ID. |
 | `/leaderboard publish:true` | Publish or move the auto-updating board to the current channel. Requires Manage Server. |
 | `/add` | Correct a player's total. Requires Manage Server. |
 | `/reset` | Reset a player's standing. Requires Manage Server. |
@@ -129,7 +131,7 @@ The screenshots show the application with sample data.
 
 ### Discord previews
 
-These two images are local simulations using sample values. The leaderboard uses the same embed data as the app's Discord output.
+These images are local simulations using sample values and the bot's embed data.
 
 <table>
   <tr>
@@ -139,6 +141,11 @@ These two images are local simulations using sample values. The leaderboard uses
   <tr><td align="center">Simulated leaderboard embed</td><td align="center">Simulated bot profile and presence</td></tr>
 </table>
 
+
+<table>
+<tr><td><a href="docs/previews/discord-match-history.png"><img src="docs/previews/discord-match-history.png" alt="Simulated Discord match history and match summary" width="870"></a></td></tr>
+<tr><td align="center">Shared match history and a selected match summary</td></tr>
+</table>
 
 ## Capture setups
 

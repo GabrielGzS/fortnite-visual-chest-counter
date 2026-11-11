@@ -4,11 +4,10 @@ from html import escape
 import math
 import re
 
-from fortnite_chest_counter import settings
+from fortnite_chest_counter import match_stats, settings
 from fortnite_chest_counter.detection import chest_types
 
 
-RATE = 137_500
 SCOPES = ("personal", "team", "cumulative")
 
 
@@ -28,7 +27,7 @@ def _summary(value):
     boost = _boost(value.get("boost"))
     log_no_drop = value.get("log_no_drop")
     if type(log_no_drop) not in (int, float) or not math.isfinite(log_no_drop) or log_no_drop > 0:
-        log_no_drop = total * math.log1p(-boost / RATE)
+        log_no_drop = match_stats.chest_exposure(total, boost)
     rows = value.get("member_totals")
     member_totals = []
     if isinstance(rows, (list, tuple)):
@@ -51,7 +50,7 @@ def _personal(state, *, boost=1.0, active=False):
     state = state if isinstance(state, dict) else {}
     total = max(_count(state.get("approximate")), _count(state.get("certain")))
     return {"certain": _count(state.get("certain")), "total": total,
-            "log_no_drop": total * math.log1p(-boost / RATE), "boost": boost,
+            "log_no_drop": match_stats.chest_exposure(total, boost), "boost": boost,
             "matches": int(bool(total or active)), "players": 1, "names": "", "types": "", "member_totals": ()}
 
 
@@ -82,11 +81,12 @@ def reconcile_context(context, state):
     certain = _count(state.get("certain"))
     same_match = old.get("session_started_at") == state.get("session_started_at")
     rate = (personal["log_no_drop"] / personal["total"] if personal["total"] > 0
-            else math.log1p(-personal["boost"] / RATE))
+            else match_stats.chest_exposure(1, personal["boost"]))
     if same_match:
         total_delta = total - old["approximate"]
         certain_delta = certain - old["certain"]
-        for summary in (personal, team, cumulative):
+        live_summaries = (personal, team) if context.get("current_saved") is True else (personal, team, cumulative)
+        for summary in live_summaries:
             if summary is None:
                 continue
             summary["total"] = max(0, summary["total"] + total_delta)
@@ -98,15 +98,17 @@ def reconcile_context(context, state):
                                           for name, count in team["member_totals"])
         previous_matches = personal["matches"]
         personal["matches"] = max(previous_matches, int(total > 0 or context.get("active") is True))
-        cumulative["matches"] += personal["matches"] - previous_matches
+        if context.get("current_saved") is not True:
+            cumulative["matches"] += personal["matches"] - previous_matches
     else:
         # A saved previous match already belongs to the cumulative result. An unsaved
         # current contribution must be removed before incorporating the new counter.
         if context.get("current_saved") is not True:
-            cumulative["total"] = max(0, cumulative["total"] - personal["total"])
-            cumulative["certain"] = max(0, cumulative["certain"] - personal["certain"])
-            cumulative["log_no_drop"] = min(0.0, cumulative["log_no_drop"] - personal["log_no_drop"])
-            cumulative["matches"] = max(0, cumulative["matches"] - personal["matches"])
+            previous = team if team is not None else personal
+            cumulative["total"] = max(0, cumulative["total"] - previous["total"])
+            cumulative["certain"] = max(0, cumulative["certain"] - previous["certain"])
+            cumulative["log_no_drop"] = min(0.0, cumulative["log_no_drop"] - previous["log_no_drop"])
+            cumulative["matches"] = max(0, cumulative["matches"] - previous["matches"])
         personal = _personal(state, boost=personal["boost"], active=context.get("active") is True)
         cumulative["total"] += personal["total"]
         cumulative["certain"] = min(cumulative["total"], cumulative["certain"] + personal["certain"])
@@ -157,7 +159,7 @@ def render_sections(display, context, *, styled=False):
         values = {name: settings.format_count(summary[name], thousands)
                   for name in ("certain", "total", "matches", "players")}
         values["approx"] = settings.format_count(summary["total"] - summary["certain"], thousands)
-        values["chance"] = f"{-math.expm1(summary['log_no_drop']) * 100 if summary['log_no_drop'] else 0:.6f}%"
+        values["chance"] = match_stats.token_chance(summary["log_no_drop"])
         values.update(names=summary["names"], types=summary["types"])
         if scope == "personal":
             current_types = _types_text(state, thousands)

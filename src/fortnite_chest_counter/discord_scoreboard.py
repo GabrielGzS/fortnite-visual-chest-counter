@@ -361,19 +361,23 @@ def type_breakdown(chest_types):
 def make_public_embed(players, team=None, *, settings=None):
     """Readable bot output, separate from the webhook payload read by clients."""
     players = players[:_MAX_RANKS]
-    embed = make_embed((), team, settings=settings)
-    if players:
-        embed["description"] = embed["description"].replace("No matches shared yet.", f"Top {len(players)}", 1)
+    embed = make_embed((), settings=settings)
+    embed["description"] = "Player totals across shared results." if players else "No matches shared yet."
+    if settings is not None:
+        mode, boost = settings
+        embed["footer"]["text"] = f"Current group settings · {mode} ×{boost:g}"
     for index, player in enumerate(players, 1):
-        submissions = "submission" if player.matches == 1 else "submissions"
-        lines = [f"**{player.total:,}** chests · {player.matches:,} {submissions}",
-                 f"Pirate Token chance · **{player.token_chance}**"]
-        if player.certain is not None:
-            lines.append(f"{player.certain:,} confirmed · {player.confirmed_total - player.certain:,} estimated")
-        types = type_breakdown(player.chest_types)
-        if types:
-            lines.append(types)
-        embed["fields"].append({"name": f"{index}. {player.name}", "value": "\n".join(lines), "inline": False})
+        results = "result" if player.matches == 1 else "results"
+        value = (f"**{player.total:,}** chests · {player.matches:,} {results} · "
+                 f"Pirate Token chance · **{player.token_chance}**")
+        embed["fields"].append({"name": f"{index}. {player.name}", "value": value, "inline": False})
+    if team is not None and team.matches:
+        players_received = "player" if team.players == 1 else "players"
+        chance = team.chance_percent or (f"about 1 in {team.one_in:,}" if team.one_in else "0%")
+        value = (f"**{team.chests:,}** chests · Results received from {team.players:,} {players_received}\n"
+                 f"Estimated Pirate Token chance · **{chance}**\n"
+                 f"Matches synced in total · {team.matches:,}")
+        embed["fields"].append({"name": "Latest synchronized match", "value": value, "inline": False})
     return embed
 
 

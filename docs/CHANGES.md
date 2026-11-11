@@ -7,6 +7,11 @@ changes; the pull request links here. Versioned release notes describe published
 
 ## Changes
 
+- Simplify the Discord leaderboard, with cumulative player totals before the latest synchronized match. Add
+  `/match` for paginated shared history and per-match summaries. Chest types remain available in `/chests`.
+- Share the Pirate Token calculation across Dashboard, overlays and Discord. Keep the saved cumulative totals
+  stable during OBS updates and synchronize verified match corrections to Guests without duplicating a result.
+
 - Local screen and window capture read Fortnite's HUD scale at the start of each session and try the nearest
   calibrated text size first. Image matching still chooses the winning size. The session log records both scales
   when available. Recorded video, streams and capture devices use the image alone.
@@ -21,7 +26,7 @@ changes; the pull request links here. Versioned release notes describe published
   Also read a bare `COFFRE` below another reward such as `MUNITIONS AU MAX` when the XP header and chest line align across three frames. Reuse the existing overlap check before adding it as an estimated opening.
   Read the actual digit on qualified rare rows through X4 so a temporary unreadable multiplier does not recount the stack.
 
-- Display each player’s cumulative Pirate Token estimate and compact chest breakdown on the public Discord board and in `/chests`. The Group leaderboard ranks chests from matches shared to Discord. Distinguish it from the Match history + live overlay total.
+- Display each player’s cumulative Pirate Token estimate on the public Discord board and in `/chests`. Detailed chest breakdowns are in `/chests`. The Group leaderboard ranks chests from matches shared to Discord. Distinguish it from the Match history + live overlay total.
 - Recover French chest types from three consistent readings around a counted popup, including weaker frames and
   neighbouring HUD scales. These readings affect the type only. The opening threshold and confidence rules stay the same.
 

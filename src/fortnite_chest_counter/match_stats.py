@@ -7,6 +7,14 @@ import math
 RATE = 137_500
 
 
+def chest_exposure(total, boost):
+    return total * math.log1p(-boost / RATE)
+
+
+def token_chance(log_no_drop):
+    return f"{-math.expm1(log_no_drop) if log_no_drop else 0.0:.6%}"
+
+
 @dataclass(frozen=True)
 class Summary:
     certain: int = 0
@@ -18,7 +26,7 @@ class Summary:
 
     @property
     def chance(self):
-        return f"{-math.expm1(self.log_no_drop) * 100 if self.log_no_drop else 0:.6f}%"
+        return token_chance(self.log_no_drop)
 
     def __add__(self, other):
         return Summary(self.certain + other.certain, self.total + other.total,
@@ -26,7 +34,7 @@ class Summary:
 
 
 def personal(certain, total, boost):
-    return Summary(certain, total, total * math.log1p(-boost / RATE), matches=1)
+    return Summary(certain, total, chest_exposure(total, boost), matches=1)
 
 
 def team(session, player, *, current=None):
