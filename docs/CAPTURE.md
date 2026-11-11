@@ -14,7 +14,7 @@ live session (app or console) --[capture on]--> captures/<session>/  video + eve
 
 ## Using it
 
-* App: Dashboard -> **Diagnostic recording** (Off / only around my marks / around chest decisions and marks / whole
+* App: Dashboard, **Console** view -> **Diagnostic recording** (Off / only around my marks / around chest decisions and marks / whole
   session) - switchable while counting: the worker gets `capture <mode>` on its control pipe, the old recording finishes
   in a background thread (its encoder flush never holds up counting) and the new one starts in its own folder. Press
   **Ctrl+Alt+M** (global hotkey, works while Fortnite has the focus) or **Mark moment** right after a miss; both are

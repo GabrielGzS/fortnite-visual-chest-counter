@@ -32,10 +32,10 @@ Do **not** add to this scene: webcam, alerts, chat, the counter's own text or ot
 ## 3. Start counting
 
 1. Open **Fortnite Visual Chest Counter.exe**.
-2. On the **Dashboard** the video source is already **OBS Virtual Camera**. Click **Start counting**.
+2. On the **Dashboard** (**Overview** view) the video source is already **OBS Virtual Camera**. Click **Start counting**.
 3. The status turns to **Counting**; the line under the source shows the picture size and how many pictures per second are
    analysed (about 15).
-4. Turn on **Live preview** once to check that the counter sees the full game picture with the HUD.
+4. On the Dashboard's **Game** view, turn on **Live preview** once to check that the counter sees the full game picture with the HUD.
 
 Leave the app open (minimised is fine). Stop with **Stop counting** or by closing the app (it asks first). Numbers are saved
 after every chest and kept between sessions. If a red message says `OBS Virtual Camera was not found`, follow the steps it

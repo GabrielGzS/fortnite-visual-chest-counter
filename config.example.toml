@@ -112,11 +112,11 @@ mark_after_seconds = 10
 dir = "captures"
 
 [match]
-# Match recognition (in development, OFF by default). English games only for now.
+# Match tracking (experimental, OFF by default; the app's Settings page sets this). English games only for now.
 #   "off"    = nothing runs (the default)
-#   "shadow" = follow the match and write what it sees to the session log in logs/, for testing. It needs [logging] enabled.
+#   "shadow" = follow the match and only write what it sees to the session log in logs/. It needs [logging] enabled.
 #              It never changes your counts, your profiles, the OBS text or the app.
-#   "on"     = also keep a history of your matches and chests in state/history/, for testing. It needs saving turned on in [state].
+#   "on"     = also keep a history of your matches and chests in state/history/. It needs saving turned on in [state].
 #              Your counts and the OBS text stay exactly as they would be with this off.
 mode = "off"
 # Only for mode = "on": how often running totals are saved, in seconds: 30, 60 (recommended), 300 or 600. Matches are still followed

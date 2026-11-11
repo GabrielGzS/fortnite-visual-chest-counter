@@ -26,9 +26,9 @@ Setup-specific problems: [dual-PC SRT](obs-dual-pc-srt.md#troubleshooting) · [c
 
 | Symptom | Fix |
 |---|---|
-| Number never changes | Turn on **Live preview**: 16:9, full picture, HUD visible? Does the chest pop-up ("CHEST" / "BAÚ") appear in `ChestDetectorFeed`? Is **Settings -> Fortnite language** right for your game? |
+| Number never changes | Dashboard, **Game** view, turn on **Live preview**: 16:9, full picture, HUD visible? Does the chest pop-up ("CHEST" / "BAÚ") appear in `ChestDetectorFeed`? Is **Settings -> Fortnite language** right for your game? |
 | Many chests only in APPROX | Normal for compressed or larger-HUD video. Better picture quality (higher bitrate, clean feed) helps; APPROX is the estimated total. |
-| Missed or wrong chests | Dashboard -> **Diagnostic recording** -> "Only around my marks", then press **Ctrl+Alt+M** right after each miss. Share that session's `captures\` folder in an issue ([details](../CAPTURE.md)). |
+| Missed or wrong chests | Fix the number with **+1** / **−1** next to the counts. To help improve the counter: Dashboard, **Console** view -> **Diagnostic recording** -> "Only around my marks", then press **Ctrl+Alt+M** right after each miss. Share that session's `captures\` folder in an issue ([details](../CAPTURE.md)). |
 | Count should start from an earlier number | Dashboard -> **Edit counts...**: APPROX = the chests already opened, CERTAIN = 0. **Reset...** sets both to 0. Both work while counting. |
 
 ## The number on stream is wrong or not updating
@@ -42,6 +42,16 @@ Setup-specific problems: [dual-PC SRT](obs-dual-pc-srt.md#troubleshooting) · [c
 | OBS WebSocket: *the source reads a file* | That Text source has **Read from file** ticked, so OBS ignores direct updates: click **Use direct updates**, or pick another source. |
 | OBS WebSocket: text flickers between two values | Another tool also updates that Text source. Give each tool its own source. |
 | Numbers wrong after moving the app to a new folder | Copy `state\` and `config.toml` from the old folder and re-point the OBS Text source. |
+
+## Match tracking and Analytics
+
+| Symptom | Fix |
+|---|---|
+| Analytics says *No matches recorded yet* | Turn on **Settings > Match tracking (experimental)**, click **Save**, then **Start counting** and play a match. A match appears after it ends. |
+| Game view stays on *Not sure yet* | Match tracking reads English screens only. Check that the picture is 16:9 with the menus and HUD visible (**Live preview**, same view). Your chests are still counted. |
+| A match is **Partial** | Part of it was not seen: you started counting after it began, stopped before the end, or the video dropped. This is expected, and its observed time still shows. |
+| A recorded match was not a real match | Analytics -> **Not a match**. **Restore** puts it back. |
+| Analytics total differs from the Dashboard | Expected. Analytics only covers chests recorded with match tracking on, and leaves out **+1** / **−1** and **Edit counts...**. The Dashboard stays the official total. |
 
 ## Still stuck
 

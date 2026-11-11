@@ -18,11 +18,12 @@ without revealing hidden information or providing gameplay assistance. See
 
 > Independent, unofficial project: not affiliated with, endorsed by or approved by Epic Games. "Fortnite" is a trademark of
 > Epic Games, Inc.
-> Status: **v0.2.3 public beta** (desktop app). Developed and tested during Fortnite Chapter 7 Season 5 (November 2026) -
+> Status: **v0.3.0 public beta** (desktop app). Developed and tested during Fortnite Chapter 7 Season 5 (November 2026) -
 > see [Fortnite compatibility](#fortnite-compatibility). Windows 10 / 11. Nothing to install.
 
 **Contents:** [The two numbers](#the-two-numbers-read-this-first) · [Download](#download) · [Choose your setup](#choose-your-setup) ·
 [Quick start](#quick-start) · [Show it on stream](#show-it-on-stream) · [Using the app](#using-the-app) ·
+[Match tracking and Analytics](#match-tracking-and-analytics-experimental) ·
 [Fair play](#fair-play-and-compatibility) · [Updating](#updating) · [Troubleshooting](#troubleshooting) ·
 [Known limitations](#known-limitations) · [Setup help from AI](#getting-setup-help-from-ai) · [How it works](#how-it-works) ·
 [Development](#development)
@@ -101,14 +102,20 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
 
 ## Using the app
 
-- **Dashboard:** both numbers, the video source list (OBS Virtual Camera, capture devices, screens; **Refresh** after
-  plugging something in) and **Start counting** / **Stop counting**. Counts are saved after every chest and kept between
-  sessions.
-- **Activity and Live preview** (optional, only for you): every decision as it happens - **green** = certain chest,
-  **yellow** = counted in APPROX only, **red** = looked like a chest pop-up but not counted - with the reason, and the
-  picture the counter analyses. Showing, hiding or minimising them never changes counting.
+- **Dashboard** (v0.3.0: three views, switched at the top; changing view never changes counting):
+  - **Overview:** both numbers, the video source list (OBS Virtual Camera, capture devices, screens; **Refresh** after
+    plugging something in) and **Start counting** / **Stop counting**. Counts are saved after every chest and kept between
+    sessions.
+  - **Game:** what match tracking sees right now, and **Live preview**, the picture the counter analyses.
+  - **Console:** **Activity**, every decision as it happens - **green** = certain chest, **yellow** = counted in APPROX
+    only, **red** = looked like a chest pop-up but not counted - with the reason, plus **Diagnostic recording**. The
+    button shows a number when there are warnings you have not seen.
 - **Edit counts... / Reset...:** already opened chests? Enter the number as APPROX with CERTAIN `0`; new chests are added on
   top. Reset sets both to 0. Both work while counting; closing the app never resets anything.
+- **+1 / −1** (v0.3.0, next to the numbers): adjust APPROX by one chest, also while counting. CERTAIN never changes this
+  way, because the counter did not confirm that chest. A line then shows how much was counted and how much was adjusted by
+  hand, with an optional **Why?** and **Undo**. Fortnite can count a chest with nothing on screen to detect (a broken
+  chest, for example), so a +1 does not have to mean the counter made a mistake.
 - **Profiles** (v0.2.2): one per person you count, for example one per streamer. Each profile keeps its own counts and its
   own video source (such as that streamer's Twitch link). **New profile...**, **Rename...** and **Delete...** sit above the
   numbers; a deleted profile's counts are kept in `state\profiles\deleted\`. One profile counts at a time, and the OBS text
@@ -120,13 +127,26 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
   own split; **Reset...** clears it.
 - **Analyse a recording...:** count a video file, faster than real time; never changes the live counter
   ([guide](docs/guides/recorded-video.md)).
-- **Diagnostic recording and Ctrl+Alt+M:** optional - keep the video around a missed chest (press **Ctrl+Alt+M** or **Mark
+- **Diagnostic recording and Ctrl+Alt+M** (Dashboard, **Console** view): optional - keep the video around a missed chest (press **Ctrl+Alt+M** or **Mark
   moment** right after it), then **Review captures** (Settings) replays it through the current counter. Recording never
   slows counting; it needs 2 GB free and stops by itself below 1 GB. Details: [docs/CAPTURE.md](docs/CAPTURE.md).
 - **Settings:** Fortnite language (English / Portuguese (Brazil) / Both - pick the one your game uses; "Both" is not
   automatic detection), session logs, diagnostic recording, **Remember window size and position**. Everything else is in
   `config.toml` (Settings → Open config.toml; every option is explained inside).
 - **Help & diagnostics:** setup steps, the offline guide and a one-click diagnostics report.
+
+## Match tracking and Analytics (experimental)
+
+New in v0.3.0 and **off by default**. Turn it on in **Settings > Match tracking (experimental)**. While counting, the app then
+follows your matches and keeps a history of them, per profile, on your PC. It never changes your counts or what OBS shows.
+
+The **Analytics** page shows matches, match time and chests per match and per minute, with CERTAIN and APPROX kept apart. A
+match only counts as **complete** if its start and its ending were both seen with no break in the video. A **partial** match
+(joined late, or the video stopped) still shows its observed time but never enters complete-match averages. If a recorded
+match was wrong, **Not a match** leaves it out of the statistics, and **Restore** puts it back; nothing is deleted.
+
+Match recognition reads **English** screens only for now, and has not yet been confirmed on a full real match from start to
+finish. Chest counting is not affected in any language. Details: [match tracking guide](docs/MATCH_TRACKING.md).
 
 ## Fair play and compatibility
 
@@ -158,13 +178,13 @@ downloaded and prepared, and **Restart & Install** finishes it. It is built to k
 to return to the previous version by itself if a new one does not start properly. Nothing is downloaded or installed unless you choose
 to. The automatic check and the download speed are in **Settings > Updates**.
 
-The updater has not installed a real update yet: v0.2.4 will be the first. If it does not work, install that version by hand as
-described below.
+v0.3.0 is the first release the updater can install, so it is the updater's first real update. If it does not work, install v0.3.0
+by hand as described below.
 
-**Getting v0.2.3 takes a manual download**, because older versions have no updater. Download it only from the official
+**v0.2.2 and older need a manual download**, because those versions have no updater. Download it only from the official
 [GitHub releases page](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases).
 
-Your data is stored next to, not inside, the program files: `state\` (counts of every profile), `config.toml` (settings), `logs\`,
+Your data is stored next to, not inside, the program files: `state\` (counts and match history of every profile), `config.toml` (settings), `logs\`,
 `captures\`, `obs_output\` (re-created automatically). Easiest: close the app, extract the new ZIP **into the same folder** and
 replace files; opening the app writes your real numbers back into the OBS text files. If you extract to a new folder, copy
 `state\` and `config.toml` and re-point the OBS Text source.
@@ -176,7 +196,7 @@ replace files; opening the app writes your real numbers back into the OBS text f
 | Symptom | Fix |
 |---|---|
 | `OBS Virtual Camera was not found` | Open OBS Studio 28+, click **Start Virtual Camera**, click **Start counting** again. |
-| Number never changes | Turn on **Live preview**: 16:9, full screen, HUD visible? Does the chest pop-up ("CHEST" / "BAÚ") appear? Screen source: the stream must play **fullscreen** - a small player inside a web page is too small. |
+| Number never changes | Dashboard, **Game** view, turn on **Live preview**: 16:9, full screen, HUD visible? Does the chest pop-up ("CHEST" / "BAÚ") appear? Screen source: the stream must play **fullscreen** - a small player inside a web page is too small. |
 | Livestream URL: "Buffering" / video in bursts | Normal for a live stream; the counter catches up and keeps counting. Keep **Stream stability: Maximum stability** for long sessions. |
 | SRT picture black on the streaming PC | Address, port, Media Source settings and Windows Firewall: [SRT troubleshooting](docs/guides/obs-dual-pc-srt.md#troubleshooting). |
 | OBS text blank / not updating | The Text source must have **Read from file** ticked and point at the file shown on the Overlay page. |
@@ -210,8 +230,9 @@ can, a diagnostic capture.
 - **Screen source:** the gameplay must fill the screen; a small player inside a web page is not counted.
 - **Clean gameplay feed recommended:** overlays on top of the HUD can hide the clues.
 - **Audio is not used**; only the picture is analysed.
-- **No per-match statistics yet:** the counter keeps one running total. Match tracking is planned
-  ([roadmap](docs/ROADMAP.md)).
+- **Match tracking is experimental:** it reads English screens only and has been tested on recordings, not yet on a full
+  real match from start to finish. Other modes, reboots and squads are untested. Your counts never depend on it
+  ([guide](docs/MATCH_TRACKING.md)).
 - Tested on a limited set of recordings (PC English, PS5 Portuguese, their stream-compressed versions, diagnostic
   recordings of streams with a larger and a smaller HUD, 11 labelled real-world cases), live sessions (incl. a 3-hour
   livestream) and one dual-PC SRT setup. Physical capture cards and real OBS projectors are untested. Windows only.
@@ -247,7 +268,8 @@ Facts for assistants (please do not contradict these):
     streaming, or Windows Firewall blocking **UDP 9000** (network must be **Private**). Full guide:
     `docs/guides/obs-dual-pc-srt.md`.
   - **Capture card:** a **Video Capture Device** source inside `ChestDetectorFeed` (not yet tested with physical cards).
-- **Start counting** / **Stop counting** are on the Dashboard. Counts are saved after every chest and kept between sessions.
+- The Dashboard has three views: **Overview** (the counts, video source, **Start counting** / **Stop counting**), **Game** (match
+  status, **Live preview**) and **Console** (**Activity**, **Diagnostic recording**). Counts are saved after every chest and kept between sessions.
 - OBS shows the numbers with a **Text (GDI+)** source, **Read from file** = `obs_output\chest_counter.txt`. The app's
   **Overlay** page shows that exact path (Copy path button) and chooses what the file says: both numbers on two lines,
   both on one line, estimated total only, or confirmed only; wording with `#` = the number (`#C` / `#A` for one line).
@@ -259,8 +281,10 @@ Facts for assistants (please do not contradict these):
 - Supported Fortnite languages: English and Portuguese (Brazil); Settings → **Fortnite language** (English / Portuguese
   (Brazil) / Both; "Both" is not automatic detection). Picture must be 16:9 with the HUD visible. A HUD drawn up to
   about 1.3x larger or about 0.8x smaller is recognised for English pop-ups; those chests count in APPROX only.
-- There are no per-match statistics yet (one running total); they are planned, not available.
-- Problems: Help & diagnostics → **Run diagnostics** → **Copy report**. Missed chests: Dashboard → **Diagnostic recording** →
+- **Match tracking** (v0.3.0, experimental, off by default, English screens only): Settings → **Match tracking (experimental)**.
+  The **Analytics** page shows what the history says. It never changes the counts or what OBS shows.
+- **+1 / −1** next to the numbers adjust APPROX only, with an optional reason and Undo.
+- Problems: Help & diagnostics → **Run diagnostics** → **Copy report**. Missed chests: Dashboard, **Console** view → **Diagnostic recording** →
   "Only around my marks", then press **Ctrl+Alt+M** right after each miss.
 - Advanced settings live in `config.toml` next to the app (Settings → Open config.toml); a wrong value only shows a warning
   and uses the default. Every command also works from a terminal: `runtime\python\python.exe -m fortnite_chest_counter --help`.

@@ -328,7 +328,22 @@ def test_only_the_official_python_may_be_shipped():
 def test_every_updater_module_is_on_the_required_list():
     source = {path.name for path in (ROOT / "src/fortnite_chest_counter/update").glob("*.py")}
     assert {"install_helper.py", "trust.py", "__init__.py"} <= source
-    assert {f"{C.PACKAGE}/update/{name}" for name in source} | {f"{C.PACKAGE}/gui/update_manager.py"} == set(C.REQUIRED_MODULES)
+    expected = {f"{C.PACKAGE}/update/{name}" for name in source} | {f"{C.PACKAGE}/gui/update_manager.py"}
+    expected |= {f"{C.PACKAGE}/{name}.py" for name in C.MATCH_MODULES} | {f"{C.PACKAGE}/templates/{path}" for path in B.TEMPLATE_FILES}
+    assert expected == set(C.REQUIRED_MODULES)
+
+
+def test_every_template_the_program_loads_is_shipped():
+    from fortnite_chest_counter import match_cues, paths
+    on_disk = {path.relative_to(paths.TEMPLATES_DIR).as_posix() for path in paths.TEMPLATES_DIR.rglob("*.npy")}
+    assert on_disk - {"audio_fingerprint.npy"} == set(B.TEMPLATE_FILES), "a template is missing from the build list, or the list names one that does not exist"
+    assert {f"match/en/{cue.name}.npy" for cue in match_cues.CUES} <= set(B.TEMPLATE_FILES)
+    assert "audio_fingerprint.npy" not in B.TEMPLATE_FILES, "development-only"
+
+
+def test_every_match_module_exists():
+    for name in C.MATCH_MODULES:
+        assert (ROOT / "src/fortnite_chest_counter" / f"{name}.py").is_file(), name
 
 
 def test_a_manifest_for_another_release_fails():
@@ -462,16 +477,17 @@ def test_a_changed_manifest_is_rejected():
 
 
 def test_the_version_is_consistent_and_public_beta():
-    assert __version__ == "0.2.3" and RELEASE_CHANNEL == "public beta"
+    assert __version__ == "0.3.0" and RELEASE_CHANNEL == "public beta"
     assert f"**v{__version__} public beta**" in (ROOT / "README.md").read_text(encoding="utf-8")
     assert f"v{__version__} public beta" in (ROOT / "packaging/README.html").read_text(encoding="utf-8")
 
 
-def test_the_release_notes_explain_the_last_manual_download():
+def test_the_release_notes_state_what_is_experimental():
     notes = (ROOT / "docs" / f"RELEASE_NOTES_v{__version__}.md").read_text(encoding="utf-8")
+    flat = " ".join(notes.split()).lower()
     assert notes.startswith(f"## Fortnite Visual Chest Counter v{__version__} — Public Beta") and R.zip_name(__version__) in notes
-    assert "last manual download" in notes.lower() and "built-in updater" in notes.lower()
-    assert "experimental" in notes.lower() and "not been run on a real installation" in " ".join(notes.split()), "the unverified parts must be stated"
+    assert "match tracking" in flat and "experimental" in flat and "english" in flat, "the limits of match tracking must be stated"
+    assert "built-in updater" in flat and "first real update" in flat, "the updater's state must be stated"
     for forbidden in ("antivirus", "defender", "smart app control", "smartscreen", "windows protected"):
         assert forbidden not in notes.lower(), forbidden
 

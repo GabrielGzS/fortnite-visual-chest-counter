@@ -53,7 +53,9 @@ DEEPEST_PACKAGE_PATH = 110                                      # characters bel
 MAX_WINDOWS_PATH = 259
 TEMPLATE_FILES = ["chest/en/chest.npy", "chest/en/chest_small.npy", "chest/en/rare.npy", "chest/en/rare_small.npy",
                   "chest/en/sprite.npy", "chest/en/sprite_small.npy", "chest/pt/bau.npy", "container_opened.npy",
-                  "ui/interaction_disc.npy", "ui/interaction_ring.npy"]                    # audio_fingerprint.npy is development-only
+                  "ui/interaction_disc.npy", "ui/interaction_ring.npy",                    # audio_fingerprint.npy is development-only
+                  *(f"match/en/{name}.npy" for name in ("you_placed_screen", "you_placed_bar", "eliminated_by", "connecting", "menu_locker", "menu_quests", "menu_career",
+                                                        "matchmaking_cancel", "waiting_for_players", "bus_launching", "spectating", "victory_large", "victory_small"))]
 THIRD_PARTY = ["numpy", "scipy"]
 # Livestream URL input (v0.2.1): Streamlink and its complete dependency closure on Windows / Python 3.13 (BSD / MIT /
 # Apache-2.0, pycountry LGPL-2.1, certifi MPL-2.0). Verified against the wheel RECORD hashes like numpy; their licence

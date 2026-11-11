@@ -60,9 +60,8 @@ recognition but turning detections into gameplay statistics:
 | v0.2.0 | Automatic chest counting and a usable desktop app (released) |
 | v0.2.1 | Livestream URL input (Twitch / YouTube, no OBS) + OBS compatibility: WebSocket overlay output, OBS projector input, analysis-rate presets (released) |
 | v0.2.2 | Better detection (stacked pop-ups, smaller HUD), count profiles, chest types (released) |
-| v0.2.3 | Built-in updater with signed releases (experimental: real-package testing postponed to v0.2.4) |
-| v0.2.4 | The updater's first real update, plus the postponed checks listed in [UPDATER.md](UPDATER.md) |
-| **v0.3.0** | **Match Tracking & Statistics Foundation** - the backend that makes statistics possible |
+| v0.2.3 | Built-in updater with signed releases (experimental: real-package testing still open, see [UPDATER.md](UPDATER.md)) |
+| **v0.3.0** | **Match Tracking & Statistics Foundation** - experimental match tracking, match history, a first Analytics page, manual corrections |
 | **v0.4.0** | **Statistics & Performance Analytics** - records, history and trends on top of v0.3.0 |
 
 These are **planning milestones, not implementation authorization**: each one starts with an investigation and a design
@@ -89,7 +88,11 @@ Driven by a real streamer setup: capture card owned by OBS, OBS Virtual Camera u
   render-lag skipped frames). Offline evidence so far: JPEG quality 95 (4:4:4) left every counted decision unchanged,
   quality 90 (4:2:0) did not; detection needs 15 pictures per second.
 
-### v0.3.0 - Match Tracking & Statistics Foundation (planned)
+### v0.3.0 - Match Tracking & Statistics Foundation (release candidate)
+
+Built, in the order M0 to M9; see `M4_VALIDATION.md` to `M9_VALIDATION.md` and [MATCH_TRACKING.md](MATCH_TRACKING.md). The plan below is kept as
+written. What changed from it: a deliberately small **Analytics** page did ship (matches, match time, chests per match and per minute), the Dashboard
+was split into Overview / Game / Console, and the only manual match correction is **Not a match** / **Restore**; manual start and end were not built.
 
 Goal: turn the continuous stream of counted chests into organised, reliable, match-specific data. Today the app knows that
 a chest was opened; v0.3.0 should also know **which match** it belongs to, and keep that information.
@@ -139,9 +142,9 @@ visual cue exists:
 4. Automatic transitions only where measured as reliable; everywhere else manual start / end in the app, with automatic
    suggestions at most. Chests seen while spectating someone else must not be credited to the user's match.
 
-Also in v0.3.0: ship the setup guides (`docs/guides/`) inside the ZIP's offline `README.html`.
+Moved to a later version: ship the setup guides (`docs/guides/`) inside the ZIP's offline `README.html`.
 
-Not in v0.3.0: the statistics dashboard (v0.4.0), Auto language (D2, needs match tracking first), detection changes beyond
+Not in v0.3.0: the full statistics views (v0.4.0), Auto language (D2, needs match tracking first), detection changes beyond
 what match tracking needs (any change must keep chest events identical in `regress.py`).
 
 ### v0.4.0 - Statistics & Performance Analytics (planned)

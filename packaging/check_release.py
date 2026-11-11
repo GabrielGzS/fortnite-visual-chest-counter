@@ -31,8 +31,11 @@ from fortnite_chest_counter.version import __version__                   # noqa:
 
 PACKAGE = "runtime/lib/fortnite_chest_counter"
 TRUST_FILE = f"{PACKAGE}/update/trust.py"
+MATCH_MODULES = ("match_cues", "match_state", "match_tracker", "match_history", "match_analytics")
 REQUIRED_MODULES = (*(f"{PACKAGE}/update/{path.name}" for path in sorted((ROOT / "src/fortnite_chest_counter/update").glob("*.py"))),
-                    f"{PACKAGE}/gui/update_manager.py")
+                    f"{PACKAGE}/gui/update_manager.py",
+                    *(f"{PACKAGE}/{name}.py" for name in MATCH_MODULES),
+                    *(f"{PACKAGE}/templates/{path}" for path in build_release.TEMPLATE_FILES))
 PROVENANCE = "runtime/PROVENANCE.txt"
 PYTHON_FOLDER = "runtime/python/"
 SUMS_NAME = "SHA256SUMS.txt"

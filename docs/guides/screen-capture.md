@@ -7,7 +7,7 @@ set up.
    theatre mode at the least). For your own game, simply play.
 2. In the app: **Video source** -> **Screen 1** / **Screen 2** (the list shows each screen's size; **Refresh** after plugging
    a monitor in) -> **Start counting**.
-3. Turn on **Live preview** once to check that the counter sees the game picture with the HUD.
+3. On the Dashboard's **Game** view, turn on **Live preview** once to check that the counter sees the game picture with the HUD.
 
 Good to know:
 

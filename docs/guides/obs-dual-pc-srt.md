@@ -105,7 +105,7 @@ your stream needs more (for example 1080p60 and a higher bitrate), that works to
 1. On the streaming PC open **Fortnite Visual Chest Counter.exe**.
 2. Keep **OBS Virtual Camera** as the video source and click **Start counting**. The line under the source shows the
    picture size and how many pictures per second are analysed (about 15).
-3. Turn on **Live preview** once to check: the whole picture is the 16:9 gameplay, with the HUD visible.
+3. On the Dashboard's **Game** view, turn on **Live preview** once to check: the whole picture is the 16:9 gameplay, with the HUD visible.
 4. Show the numbers on your stream: [OBS overlay guide](obs-overlay.md).
 
 ## Every session

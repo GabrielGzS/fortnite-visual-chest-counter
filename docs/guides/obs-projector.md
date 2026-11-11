@@ -25,7 +25,7 @@ Capture card --> OBS (your scenes and stream, unchanged)
    every time OBS starts.
 4. Open **Fortnite Visual Chest Counter.exe**, click **Refresh**, and pick **OBS projector: Windowed Projector (Source) -
    *your source*** in the **Video source** list.
-5. Click **Start counting**. Turn on **Live preview** once to check that the whole picture is your gameplay with the HUD.
+5. Click **Start counting**. On the Dashboard's **Game** view, turn on **Live preview** once to check that the whole picture is your gameplay with the HUD.
 6. Show the numbers on stream: [OBS overlay guide](obs-overlay.md).
 
 ## While you stream

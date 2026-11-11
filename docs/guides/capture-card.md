@@ -25,7 +25,7 @@ Console / gaming PC -> HDMI -> capture card -> streaming PC: OBS -> scene "Chest
 5. **Controls** box: **gear** next to **Start Virtual Camera** -> **Output Type** = **Scene**, **Output Selection** =
    **ChestDetectorFeed** -> **Start Virtual Camera**.
 6. Open **Fortnite Visual Chest Counter.exe**, keep **OBS Virtual Camera**, click **Start counting**. Check once with
-   **Live preview**: the full 16:9 picture with the HUD.
+   **Live preview** (Dashboard, **Game** view): the full 16:9 picture with the HUD.
 7. Show the numbers on stream: [OBS overlay guide](obs-overlay.md).
 
 ## If the picture is black

@@ -36,7 +36,7 @@
 <main>
 
 <h1>Fortnite Visual Chest Counter</h1>
-<p class="sub">Automatically count Fortnite chests from gameplay video &middot; v0.2.3 public beta &middot; Windows 10 / 11 &middot; no Python or programming needed</p>
+<p class="sub">Automatically count Fortnite chests from gameplay video &middot; v0.3.0 public beta &middot; Windows 10 / 11 &middot; no Python or programming needed</p>
 
 <h2 style="border-top:none;margin-top:1rem">What this is</h2>
 <p>A small app for players and streamers. It recognises the chest-opening pop-ups in Fortnite gameplay video and keeps
@@ -77,7 +77,8 @@ number closely, but computer vision is never 100%. See <a href="#limits">Known l
   <li><a href="#types">Chest types</a></li>
   <li><a href="#overlay">Show it on stream</a></li>
   <li><a href="#custom">Customize text</a></li>
-  <li><a href="#activity">Activity &amp; preview</a></li>
+  <li><a href="#activity">Dashboard views</a></li>
+  <li><a href="#matches">Match tracking &amp; Analytics</a></li>
   <li><a href="#capture">Improve accuracy</a></li>
   <li><a href="#video">Recorded video</a></li>
   <li><a href="#start">Starting count</a></li>
@@ -120,7 +121,7 @@ the Activity log and over the Live preview), including how many seconds could no
 <h2 id="screen">Count what is on a screen</h2>
 <p>Play the stream, video or game <b>fullscreen</b> on one of your monitors, pick that <b>Screen</b> in the <b>Video source</b>
 list (it shows each screen&rsquo;s size; <b>Refresh</b> after plugging one in) and click <b>Start counting</b>. Turn on
-<b>Live preview</b> once to check that the counter sees the game with its HUD.</p>
+<b>Live preview</b> (Dashboard, <b>Game</b> view) once to check that the counter sees the game with its HUD.</p>
 <ul>
 <li>The gameplay must <b>fill the screen</b>. A small player inside a web page (with chat and menus around it) is too small to
 read &mdash; nothing is counted. Use the player&rsquo;s fullscreen button.</li>
@@ -178,7 +179,7 @@ runtime\                       program files (the official Python runtime from p
 <p>Open <b>Fortnite Visual Chest Counter.exe</b>. On the <b>Dashboard</b>, pick <b>OBS Virtual Camera</b> as the <b>Video source</b>; click
 <b>Start counting</b>. The status at the top right changes to <span class="ok">Counting</span>, and a line under the video source shows the
 picture size and how many pictures per second are analysed (about 15).</p>
-<p>Leave the app open while you play; you can minimise it. Each chest appears in the <b>Activity</b> panel the moment it is counted
+<p>Leave the app open while you play; you can minimise it. Each chest appears in the <b>Activity</b> log (Dashboard, <b>Console</b> view) the moment it is counted
 and the big numbers go up. To stop, click <b>Stop counting</b> (or close the app; it asks first). Your numbers are saved after every chest
 and are kept for next time.</p>
 <p>If a red message says <i>&ldquo;OBS Virtual Camera was not found&rdquo;</i>, follow the steps it shows (open OBS, Start Virtual Camera, click Start counting again).</p>
@@ -212,7 +213,7 @@ this does not work while OBS is using the card. If the app says the device canno
   <tr><td><b>Capture device: &hellip;</b> (no OBS)</td>
       <td>Many cards work with only <b>one</b> program at a time, so close OBS or remove the card from it. Uses the card&rsquo;s default resolution. Not yet tested with physical cards.</td></tr>
 </table>
-<p>Turn on <b>Live preview</b> on the Dashboard to check that the counter sees the game, full screen, with the HUD.</p>
+<p>Turn on <b>Live preview</b> (Dashboard, <b>Game</b> view) to check that the counter sees the game, full screen, with the HUD.</p>
 
 <h2 id="overlay">Show it on stream (OBS text source)</h2>
 <p>The counter only writes the <i>text</i>. You style it in OBS however you like. You need <b>one</b> source:</p>
@@ -243,8 +244,10 @@ this does not work while OBS is using the card. If the app says the device canno
   <tr><td><code>last_chest.txt</code></td><td>The most recent chest, e.g. <code>CHEST +1 &bull; HIGH</code>.</td></tr>
 </table>
 
-<h2 id="activity">Activity panel and live preview (optional)</h2>
-<p>Both are on the Dashboard and are only for you &mdash; showing, hiding or minimising them never changes what is counted.</p>
+<h2 id="activity">Dashboard views: Overview, Game and Console</h2>
+<p>The Dashboard has three views, switched at the top. <b>Overview</b> has your numbers, the video source and <b>Start counting</b>. <b>Game</b> shows what
+<a href="#matches">match tracking</a> sees and the <b>Live preview</b>. <b>Console</b> has the <b>Activity</b> log and <a href="#capture">diagnostic recording</a>; its button shows
+a number when there are warnings you have not seen. Changing view, or minimising the app, never changes what is counted.</p>
 <p><b>Activity</b> lists what the counter sees and decides, live:
 <b style="color:#0f7a4a">green</b> = certain chest &middot; <b style="color:#9a5b00">yellow</b> = counted in APPROX only &middot;
 <b style="color:#c0392b">red</b> = looked like a chest pop-up but was not counted. <code>match 0.94</code> is how closely the pop-up word
@@ -255,7 +258,7 @@ full screen with the HUD. It is off by default and costs nothing while hidden.</
 <p>Everything is also written to the session log in <code>logs\</code>, whether the panels are open or not.</p>
 
 <h2 id="capture">Help improve accuracy: marks and diagnostic recording (optional)</h2>
-<p>On the Dashboard, <b>Diagnostic recording</b> (off by default) keeps the video the counter analysed, so a missed chest can be replayed
+<p>On the Dashboard&rsquo;s <b>Console</b> view, <b>Diagnostic recording</b> (off by default) keeps the video the counter analysed, so a missed chest can be replayed
 and checked later. Change it any time, <b>also while counting</b> &mdash; the counts are not affected:</p>
 <ul>
   <li><b>Only around my marks</b> &mdash; the smallest: the counter keeps a short rolling recording and saves only the 30 seconds before and
@@ -285,6 +288,10 @@ The video should be clean 16:9 gameplay with the HUD visible, in English or Braz
 <b>Chests opened (APPROX)</b>, leave <b>Confirmed chests (CERTAIN)</b> at 0 and click <b>Save</b>.</p>
 <p>APPROX starts at your number and new chests are added on top. CERTAIN starts at 0, because the counter did not see the earlier chests.
 The same window corrects a wrong count. It works while counting: the counter picks up the new numbers within a second.</p>
+<p><b>One chest off?</b> The <b>+1</b> and <b>&minus;1</b> buttons next to the numbers change APPROX by one, also while counting. CERTAIN never changes this way, because the counter did not confirm that chest,
+and APPROX cannot go below CERTAIN. A line then shows how much was counted and how much was adjusted by hand, with <b>Undo</b> and an optional <b>Why?</b>.
+Fortnite can count a chest with nothing on screen to detect (a broken chest, for example), so a +1 does not have to mean the counter made a mistake. A <b>Reset&hellip;</b> or <b>Edit counts&hellip;</b> replaces the total,
+so corrections made before it can no longer be undone; they stay in the history.</p>
 
 <h2 id="profiles">Profiles: separate counts per person</h2>
 <p>Count several streamers (or yourself and others) without mixing their numbers: the <b>Profile</b> row on the Dashboard has
@@ -299,6 +306,20 @@ the <b>Default</b> profile. A deleted profile&rsquo;s counts are kept as a backu
 one). It is a label only: CERTAIN and APPROX are counted exactly as before, and OBS still shows only the totals. Chests
 counted before v0.2.2, or set with <b>Edit counts&hellip;</b>, are listed as <i>not classified</i>. Chest types are read for
 English pop-ups.</p>
+
+<h2 id="matches">Match tracking and Analytics (experimental)</h2>
+<p>New in v0.3.0 and <b>off by default</b>. Turn it on in <b>Settings &gt; Match tracking (experimental)</b>; it starts the next time you click <b>Start counting</b>. The app then follows your matches and keeps a
+history of them, per profile, in <code>state\history\</code> on your PC. It <b>never changes your counts or what OBS shows</b>.</p>
+<p><b>Save progress every</b> (30 seconds, 1 minute, 5 minutes or 10 minutes) sets how often running totals are written. Matches are followed once a second whatever you choose. A longer interval writes less to the disk, but after a crash more of the last moments count as uncertain.</p>
+<p>The <b>Analytics</b> page shows matches, match time and chests per match and per minute, with CERTAIN and APPROX kept apart. It reads the match history only, so your official totals stay the numbers on the Dashboard, and manual +1 / &minus;1 corrections are not part of it.</p>
+<table>
+  <tr><th>Quality</th><th>Meaning</th></tr>
+  <tr><td><b>Complete</b></td><td>Its start and its ending were both seen in English, with no break in the video. Only these enter complete-match averages.</td></tr>
+  <tr><td><b>Partial</b></td><td>Joined late, or part of it was not seen (counting stopped, video lost). Its observed time still shows.</td></tr>
+  <tr><td><b>Unconfirmed</b></td><td>No English evidence that it was really a match. Left out of every statistic.</td></tr>
+</table>
+<p>If a recorded match was wrong, <b>Not a match</b> leaves it out of the statistics and <b>Restore</b> puts it back. Nothing is deleted, and the chests stay in your totals.</p>
+<p>Match recognition reads <b>English</b> screens only for now, and has not yet been confirmed on a full real match from start to finish. In another language the chests are still counted, but matches show as &ldquo;not sure&rdquo; and no statistics are made up.</p>
 
 <h2 id="reset">Reset the counter (e.g. at the start of a stream)</h2>
 <p>On the Dashboard click <b>Reset&hellip;</b> and confirm. Both numbers (and the chest-type split) of the selected profile go to 0, also while counting. Closing and reopening the app does
@@ -323,11 +344,11 @@ A mistake in the file only produces a warning and the default is used for that o
 Choose <b>Download &amp; Install</b>: counting keeps running while the update is downloaded and prepared, and <b>Restart &amp; Install</b> finishes it.
 It is built to keep your counts, profiles, settings and OBS sources, and to return to the previous version by itself if a new one does not start properly.
 Nothing is downloaded or installed unless you choose to. The automatic check and the download speed are in <b>Settings &gt; Updates</b>.</p>
-<p>The updater has not installed a real update yet: v0.2.4 will be the first. If it does not work, update by hand with the steps below, which work for any version. Moving to v0.2.3 from an older version also needs these steps, because older versions have no updater.</p>
+<p>v0.3.0 is the first release the updater can install, so it is the updater&rsquo;s first real update. If it does not work, update by hand with the steps below, which work for any version. Versions older than v0.2.3 also need these steps, because they have no updater.</p>
 <p>Your counter, settings and logs are stored <b>next to</b> the program files, never inside them:</p>
 <table>
   <tr><th>Keep</th><th>What it is</th></tr>
-  <tr><td><code>state\</code></td><td>Your saved counts (every profile).</td></tr>
+  <tr><td><code>state\</code></td><td>Your saved counts and match history (every profile).</td></tr>
   <tr><td><code>config.toml</code></td><td>Your settings (if any were changed).</td></tr>
   <tr><td><code>logs\</code></td><td>Session logs (optional to keep).</td></tr>
   <tr><td><code>obs_output\</code></td><td>The text files OBS reads (they are re-created automatically).</td></tr>
@@ -343,10 +364,10 @@ If you extract to a new folder instead, copy <code>state\</code> and <code>confi
   <tr><th>Problem</th><th>Fix</th></tr>
   <tr><td>&ldquo;OBS Virtual Camera was not found&rdquo;</td><td>Open OBS Studio (version 28+) and click <b>Start Virtual Camera</b>, then click <b>Start counting</b> again.</td></tr>
   <tr><td>&ldquo;exists but is not sending video&rdquo;</td><td>Click <b>Start Virtual Camera</b> again; check the ChestDetectorFeed scene actually shows the game (not black).</td></tr>
-  <tr><td>The number never changes</td><td>Turn on <b>Live preview</b>: is the picture 16:9, full screen, with the HUD visible? Does the chest pop-up (&ldquo;CHEST&rdquo; / &ldquo;BA&Uacute;&rdquo;) appear? Screen source: the stream must play <b>fullscreen</b> (a small player in a web page is too small). Webcam/alerts covering the HUD hide it.</td></tr>
+  <tr><td>The number never changes</td><td>Dashboard, <b>Game</b> view, turn on <b>Live preview</b>: is the picture 16:9, full screen, with the HUD visible? Does the chest pop-up (&ldquo;CHEST&rdquo; / &ldquo;BA&Uacute;&rdquo;) appear? Screen source: the stream must play <b>fullscreen</b> (a small player in a web page is too small). Webcam/alerts covering the HUD hide it.</td></tr>
   <tr><td>Livestream URL: &ldquo;Buffering&rdquo; / video in bursts</td><td>Normal for a live stream; the counter catches up and keeps counting. Keep <b>Stream stability: Maximum stability</b> for long sessions.</td></tr>
   <tr><td>&ldquo;already running in another window&rdquo; / &ldquo;already open&rdquo;</td><td>Only one counter can run at a time. Use the one that is already open (look in the taskbar).</td></tr>
-  <tr><td>It missed a chest / counted something wrong</td><td>Help improve it: turn on <b>Diagnostic recording</b> in Settings and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd> right after a miss (see <a href="#capture">Help improve accuracy</a>). Share the session&rsquo;s folder from <code>captures\</code>.</td></tr>
+  <tr><td>It missed a chest / counted something wrong</td><td>Use <b>+1</b> / <b>&minus;1</b> to fix the number. To help improve it: Dashboard, <b>Console</b> view, turn on <b>Diagnostic recording</b> and press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd> right after a miss (see <a href="#capture">Help improve accuracy</a>). Share the session&rsquo;s folder from <code>captures\</code>.</td></tr>
   <tr><td>Text in OBS is blank or not updating</td><td>In the Text source tick <b>Read from file</b> and check it points to the file shown on the app&rsquo;s <b>Overlay</b> page.</td></tr>
   <tr><td>Wrong numbers / want to fix by hand</td><td><b>Edit counts&hellip;</b> on the Dashboard, or <b>Reset&hellip;</b> for 0.</td></tr>
   <tr><td>Anything else</td><td>Open <b>Help &amp; diagnostics</b> &rarr; <b>Run diagnostics</b> &rarr; <b>Copy report</b> and paste it into your message (it is also saved to <code>logs\diagnostics.txt</code>). If something ever crashes it saves <code>logs\crash_*.txt</code> &mdash; send that too.</td></tr>
@@ -366,6 +387,7 @@ If chests stop being counted after a Fortnite update, please report it on the pr
   <li><b>Livestream URL</b> sees what viewers get: bursts, buffering, ad breaks and reconnects. Video the platform never delivered cannot be counted. <b>Screen</b>: the gameplay must fill the screen.</li>
   <li><b>Clean gameplay feed recommended:</b> overlays, webcam or alerts on top of the HUD can hide the clues.</li>
   <li><b>Audio is not used.</b> Only the picture is analysed.</li>
+  <li><b>Match tracking is experimental:</b> English screens only, tested on recordings but not yet on a full real match from start to finish. Other modes, reboots and squads are untested. Your counts never depend on it.</li>
   <li>Tested on a limited number of recordings (PC English, PS5 Portuguese, streams with a larger and a smaller HUD, 11 labelled real-world cases) and live sessions up to several hours. Physical capture cards and real OBS projectors are not tested yet. Other platforms or settings may behave differently &mdash; that&rsquo;s why this is a <b>beta</b>.</li>
 </ul>
 

@@ -108,7 +108,9 @@ class FakeObs:
         if conn is not None:
             try:
                 _write_frame(conn, 0x8, struct.pack(">H", code))
-                conn.close()
+                # A real server waits for the client's answer before closing. Closing here, while _serve is blocked reading this socket,
+                # resets the connection on Windows and destroys the close frame still on its way: the client then cannot see the code.
+                conn.shutdown(socket.SHUT_WR)
             except OSError:
                 pass
 
@@ -148,6 +150,8 @@ class FakeObs:
                     self.send(7, self._answer(d))
         except (OSError, ConnectionError, ValueError):
             pass
+        finally:
+            conn.close()
 
     def _find(self, data):
         for name, item in self.inputs.items():

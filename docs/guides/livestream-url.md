@@ -31,7 +31,7 @@ it is; the counter can even run on another PC.
   decode it). Facecams, overlays or a small gameplay area covering the chest pop-up can make it miss chests.
 - **The app always says when the stream is not delivering video:** the status pill and the Live preview switch to
   *Buffering* / *Ad break* (yellow: waiting, normal now and then) or *Reconnecting* / *Stream offline* (red: the
-  connection dropped - the app reconnects by itself). The Activity log shows the same in colour, and after a gap a yellow
+  connection dropped - the app reconnects by itself). The Activity log (Dashboard, **Console** view) shows the same in colour, and after a gap a yellow
   line says how many seconds of the stream could not be seen: **chests opened in that part are missing from the count**.
   Counts are always kept, and nothing is counted twice (a reconnect continues at the newest part of the stream).
 - Your OBS overlay text is never changed to show these messages.

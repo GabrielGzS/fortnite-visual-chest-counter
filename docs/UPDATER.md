@@ -2,7 +2,7 @@
 
 Internal / developer note. Signing keys are covered in [UPDATE_SIGNING.md](UPDATE_SIGNING.md).
 
-**Current state (v0.2.3):** the whole updater is built, including the app's window controls and settings, and passes the automated tests
+**Current state (v0.2.3, unchanged in v0.3.0):** the whole updater is built, including the app's window controls and settings, and passes the automated tests
 on small synthetic installations. Both production public keys are in the trust list. It ships as **experimental**.
 
 **Unverified, not passed.** The project has no users yet, so on 2026-11-09 the real-package checks were postponed to v0.2.4 development:
