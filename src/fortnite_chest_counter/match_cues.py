@@ -13,8 +13,8 @@ Nothing here writes to the frame, keeps it, or touches chest detection, counting
     connecting          "CONNECTING...": loading                           three artworks, two sessions
     lobby_menu          the menu bar: at least two of three words          one lobby, two tabs
     matchmaking         "CANCEL": in the matchmaking queue                 one lobby
-    waiting_for_players the pre-game island countdown                      one match start
-    bus_launching       "... LAUNCHING IN": the bus is about to leave      one match start
+    waiting_for_players the pre-game island countdown                      one match start, and one on a smaller HUD
+    bus_launching       "... LAUNCHING IN": the bus is about to leave      one match start, and one on a smaller HUD
     spectating          "SPECTATING:": watching another player             one match end, recorded twice
     victory_royale      PROVISIONAL, see below                             three wins, two banner sizes
 
@@ -60,14 +60,16 @@ CUES = (Cue("you_placed_screen", (514, 86, 707, 140)), Cue("you_placed_bar", (53
         Cue("menu_locker", (304, 27, 414, 66)), Cue("menu_quests", (479, 27, 586, 66)), Cue("menu_career", (665, 27, 775, 66)),
         Cue("matchmaking_cancel", (101, 586, 246, 632), DARK), Cue("waiting_for_players", (552, 80, 752, 120)),
         Cue("bus_launching", (600, 58, 800, 94)),          # wider: the sentence is centred, and the bus's name changes each season
-        Cue("spectating", (1012, 0, 1157, 36)), Cue("victory_large", (550, 121, 754, 188)), Cue("victory_small", (561, 94, 736, 152)))
+        Cue("spectating", (1012, 0, 1157, 36)), Cue("victory_large", (550, 121, 754, 188)), Cue("victory_small", (561, 94, 736, 152)),
+        # The same two sentences on a HUD drawn about 0.78x: at that size the normal templates score under 0.3, so the game's start is missed.
+        Cue("waiting_for_players_small", (570, 78, 735, 104)), Cue("bus_launching_small", (600, 58, 800, 84)))
 _CUE = {cue.name: cue for cue in CUES}
 
 _MENU = ("menu_locker", "menu_quests", "menu_career")
 # signal -> the templates behind it. The highest score wins, except the menu bar, where two of the three words must agree.
 SIGNALS = {"you_placed": ("you_placed_screen", "you_placed_bar"), "eliminated_by": ("eliminated_by",), "connecting": ("connecting",),
-           "lobby_menu": _MENU, "matchmaking": ("matchmaking_cancel",), "waiting_for_players": ("waiting_for_players",),
-           "bus_launching": ("bus_launching",), "spectating": ("spectating",), "victory_royale": ("victory_large", "victory_small")}
+           "lobby_menu": _MENU, "matchmaking": ("matchmaking_cancel",), "waiting_for_players": ("waiting_for_players", "waiting_for_players_small"),
+           "bus_launching": ("bus_launching", "bus_launching_small"), "spectating": ("spectating",), "victory_royale": ("victory_large", "victory_small")}
 PROVISIONAL_SIGNALS = frozenset({"victory_royale"})          # too few examples to rely on by itself
 NOT_ENGLISH_SPECIFIC = frozenset({"victory_royale"})         # the same word appears in the Portuguese game
 

@@ -263,10 +263,14 @@ def test_an_unknown_reason_keeps_the_careful_label():
     assert ending("something else") == "Left or not seen"
 
 
-def test_leaving_stays_partial():
-    """No ending on screen means not complete, however much of the match was seen."""
+def test_the_waiting_island_is_named_rather_than_called_an_ending():
+    assert analytics().ending_text({"ended_by": "left_or_unknown", "reasons": ["started: joined late, health bar", "waiting island", "next match countdown seen"]}) == "Waiting island"
+
+
+def test_leaving_is_complete_but_keeps_its_own_ending():
+    """Complete says the start and the end of the player's part were both seen. How it ended is a separate fact."""
     s = M2.played_match().show(4, "connecting").finish()
-    assert s.records[0].completion == M2.S.PARTIAL and s.records[0].ended_by == M2.S.LEFT_OR_UNKNOWN
+    assert s.records[0].completion == M2.S.COMPLETE and s.records[0].ended_by == M2.S.LEFT_OR_UNKNOWN
 
 
 # ------------------------------------------------------------------ recent matches

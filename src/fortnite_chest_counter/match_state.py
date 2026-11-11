@@ -25,8 +25,12 @@ Each rule needs a signal in 2 of the last 3 samples, unless the table says other
     IN_MATCH, ELIMINATED      UNKNOWN               no evidence of play or no picture for 60 s, or video time ran backwards
 
 What it will not claim:
-  * A match is "complete" only with its start seen, YOU PLACED or Victory seen, English evidence, and no break in the video before that
-    ending. A break after the ending hides nothing about the match, so it does not count.
+  * A match is "complete" when its start was seen, the player's part in it ended on screen, there is English evidence, and there is no
+    break in the video before that ending. Complete describes what was observed, not how it went: YOU PLACED, Victory, or play giving way
+    to a loading screen or the menus all end it, however soon and for whatever reason. Video simply stopping does not. A break after the
+    ending hides nothing about the match, so it does not count.
+  * WAITING FOR PLAYERS and LAUNCHING IN only appear before a game. A match opened on a health bar straight after a loading screen, with no
+    chest in it, that such text then closes was the waiting island, whose HUD can appear before its text can be read. It stays unconfirmed.
   * A match is "unconfirmed" until English text or an English chest belongs to it. A health bar, a Portuguese chest and Victory Royale can
     never confirm one: the health bar and the word ROYALE look the same in other languages. Unconfirmed matches must stay out of statistics.
   * An elimination does not finish a match on its own. The record stays open through spectating. M1 cannot identify the original player's
@@ -48,6 +52,7 @@ UNKNOWN, LOBBY, LOADING, PRE_GAME, IN_MATCH, ELIMINATED = "UNKNOWN", "LOBBY", "L
 COMPLETE, PARTIAL, UNCONFIRMED = "complete", "partial", "unconfirmed"
 PLACED, VICTORY, LEFT_OR_UNKNOWN, STOPPED, LOST, DISCONTINUITY = "placed", "victory", "left_or_unknown", "stopped", "lost", "discontinuity"
 HIGH, MEDIUM, LOW = "high", "medium", "low"
+WAITING_ISLAND = "waiting island"
 
 SCORE_THRESHOLD = 0.70
 HEALTH_BAR_MIN_PIXELS = 30
@@ -149,6 +154,8 @@ class _Match:
     reasons: list = field(default_factory=list)
     evidence: list = field(default_factory=list)
     seen: set = field(default_factory=set)
+    after_loading: bool = False            # joined on a health bar straight after a loading screen
+    chest_counted: bool = False
 
 
 @dataclass
@@ -339,6 +346,7 @@ class MatchStateMachine:
         if match is None:
             return
         for language in observation.chests:
+            match.chest_counted = True
             if language == "en":
                 match.english_chests += 1
                 match.english.add("en_chest")
@@ -386,7 +394,7 @@ class MatchStateMachine:
         if self.state == state:
             return
         if self._match is not None:
-            self._close(t, self._match.ended_by or LEFT_OR_UNKNOWN, [reason], events)
+            self._close(t, self._match.ended_by or LEFT_OR_UNKNOWN, [reason], events, play_ended=True)
         self._countdown = None
         self._go(t, state, reason, events)
 
@@ -394,7 +402,11 @@ class MatchStateMachine:
         signal = "waiting_for_players" if self._confirmed("waiting_for_players") else "bus_launching"
         if self.state != PRE_GAME:
             if self._match is not None:
-                self._close(t, self._match.ended_by or LEFT_OR_UNKNOWN, ["next match countdown seen"], events)
+                match = self._match
+                if match.after_loading and not match.chest_counted and match.ended_by is None:
+                    match.english.clear()              # the countdown proves play had not begun, so what confirmed it proves nothing
+                    match.reasons.append(WAITING_ISLAND)
+                self._close(t, match.ended_by or LEFT_OR_UNKNOWN, ["next match countdown seen"], events)
             self._countdown = _Countdown(self._first_hit(signal), t, HIGH if signal == "waiting_for_players" else MEDIUM, set())
             self._go(t, PRE_GAME, "countdown_seen", events)
         self._countdown.last_t = t
@@ -430,6 +442,7 @@ class MatchStateMachine:
         first = next((seen_t for seen_t, hud in self._hud if hud), t) if sustained else t
         from_loading = self.state == LOADING
         match = self._open(t, first, first, False, LOW, events)
+        match.after_loading = from_loading
         match.observed = match.active = t - match.opened_t
         if from_loading and self._loading_english_continuous:
             match.english.add("connecting")
@@ -472,16 +485,16 @@ class MatchStateMachine:
         if state != LOADING:
             self._loading_english_continuous = False
 
-    def _close(self, t, ended_by, reasons, events):
+    def _close(self, t, ended_by, reasons, events, play_ended=False):
         match = self._match
         finished = ended_by in (PLACED, VICTORY)
         if not match.english:
             completion = UNCONFIRMED
-        elif match.observed_from_start and finished and not match.discontinuity and not match.ambiguous_recovery:
+        elif match.observed_from_start and (finished or play_ended) and not match.discontinuity and not match.ambiguous_recovery:
             completion = COMPLETE
         else:
             completion = PARTIAL
-        duration = round(match.ended_t - match.played_from_t, 3) if completion == COMPLETE else None
+        duration = round((match.ended_t if finished else t) - match.played_from_t, 3) if completion == COMPLETE else None
         events.append(MatchRecord(match.number, completion, bool(match.english), ended_by, match.observed_from_start, match.opened_t, match.played_from_t,
                                   match.ended_t if finished else None, t, round(match.observed, 3), round(match.active, 3), round(match.spectating, 3),
                                   round(match.uncertain, 3), duration, match.start_confidence, match.end_confidence if finished else LOW, match.discontinuity,

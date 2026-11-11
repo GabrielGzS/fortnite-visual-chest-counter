@@ -22,6 +22,7 @@ from fortnite_chest_counter import match_state as S
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 TIMELINES = json.loads(gzip.open(HERE / "fixtures" / "match" / "timelines.json.gz").read())
+TIMELINES.update(json.loads(gzip.open(HERE / "fixtures" / "match" / "timelines_small.json.gz").read()))
 HP = 180
 
 
@@ -307,10 +308,93 @@ def test_gameplay_appearing_after_the_lobby_counts_as_joined_late():
 
 # ---- endings
 
-def test_leaving_without_dying_is_partial():
+def test_leaving_after_a_seen_start_is_complete_and_the_outcome_stays_unknown():
     s = played_match().show(4, "connecting").finish()
     r = s.records[0]
-    assert r.ended_by == S.LEFT_OR_UNKNOWN and r.completion == S.PARTIAL and r.ended_t is None and r.end_confidence == S.LOW
+    assert r.ended_by == S.LEFT_OR_UNKNOWN and r.completion == S.COMPLETE and r.ended_t is None and r.end_confidence == S.LOW
+    assert r.complete_duration_seconds == r.closed_t - r.played_from_t
+
+
+def test_returning_to_the_lobby_is_complete():
+    r = played_match().show(4, "lobby_menu").finish().records[0]
+    assert r.ended_by == S.LEFT_OR_UNKNOWN and r.completion == S.COMPLETE
+
+
+def test_a_short_match_needs_no_minimum_duration():
+    r = start_match(Script()).show(8, health=HP).show(4, "lobby_menu").finish().records[0]
+    assert r.completion == S.COMPLETE and r.active_seconds < 25
+
+
+def test_leaving_cannot_complete_a_match_whose_start_was_not_seen():
+    s = Script().show(20, health=HP).show(4, "connecting").finish()
+    assert s.records[0].observed_from_start is False and s.records[0].completion != S.COMPLETE
+
+
+def test_counting_stopping_is_not_an_ending():
+    r = played_match().finish().records[0]
+    assert r.ended_by == S.STOPPED and r.completion == S.PARTIAL and r.complete_duration_seconds is None
+
+
+def test_losing_the_video_is_not_an_ending():
+    r = played_match().finish(S.LOST).records[0]
+    assert r.ended_by == S.LOST and r.completion == S.PARTIAL
+
+
+def test_missing_video_before_leaving_stays_partial():
+    r = played_match().jump(20).show(4, "connecting").finish().records[0]
+    assert r.discontinuity and r.ended_by == S.LEFT_OR_UNKNOWN and r.completion == S.PARTIAL
+
+
+def test_a_reconnect_is_two_records_and_the_second_is_partial():
+    s = played_match().show(4, "connecting").show(12, health=HP).finish()
+    first, second = s.records
+    assert first.completion == S.COMPLETE and second.observed_from_start is False and second.completion == S.PARTIAL
+
+
+def island_opened_after_loading(script=None):
+    """Loading, then the island's health bar before its countdown text can be read: the tracker opens a match that is not one."""
+    return (script or Script()).show(5, "lobby_menu").show(8, "connecting").show(12, health=HP)
+
+
+def test_the_countdown_retroactively_marks_the_waiting_island():
+    s = island_opened_after_loading()
+    assert s.state == S.IN_MATCH and s.machine.open_match_number == 1
+    s.show(20, "waiting_for_players", health=HP).show(10, "bus_launching", health=HP).show(6).show(60, health=HP).show(4, "connecting").finish()
+    island, match = s.records
+    assert island.completion == S.UNCONFIRMED and not island.english_confirmed and S.WAITING_ISLAND in island.reasons
+    assert match.completion == S.COMPLETE and match.observed_from_start and S.WAITING_ISLAND not in match.reasons
+
+
+def test_the_real_small_hud_clip_finds_the_island_and_the_bus():
+    """A streamer whose HUD is drawn about 0.78x. Before the small templates this start read as joined late, with 20 s of island counted as play."""
+    events = replay("small")
+    near(story(events)[:4], [(25, S.IN_MATCH), (33, S.LOBBY), (41, S.LOADING), (47, S.PRE_GAME)], margin=3.0)
+    first, second = [e for e in events if isinstance(e, S.MatchRecord)]
+    assert not first.observed_from_start and first.completion != S.COMPLETE
+    assert second.observed_from_start and second.ended_by == S.STOPPED and second.completion != S.COMPLETE          # the recording stops mid-match
+    assert abs(second.played_from_t - 66) <= 2 and abs(second.active_seconds - 34) <= 2                            # dated from the last countdown, however the bus was sampled
+
+
+def test_a_counted_chest_means_it_was_not_the_island():
+    s = island_opened_after_loading().show(1, health=HP, chests=("en",)).show(6, "waiting_for_players", health=HP).finish()
+    assert S.WAITING_ISLAND not in s.records[0].reasons and s.records[0].english_confirmed
+
+
+def test_a_late_join_without_a_loading_screen_is_not_called_the_island():
+    s = Script().show(12, health=HP).show(6, "waiting_for_players", health=HP).finish()
+    assert S.WAITING_ISLAND not in s.records[0].reasons
+
+
+def test_a_countdown_without_leaving_does_not_complete_a_match():
+    s = played_match().show(6, "waiting_for_players", health=HP).finish()
+    assert s.records[0].ended_by == S.LEFT_OR_UNKNOWN and s.records[0].completion == S.PARTIAL      # a jump in the video, not a player seen leaving
+
+
+def test_the_island_rule_waits_for_real_text_and_uses_no_timer():
+    s = island_opened_after_loading().show(120, health=HP)
+    assert s.state == S.IN_MATCH and s.records == []                  # however long it runs, only the countdown can call it the island
+    s.show(4, "connecting").finish()
+    assert S.WAITING_ISLAND not in s.records[0].reasons
 
 
 def test_the_lobby_appearing_also_closes_the_match():
@@ -385,9 +469,15 @@ def test_repeated_placement_after_health_keeps_one_original_ending():
     assert sum(e.state == S.ELIMINATED for e in s.events if isinstance(e, S.Transition)) == 1
 
 
-def test_elimination_without_placement_is_not_a_complete_match():
+def test_elimination_then_leaving_is_complete_without_claiming_a_placement():
     s = played_match().show(6, "eliminated_by").show(4, "connecting").finish()
-    assert s.records[0].ended_by == S.LEFT_OR_UNKNOWN and s.records[0].completion == S.PARTIAL
+    r = s.records[0]
+    assert r.ended_by == S.LEFT_OR_UNKNOWN and r.completion == S.COMPLETE and r.ended_t is None
+
+
+def test_elimination_then_the_video_stopping_stays_partial():
+    r = played_match().show(6, "eliminated_by").finish().records[0]
+    assert r.ended_by == S.STOPPED and r.completion == S.PARTIAL
 
 
 def test_a_win_never_comes_back_as_the_same_match():

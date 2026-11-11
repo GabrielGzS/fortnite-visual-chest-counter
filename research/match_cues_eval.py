@@ -1,7 +1,7 @@
 """
 Measure the match-recognition cues on labelled footage and on ordinary gameplay. Samples frames only: it runs no chest detection.
 
-    python research/match_cues_eval.py --capture "<...>/captures/20261108_233437" [--ffmpeg <exe>] [--write-fixtures]
+    python research/match_cues_eval.py --capture "<...>/captures/20261108_233437" --small-capture <a copy of captures/20261111_071106> [--ffmpeg <exe>] [--write-fixtures]
 
 Exit code 0 only when every signal reaches the threshold on its known screens and stays at or below 0.40 everywhere else, and the combined
 checks stay under the time budget. Frames close to a labelled boundary are not judged either way, because those labels are approximate.
@@ -28,11 +28,11 @@ NEW, PS5 = "Fortnites-NEW-HD-No-Audio.mp4", "Fortnite-PS5-Pro-HD-No-Audio.mp4"
 #              signal: {source: [(from, to) in seconds where the text is on screen]}, labelled by eye from the footage
 TRUTH = {"you_placed": {"clip1": [(8.5, 14.5), (16.0, 16.5)], "clip2": [(40.0, 45.5), (46.5, 47.0)]},
          "eliminated_by": {"clip1": [(10.0, 14.5)], "clip2": [(40.0, 45.0)]},
-         "connecting": {"clip1": [(18.5, 27.0)], "clip2": [(48.5, 58.0)], "clip3": [(18.0, 21.0)], "case_20261108_030211_seg_00019": [(2.0, 9.0)]},
+         "connecting": {"clip1": [(18.5, 27.0)], "clip2": [(48.5, 58.0)], "clip3": [(18.0, 21.0)], "case_20261108_030211_seg_00019": [(2.0, 9.0)], "small": [(40.0, 45.0)]},
          "lobby_menu": {"clip1": [(30.5, 60.0)], "clip2": [(0.0, 3.5), (60.5, 63.5), (68.0, 80.0)], "clip3": [(0.0, 15.0)]},
-         "matchmaking": {"clip1": [(30.5, 60.0)], "clip2": [(0.0, 8.0), (61.0, 64.5)], "clip3": [(0.0, 14.0)]},
-         "waiting_for_players": {"clip3": [(24.0, 33.0)]},
-         "bus_launching": {"clip3": [(34.5, 44.0)]},
+         "matchmaking": {"clip1": [(30.5, 60.0)], "clip2": [(0.0, 8.0), (61.0, 64.5)], "clip3": [(0.0, 14.0)], "small": [(32.0, 36.0)]},
+         "waiting_for_players": {"clip3": [(24.0, 33.0)], "small": [(46.0, 54.0)]},
+         "bus_launching": {"clip3": [(34.5, 44.0)], "small": [(56.0, 65.0)]},
          "spectating": {"clip1": [(14.0, 14.5), (16.0, 16.5)], "clip2": [(44.0, 45.0), (46.5, 47.0)]},
          "victory_royale": {"new": [(258.0, 261.0), (499.0, 506.0)], "ps5": [(1020.0, 1028.0)]}}
 # On screen but hidden behind the Twitch player's controls: neither right nor wrong for this signal.
@@ -51,10 +51,11 @@ def frames(ffmpeg, inputs, fps):
     process.wait()
 
 
-def sources(capture):
+def sources(capture, small_capture):
     samples = ROOT / "samples" / "video tests"
     for number in (1, 2, 3):
         yield f"clip{number}", ["-f", "concat", "-safe", "0", "-i", str(Path(capture) / "video" / f"clip_{number:03d}.ffconcat")], 2
+    yield "small", ["-f", "concat", "-safe", "0", "-i", str(Path(small_capture) / "video" / "clip_small.ffconcat")], 2
     yield "ps5", ["-i", str(samples / PS5)], 1
     yield "new", ["-i", str(samples / NEW)], 1
     for segment in sorted((ROOT / "samples" / "cases").glob("*/video/seg_*.mkv")):
@@ -81,6 +82,8 @@ def write_fixtures(rows, bits, path):
     for signal in M.SIGNALS:
         positives = [i for i, row in enumerate(rows) if verdict(signal, row["source"], row["t"]) is True]
         chosen.update(positives[:: max(1, len(positives) // 3)][:4])
+        small = [i for i in positives if rows[i]["source"] == "small"]                # the smaller HUD must be represented, not left to chance
+        chosen.update(small[:: max(1, len(small) // 3)][:3])
         negatives = sorted((i for i, row in enumerate(rows) if verdict(signal, row["source"], row["t"]) is False), key=lambda i: -rows[i][signal])
         chosen.update(negatives[:3])
     others = [i for i, row in enumerate(rows) if not row["source"].startswith("clip")]
@@ -98,6 +101,7 @@ def write_fixtures(rows, bits, path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--capture", required=True)
+    parser.add_argument("--small-capture", required=True, help="the capture with the smaller HUD, with video/clip_small.ffconcat")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--write-fixtures", action="store_true")
     parser.add_argument("--write-timelines", action="store_true", help="save one-sample-per-second cue timelines for tests/test_match_state.py")
@@ -106,7 +110,7 @@ def main():
     reader = M.CueReader()
     rows, bits, whole_ms, set_ms = [], [], [], {name: [] for name in SETS}
     changes, still, started = {}, [], time.monotonic()
-    for source, inputs, fps in sources(arguments.capture):
+    for source, inputs, fps in sources(arguments.capture, arguments.small_capture):
         previous, step = None, 0
         for t, frame in frames(arguments.ffmpeg, inputs, fps):
             frame.flags.writeable = False
@@ -127,7 +131,7 @@ def main():
                     if evidence.change < 1.0:
                         still.append((source, t, round(evidence.change, 3), round(evidence.mean_luma, 1)))
                 previous = evidence.sample
-                if source in ("clip1", "clip2", "clip3", "ps5", "new"):
+                if source in ("clip1", "clip2", "clip3", "small", "ps5", "new"):
                     timelines.setdefault(source, []).append([round(t, 1), {k: round(v, 3) for k, v in scores.items() if v >= 0.05}, health, int(evidence.black), int(evidence.frozen)])
             step += 1
             fill = {signal: max(float(M._ink_mask(frame[M._CUE[n].box[1]:M._CUE[n].box[3], M._CUE[n].box[0]:M._CUE[n].box[2]], M._CUE[n].ink).mean()) for n in M.SIGNALS[signal]) for signal in M.SIGNALS}
@@ -174,10 +178,12 @@ def main():
         folder.mkdir(parents=True, exist_ok=True)
         write_fixtures(rows, bits, folder / "frames.npz")
     if arguments.write_timelines:
-        path = ROOT / "tests" / "fixtures" / "match" / "timelines.json.gz"
-        with open(path, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0, filename="") as out:
-            out.write(json.dumps(timelines, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-        print(f"\nwrote {path}: {sum(len(v) for v in timelines.values())} samples, {path.stat().st_size // 1024} KiB")
+        folder = ROOT / "tests" / "fixtures" / "match"
+        small = {"small": timelines.pop("small")}                                    # its own file: the scorecard's frozen references cover only the others
+        for path, content in ((folder / "timelines.json.gz", timelines), (folder / "timelines_small.json.gz", small)):
+            with open(path, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0, filename="") as out:
+                out.write(json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+            print(f"\nwrote {path}: {sum(len(v) for v in content.values())} samples, {path.stat().st_size // 1024} KiB")
     print("\nRESULT:", "ACCEPTED" if ok else "NOT ACCEPTED")
     sys.exit(0 if ok else 1)
 

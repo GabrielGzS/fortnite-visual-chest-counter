@@ -32,6 +32,7 @@ ENDINGS = {"placed": "Placed", "victory": "Victory Royale", "left_or_unknown": "
 # A match that ended with no YOU PLACED or Victory on screen, by what was seen next. It says where play went, never why: quitting, a disconnect and an
 # ending the app missed all look the same.
 LEFT_ENDINGS = {"menu_seen": "Returned to lobby", "connecting_seen": "Left the match", "next match countdown seen": "Next match began"}
+WAITING_ISLAND = "waiting island"          # match_state's reason for a record the countdown proved was never a match
 
 
 @dataclass
@@ -149,6 +150,8 @@ def match_rate(certain, approx, active_seconds):
 def ending_text(match):
     """How a match ended, as far as was seen."""
     ended_by, reasons = match.get("ended_by"), match.get("reasons") or ()
+    if WAITING_ISLAND in reasons:
+        return "Waiting island"
     if ended_by == "left_or_unknown" and reasons and reasons[-1] in LEFT_ENDINGS:
         return LEFT_ENDINGS[reasons[-1]]
     return ENDINGS.get(ended_by, "Not seen")

@@ -1,7 +1,7 @@
 """
 Cut the v0.3.0 match-recognition word templates from labelled footage, so they can be rebuilt and checked. Needs footage that is not in Git.
 
-    python research/make_match_templates.py --capture "<...>/captures/20261108_233437" [--ffmpeg <exe>]
+    python research/make_match_templates.py --capture "<...>/captures/20261108_233437" --small-capture "<...>/captures/20261111_071106" [--ffmpeg <exe>]
 
 Each template is the word's ink (white or dark text) as a small true/false bitmap, trimmed to the word. No other picture content is kept.
 Footage held back for independent validation must never be used here.
@@ -25,10 +25,13 @@ SOURCES = {"you_placed_screen": (1, 9, (538, 98, 683, 128)), "you_placed_bar": (
            "connecting": (1, 22, (60, 644, 196, 667)), "menu_locker": (1, 36, (328, 39, 390, 54)), "menu_quests": (1, 36, (503, 39, 562, 54)),
            "menu_career": (1, 36, (689, 39, 751, 54)), "matchmaking_cancel": (1, 36, (125, 598, 222, 620)), "waiting_for_players": (3, 24, (576, 92, 728, 108)),
            "bus_launching": (3, 38, (670, 68, 752, 84)), "spectating": (1, 17, (1036, 8, 1133, 24)),
-           "victory_large": (ENGLISH_WIN, 260, (574, 135, 730, 174)), "victory_small": (PORTUGUESE_WIN, 1024, (585, 108, 712, 138))}
+           "victory_large": (ENGLISH_WIN, 260, (574, 135, 730, 174)), "victory_small": (PORTUGUESE_WIN, 1024, (585, 108, 712, 138)),
+           "waiting_for_players_small": ("seg_00169.mkv", 7.4, (592, 85, 712, 97)), "bus_launching_small": ("seg_00170.mkv", 5.4, (660, 67, 730, 77))}
 
 
-def read_frame(ffmpeg, capture, source, seconds):
+def read_frame(ffmpeg, capture, source, seconds, small_capture=None):
+    if isinstance(source, str):                                                     # a segment of the capture with the smaller HUD
+        source = Path(small_capture) / "video" / source
     if isinstance(source, int):
         inputs = ["-f", "concat", "-safe", "0", "-i", str(Path(capture) / "video" / f"clip_{source:03d}.ffconcat")]
     else:
@@ -40,6 +43,7 @@ def read_frame(ffmpeg, capture, source, seconds):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--capture", required=True, help="the labelled capture folder")
+    parser.add_argument("--small-capture", required=True, help="the capture with the smaller HUD")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--out", default=str(M.TEMPLATE_DIR))
     arguments = parser.parse_args()
@@ -49,7 +53,7 @@ def main():
     if set(SOURCES) != set(inks):
         raise SystemExit(f"SOURCES and match_cues.CUES disagree: {sorted(set(SOURCES) ^ set(inks))}")
     for name, (source, seconds, (x0, y0, x1, y1)) in SOURCES.items():
-        word = M._ink_mask(read_frame(arguments.ffmpeg, arguments.capture, source, seconds)[y0:y1, x0:x1], inks[name])
+        word = M._ink_mask(read_frame(arguments.ffmpeg, arguments.capture, source, seconds, arguments.small_capture)[y0:y1, x0:x1], inks[name])
         ys, xs = np.nonzero(word)
         trimmed = word[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
         np.save(out / f"{name}.npy", trimmed)

@@ -11,6 +11,7 @@ import math
 STATES = {"UNKNOWN", "LOBBY", "LOADING", "PRE_GAME", "IN_MATCH", "ELIMINATED"}
 COMPLETIONS = {"complete", "partial", "unconfirmed"}
 ENDINGS = {"placed", "victory"}
+COMPLETE_ENDINGS = ENDINGS | {"left_or_unknown"}
 BOUNDARIES = ("opened_t", "played_from_t", "ended_t", "closed_t")
 COUNTS = ("missed_matches", "extra_matches", "duplicate_matches", "missed_transitions",
           "extra_transitions", "incorrect_transitions", "false_endings", "missed_endings",
@@ -151,9 +152,10 @@ def record_errors(records, tolerance=0.005):
         if r["completion"] not in COMPLETIONS:
             bad("unknown completion classification")
         elif r["completion"] == "complete":
-            if not (r["observed_from_start"] and r["english_confirmed"] and not r["discontinuity"] and r["ended_by"] in ENDINGS):
+            if not (r["observed_from_start"] and r["english_confirmed"] and not r["discontinuity"] and r["ended_by"] in COMPLETE_ENDINGS):
                 bad("complete match lacks required start, language, continuity or ending")
-            if not number(duration) or not number(ended) or abs(duration - (ended - r["played_from_t"])) > tolerance:
+            finish = ended if r["ended_by"] in ENDINGS else r["closed_t"]               # leaving has no ending on screen: play stopped when the match closed
+            if not number(duration) or not number(finish) or abs(duration - (finish - r["played_from_t"])) > tolerance:
                 bad("invalid complete duration")
         elif duration is not None:
             bad("incomplete match claims a complete duration")
