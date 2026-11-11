@@ -329,7 +329,7 @@ def test_every_updater_module_is_on_the_required_list():
     source = {path.name for path in (ROOT / "src/fortnite_chest_counter/update").glob("*.py")}
     assert {"install_helper.py", "trust.py", "__init__.py"} <= source
     expected = {f"{C.PACKAGE}/update/{name}" for name in source} | {f"{C.PACKAGE}/gui/update_manager.py"}
-    expected |= {f"{C.PACKAGE}/{name}.py" for name in C.MATCH_MODULES} | {f"{C.PACKAGE}/templates/{path}" for path in B.TEMPLATE_FILES}
+    expected |= {f"{C.PACKAGE}/{name}.py" for name in C.MATCH_MODULES} | {f"{C.PACKAGE}/templates/{path}" for path in B.TEMPLATE_FILES} | {"runtime/START_HERE.md"}
     assert expected == set(C.REQUIRED_MODULES)
 
 
@@ -339,6 +339,74 @@ def test_every_template_the_program_loads_is_shipped():
     assert on_disk - {"audio_fingerprint.npy"} == set(B.TEMPLATE_FILES), "a template is missing from the build list, or the list names one that does not exist"
     assert {f"match/en/{cue.name}.npy" for cue in match_cues.CUES} <= set(B.TEMPLATE_FILES)
     assert "audio_fingerprint.npy" not in B.TEMPLATE_FILES, "development-only"
+
+
+def build_tree(root, extra):
+    """The smallest folder audit() accepts, plus one more file."""
+    app = Path(root) / "Fortnite-Visual-Chest-Counter-v0.3.0"
+    (app / "state").mkdir(parents=True)
+    (app / "obs_output").mkdir()
+    (app / "obs_output/certain_chests.txt").write_text("CERTAIN OPENED CHESTS: 0\n", encoding="utf-8")
+    (app / "obs_output/approximate_chests.txt").write_text("APPROX. OPENED CHESTS: 0\n", encoding="utf-8")
+    file = app / extra
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_bytes(b"x")
+    return app
+
+
+def test_the_budget_leaves_room_for_a_normal_folder():
+    stem = len("Fortnite-Visual-Chest-Counter-v0.3.0") + 1
+    assert B.MAX_WINDOWS_PATH == 259 and B.MAX_WINDOWS_PATH - stem - B.MAX_ARCHIVE_PATH >= 90, "a zip in a folder of about 90 characters must still extract"
+
+
+def test_a_build_with_a_path_too_long_is_refused():
+    root_length = len("Fortnite-Visual-Chest-Counter-v0.3.0/")
+    with tempfile.TemporaryDirectory() as tmp:
+        B.audit(build_tree(tmp, "runtime/lib/" + "a" * (B.MAX_ARCHIVE_PATH - root_length - len("runtime/lib/"))))
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            B.audit(build_tree(tmp, "runtime/lib/" + "a" * (B.MAX_ARCHIVE_PATH - root_length - len("runtime/lib/") + 1)))
+        except SystemExit as stop:
+            assert "too long for Windows Explorer" in str(stop)
+        else:
+            raise AssertionError("a path over the budget must stop the build")
+
+
+def test_a_release_with_a_path_too_long_is_refused():
+    budget = B.MAX_ARCHIVE_PATH - len(f"Fortnite-Visual-Chest-Counter-v{VERSION}/")
+    name = "runtime/lib/" + "a" * (budget - len("runtime/lib/") + 1)
+    with release(files=with_listing({**release_files(), name: b"x"})) as r:
+        assert_problem(r, "too long for Windows Explorer")
+
+
+def test_what_is_left_out_is_never_imported():
+    assert B.NOT_SHIPPED == {"lxml": ("isoschematron",)}, "anything added here must first be shown never to be imported"
+    used = [p for p in (ROOT / "src").rglob("*.py") if "isoschematron" in p.read_text(encoding="utf-8")]
+    assert not used, used
+
+
+def test_the_guide_is_in_runtime_because_of_the_updaters_rules():
+    from fortnite_chest_counter.update import archive
+    assert "START_HERE.md" not in archive.ROOT_FILES, "v0.2.3 refuses a package with any other root file, so v0.3.0 cannot put one there"
+    assert archive._classify("runtime/START_HERE.md") == "program" and archive._classify("START_HERE.md") is None
+    source = (ROOT / "packaging/build_release.py").read_text(encoding="utf-8")
+    assert 'runtime / "START_HERE.md"' in source and source.index('runtime / "START_HERE.md"') < source.index("write_package_files(runtime)\n\n    audit")
+
+
+def test_the_guide_says_what_a_new_user_needs():
+    for name in ("packaging/START_HERE.md", "packaging/README.html"):
+        text = " ".join((ROOT / name).read_text(encoding="utf-8").split())
+        for needed in ("Extract All", "Fortnite Visual Chest Counter.exe", "runtime", "state", "config.toml", "experimental"):
+            assert needed in text, (name, needed)
+        for forbidden in ("antivirus", "Smart App Control", "Defender", "LongPathsEnabled", "long path"):
+            assert forbidden.lower() not in text.lower(), (name, forbidden)
+
+
+def test_manual_updates_are_described_as_they_work():
+    """Each version unpacks into its own folder, so extracting "into the same folder" cannot replace anything."""
+    for name in ("README.md", "packaging/README.html", "packaging/START_HERE.md", "docs/MATCH_TRACKING.md", f"docs/RELEASE_NOTES_v{__version__}.md"):
+        text = " ".join((ROOT / name).read_text(encoding="utf-8").split())
+        assert "same folder" not in text.replace("in the same folder as", ""), name
 
 
 def test_every_match_module_exists():

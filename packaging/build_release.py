@@ -51,6 +51,11 @@ REQUIREMENTS = ROOT / "packaging" / "build-requirements.txt"
 MIN_FREE_BYTES = 3 * 1024 ** 3
 DEEPEST_PACKAGE_PATH = 110                                      # characters below the package folder, measured on v0.2.2 + a margin
 MAX_WINDOWS_PATH = 259
+# The longest entry allowed in the zip, version folder included. Windows Explorer's Extract All refuses anything over 259 characters (measured:
+# 259 works, 260 fails) and puts a folder named after the zip in front of the entry. So a zip kept in any folder of up to 92 characters extracts normally.
+MAX_ARCHIVE_PATH = 130
+# Parts of a dependency that this program never imports and whose paths are too long to ship. Nothing else is left out.
+NOT_SHIPPED = {"lxml": ("isoschematron",)}                      # XML schema validation: Streamlink uses lxml.etree only
 TEMPLATE_FILES = ["chest/en/chest.npy", "chest/en/chest_small.npy", "chest/en/rare.npy", "chest/en/rare_small.npy",
                   "chest/en/sprite.npy", "chest/en/sprite_small.npy", "chest/pt/bau.npy", "container_opened.npy",
                   "ui/interaction_disc.npy", "ui/interaction_ring.npy",                    # audio_fingerprint.npy is development-only
@@ -287,9 +292,16 @@ def write_package_files(runtime):
                                          encoding="utf-8", newline="\n")
 
 
+def archive_entry(app_root, file):
+    """The file's name inside the zip, version folder included."""
+    return f"{Path(app_root).name}/{Path(file).relative_to(app_root).as_posix()}"
+
+
 def audit(app_root):
-    """Fail the build if development leftovers, old counts or unexpected programs could reach users."""
+    """Fail the build if development leftovers, old counts or unexpected programs could reach users, or if Windows could not extract it."""
     problems = []
+    problems += [f"path too long for Windows Explorer: {archive_entry(app_root, f)}" for f in app_root.rglob("*")
+                 if f.is_file() and len(archive_entry(app_root, f)) > MAX_ARCHIVE_PATH]
     bad_names = {"samples", "analysis_output", ".venv", "chest_count.txt", "chest_count_save.txt",
                  "audio_fingerprint.npy", "chest_state.json", "config.toml"}
     third_party = [app_root / "runtime" / "lib" / d for d in ("numpy", "numpy.libs", "scipy", "scipy.libs")]
@@ -369,7 +381,7 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
         for top in tops:
             src = base / top
             if src.is_dir():
-                shutil.copytree(src, lib / top, ignore=shutil.ignore_patterns("__pycache__", "tests", "*.pyc"))
+                shutil.copytree(src, lib / top, ignore=shutil.ignore_patterns("__pycache__", "tests", "*.pyc", *NOT_SHIPPED.get(top, ())))
             else:
                 shutil.copy2(src, lib / top)
         provenance.append(f"{dist:<16}: {d.version} from PyPI; {checked} files verified against the wheel RECORD hashes")
@@ -393,6 +405,12 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
     # stripdir/prependdir: the .pyc files record "lib\..." instead of this build machine's folder (reproducible, no local paths)
     compileall.compile_dir(str(lib), quiet=1, stripdir=str(lib), prependdir="lib",
                            invalidation_mode=compileall.py_compile.PycInvalidationMode.UNCHECKED_HASH)
+    # A compiled cache is only a speed-up: Python compiles the source when it is missing, in a few milliseconds for these.
+    long_caches = [p for p in lib.rglob("*.pyc") if len(archive_entry(app_root, p)) > MAX_ARCHIVE_PATH]
+    for cache in long_caches:
+        cache.unlink()
+    provenance.append(f"left out        : {', '.join(f'{dist}/{part}' for dist, parts in NOT_SHIPPED.items() for part in parts)} (never imported); "
+                      f"{len(long_caches)} compiled caches, to keep paths short enough for Windows Explorer")
     provenance.append(f"our code        : {PACKAGE} v{__version__}, plain Python source (open source, MIT)")
     provenance.append("")
 
@@ -454,6 +472,7 @@ def build(out, python_embed, ffmpeg_zip, ffmpeg_source, mingw=None, prebuilt_lau
     provenance += [f"launcher        : {EXE_NAME} built from packaging/launcher/launcher.c with {gcc}",
                    f"                  SHA-256 {sha256(app_root / EXE_NAME)} (reproducible: no timestamps)", ""]
     shutil.copy2(ROOT / "packaging" / "README.html", app_root / "README.html")
+    shutil.copy2(ROOT / "packaging" / "START_HERE.md", runtime / "START_HERE.md")      # not in the root: v0.2.3's updater refuses a package with an unknown root file
     shutil.copy2(ROOT / "config.example.toml", app_root / "config.example.toml")
     shutil.copy2(ROOT / "packaging" / "LICENSE-NOTICE.txt", app_root / "LICENSE-NOTICE.txt")
     shutil.copy2(ROOT / "LICENSE", app_root / "LICENSE.txt")

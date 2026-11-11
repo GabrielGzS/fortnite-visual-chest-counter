@@ -35,7 +35,8 @@ MATCH_MODULES = ("match_cues", "match_state", "match_tracker", "match_history", 
 REQUIRED_MODULES = (*(f"{PACKAGE}/update/{path.name}" for path in sorted((ROOT / "src/fortnite_chest_counter/update").glob("*.py"))),
                     f"{PACKAGE}/gui/update_manager.py",
                     *(f"{PACKAGE}/{name}.py" for name in MATCH_MODULES),
-                    *(f"{PACKAGE}/templates/{path}" for path in build_release.TEMPLATE_FILES))
+                    *(f"{PACKAGE}/templates/{path}" for path in build_release.TEMPLATE_FILES),
+                    "runtime/START_HERE.md")
 PROVENANCE = "runtime/PROVENANCE.txt"
 PYTHON_FOLDER = "runtime/python/"
 SUMS_NAME = "SHA256SUMS.txt"
@@ -106,6 +107,7 @@ def _inspect_zip(zip_path, manifest, expected_keys, python_embed):
     plan = archive.inspect(zip_path, manifest)
     by_path = {item.path: item for item in plan.files}
     found += [f"the release does not contain {module}" for module in REQUIRED_MODULES if module not in by_path]
+    found += [f"the release has a path too long for Windows Explorer: {path}" for path in by_path if len(plan.root) + 1 + len(path) > build_release.MAX_ARCHIVE_PATH]
     with zipfile.ZipFile(zip_path) as z:
         found += _check_launcher(z, by_path, manifest.version)
         found += _check_dependencies(z, by_path)

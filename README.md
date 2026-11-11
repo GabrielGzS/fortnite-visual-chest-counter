@@ -186,9 +186,9 @@ by hand as described below.
 [GitHub releases page](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases).
 
 Your data is stored next to, not inside, the program files: `state\` (counts and match history of every profile), `config.toml` (settings), `logs\`,
-`captures\`, `obs_output\` (re-created automatically). Easiest: close the app, extract the new ZIP **into the same folder** and
-replace files; opening the app writes your real numbers back into the OBS text files. If you extract to a new folder, copy
-`state\` and `config.toml` and re-point the OBS Text source.
+`captures\`, `obs_output\` (re-created automatically). To update by hand: close the app, extract the new ZIP to its own folder,
+copy `state\` and `config.toml` from the old folder into the new one, and point your OBS Text source at the new `obs_output\`.
+Opening the app writes your real numbers into the OBS text files.
 
 **Coming from v0.1.x:** delete the old `.bat` and `.cmd` files after extracting. Counts, settings and OBS sources keep working.
 

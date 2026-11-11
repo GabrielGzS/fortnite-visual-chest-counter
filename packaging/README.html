@@ -38,7 +38,15 @@
 <h1>Fortnite Visual Chest Counter</h1>
 <p class="sub">Automatically count Fortnite chests from gameplay video &middot; v0.3.0 public beta &middot; Windows 10 / 11 &middot; no Python or programming needed</p>
 
-<h2 style="border-top:none;margin-top:1rem">What this is</h2>
+<h2 id="start-here" style="border-top:none;margin-top:1rem">Start here</h2>
+<ol>
+  <li>Right-click the ZIP and choose <b>Extract All</b>. A normal folder such as Downloads or Desktop is fine, but not Program Files. Do not run the app from inside the ZIP.</li>
+  <li>Open the extracted folder and double-click <b>Fortnite Visual Chest Counter.exe</b>. It is the only thing you open. Nothing else needs installing; you only need OBS if you want the numbers on your stream or want to count from your own OBS scene.</li>
+</ol>
+<div class="note warn"><b>Important:</b> always extract the complete archive. Do not delete files from the <code>runtime</code> folder or move individual files out of the app&rsquo;s folder. Doing so may stop the app from starting or counting correctly. That folder holds the app&rsquo;s own copy of Python, FFmpeg and its window toolkit: these are expected parts of the app.</div>
+<p><b>Your data</b> stays on your PC next to the app: <code>state</code> (counts, profiles, match history) and <code>config.toml</code> (settings, once you have changed one). To back up, close the app and copy those two. Deleting the app&rsquo;s folder deletes them too. The built-in updater is experimental; see <a href="#update">Updating</a>.</p>
+
+<h2>What this is</h2>
 <p>A small app for players and streamers. It recognises the chest-opening pop-ups in Fortnite gameplay video and keeps
 a running count of the <b>chests opened</b> &mdash; from a Twitch or YouTube livestream link, anything shown on a screen,
 your own stream's OBS feed (one PC or two), a capture card or a recorded video. If you want the numbers on stream, it writes
@@ -393,9 +401,8 @@ Nothing is downloaded or installed unless you choose to. The automatic check and
   <tr><td><code>logs\</code></td><td>Session logs (optional to keep).</td></tr>
   <tr><td><code>obs_output\</code></td><td>The text files OBS reads (they are re-created automatically).</td></tr>
 </table>
-<p><b>Easiest update:</b> close the app, then extract the new zip <b>into the same folder</b> and choose &ldquo;Replace the files&rdquo;. The zip never contains your counts or <code>config.toml</code>, so they are untouched.
-Opening the app afterwards writes your real numbers back into the OBS text files (the zip contains blank placeholders).
-If you extract to a new folder instead, copy <code>state\</code> and <code>config.toml</code> across, and re-point the OBS text source to the new <code>obs_output</code> folder.</p>
+<p><b>To update by hand:</b> close the app, extract the new zip to its own folder, then copy <code>state\</code> and <code>config.toml</code> from the old folder into the new one. The zip never contains your counts or <code>config.toml</code>.
+Opening the new app writes your real numbers into its OBS text files (the zip contains blank placeholders). If you use OBS, point your Text source at the new <code>obs_output</code> folder.</p>
 <p><b>Coming from v0.1.x:</b> after extracting, delete the old <code>.bat</code> and <code>.cmd</code> files from the folder &mdash; v0.2.0 is one app,
 <b>Fortnite Visual Chest Counter.exe</b>. Your counts, settings and OBS sources keep working.</p>
 

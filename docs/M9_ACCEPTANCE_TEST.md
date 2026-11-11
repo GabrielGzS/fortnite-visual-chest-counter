@@ -7,7 +7,7 @@ Write down the time of anything odd, then keep going. Send `logs\`, `state\histo
 
 ## Setup
 
-1. Extract `build_out\v0.3.0-rc3\Fortnite-Visual-Chest-Counter-v0.3.0.zip` to a **new, short folder**, for example `C:\fcc-rc\`. Leave your normal
+1. Right-click `build_out\v0.3.0-rc4\Fortnite-Visual-Chest-Counter-v0.3.0.zip` and **Extract All**, right where it is, which is where rc3 failed. It should finish with no error. Leave your normal
    install alone, and close it first: only one counter can run at a time.
 2. Open **Fortnite Visual Chest Counter.exe**. Create a profile called `RC test` and select it.
 3. **Settings > Match tracking (experimental)**: it should already be ticked. Keep **1 minute**.

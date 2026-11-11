@@ -57,8 +57,8 @@ Unchanged from v0.2.3. With match tracking on or off, the chests counted, CERTAI
 **From v0.2.3:** the app offers the update by itself. Choose **Update available**, then **Download & Install**, then **Restart &
 Install**.
 
-**By hand, or from an older version:** close the app, extract the new zip **into the same folder** and replace the files -
-counts, settings, profiles and OBS sources keep working (or copy `state\` and `config.toml` to a new folder). Download it only
+**By hand, or from an older version:** close the app, extract the new zip to its own folder, then copy `state\` and `config.toml`
+from the old folder into the new one, and point your OBS Text source at the new `obs_output\`. Download it only
 from the official [GitHub releases page](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases).
 
 **Full details:** [README](https://github.com/GabrielGzS/fortnite-visual-chest-counter#readme)

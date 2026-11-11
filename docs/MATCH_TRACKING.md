@@ -105,7 +105,7 @@ Each profile has its own history. The files are only ever added to, and a damage
 page.
 
 **Updating.** An update replaces only the program files, so `state\` and your history are left in place. If you install by
-hand, extract the new zip into the same folder, or copy `state\` and `config.toml` to the new folder.
+hand, extract the new zip to its own folder and copy `state\` and `config.toml` into it.
 
 **Going back.** If you return to v0.2.3 or older, your counts, profiles and settings keep working. Those versions ignore the
 history files without touching them, and nothing is recorded while you use them.
