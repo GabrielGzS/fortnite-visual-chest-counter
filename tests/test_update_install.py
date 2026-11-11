@@ -44,7 +44,7 @@ from fortnite_chest_counter.update import install_helper as H
 from fortnite_chest_counter.update import releases as R
 from fortnite_chest_counter.update import staging as G
 
-OLD, NEW = "0.2.3", "0.2.4"
+OLD, NEW = "0.2.3", "0.3.0"
 # A venv's python.exe only starts the real interpreter as a child, so its process id would not be the app's own, as it is in the release.
 REAL_PYTHON = str(Path(sys.base_prefix) / "python.exe")
 FAST ={"PROCESS_WAIT": 1.5, "PROCESS_POLL": 0.02, "HEALTH_DEADLINE": 8.0, "HEALTH_POLL": 0.01, "RENAME_TRIES": 3, "RENAME_DELAY": 0.03,

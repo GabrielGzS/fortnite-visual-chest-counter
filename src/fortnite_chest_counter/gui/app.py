@@ -23,7 +23,7 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QPoint, QRect, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -367,7 +367,8 @@ STREAM_STATES = {"live": (theme.CERTAIN, "Counting", None),
                  "lagging": (theme.APPROX, None, None),
                  "caught_up": (theme.CERTAIN, None, None),
                  "reconnecting": (theme.REJECT, "Reconnecting", "RECONNECTING ...\nthe stream connection was lost"),
-                 "offline": (theme.REJECT, "Stream offline", "STREAM OFFLINE\nchecking again automatically")}
+                 "offline": (theme.REJECT, "Stream offline", "STREAM OFFLINE\nchecking again automatically"),
+                 "no_video": (theme.REJECT, "No video", "NO VIDEO\nthe app is not receiving pictures from this source")}
 
 
 def _span(text, color, bold=False):
@@ -1799,10 +1800,9 @@ class AnalyticsPage(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.NoSelection)
         self.table.setFocusPolicy(Qt.NoFocus)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        for column in (4, 5):                                   # Quality and Ending: their text must never be cut off
-            self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(len(self.COLUMNS) - 1, QHeaderView.Fixed)     # sized to its buttons: Qt's own sizing ignores them
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)     # sized by _fit_columns
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table.viewport().installEventFilter(self)
         self.table.setMinimumHeight(170)
         layout.addWidget(self.table, 1)
 
@@ -1873,7 +1873,6 @@ class AnalyticsPage(QWidget):
             if old is not None:
                 old.hide()
         self.table.setRowCount(len(s.recent))
-        widest = 0
         for row, match in enumerate(s.recent):
             seen = duration(match.duration_seconds)
             more = "+" if match.chests_may_be_missing else ""
@@ -1890,9 +1889,22 @@ class AnalyticsPage(QWidget):
                             tip="Put this match back in your statistics" if match.excluded else "Leave this out of your statistics. Nothing is deleted, and you can restore it.",
                             on_click=lambda _checked=False, m=match: self.set_not_a_match(m, not m.excluded))
             self.table.setCellWidget(row, len(self.COLUMNS) - 1, action)
-            widest = max(widest, action.sizeHint().width())
-        if widest:
-            self.table.setColumnWidth(len(self.COLUMNS) - 1, widest + 24)
+        self._fit_columns()
+
+    def _fit_columns(self):
+        """Every column as wide as its widest text and the buttons fully visible, with spare room shared out. Qt's Stretch mode squeezes columns
+        to nothing in a narrow window, and its own sizing ignores buttons. If the window is too narrow for all of it, the table scrolls sideways."""
+        table, header, last = self.table, self.table.horizontalHeader(), len(self.COLUMNS) - 1
+        needed = [max(header.sectionSizeHint(column), table.sizeHintForColumn(column)) + 4 for column in range(last)]
+        needed.append(max([table.cellWidget(row, last).sizeHint().width() for row in range(table.rowCount()) if table.cellWidget(row, last)] + [0]) + 12)
+        spare = max(table.viewport().width() - sum(needed), 0) // last
+        for column, width in enumerate(needed):
+            table.setColumnWidth(column, width + (spare if column < last else 0))
+
+    def eventFilter(self, watched, event):
+        if watched is self.table.viewport() and event.type() == QEvent.Resize:
+            self._fit_columns()
+        return super().eventFilter(watched, event)
 
     def set_not_a_match(self, match, flag):
         """A new correction row: the match itself, its chests and your totals are not touched, and it can always be restored."""
@@ -2866,6 +2878,8 @@ class MainWindow(QMainWindow):
             return                                      # "incomplete" is a log line only
         color, pill, overlay = STREAM_STATES[state]
         self.stream_state = state
+        if state == "no_video":
+            self.last_status = None                     # the last rate is no longer true
         if self.mode == "counting":
             self.dashboard.set_pill(pill, color)
         preview = self.dashboard.preview
@@ -2933,7 +2947,9 @@ class MainWindow(QMainWindow):
                 parts.append(f"video {c['resolution'][0]} x {c['resolution'][1]}"
                              + (f" @ {c['input_fps']:g} fps" if c.get("input_fps") else ""))
             s = self.last_status
-            if s:
+            if self.stream_state == "no_video":
+                parts.append("no new video")
+            elif s:
                 parts.append(f"analysing {s['fps']:.1f} pictures/s")
                 if s.get("backlog_s") is not None:
                     parts.append(f"backlog {s['backlog_s']:.0f} s")
@@ -2984,7 +3000,7 @@ class MainWindow(QMainWindow):
             self.preview_timer.stop()
 
     def _tick_preview(self):
-        if self.stream_state in ("buffering", "ad", "reconnecting", "offline"):
+        if self.stream_state in ("buffering", "ad", "reconnecting", "offline", "no_video"):
             return                                      # keep the status text instead of the last (stale) picture
         frame = self.preview_reader.read()
         if frame is not None:

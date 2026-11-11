@@ -199,6 +199,7 @@ replace files; opening the app writes your real numbers back into the OBS text f
 | Number never changes | Dashboard, **Game** view, turn on **Live preview**: 16:9, full screen, HUD visible? Does the chest pop-up ("CHEST" / "BAÚ") appear? Screen source: the stream must play **fullscreen** - a small player inside a web page is too small. |
 | Livestream URL: "Buffering" / video in bursts | Normal for a live stream; the counter catches up and keeps counting. Keep **Stream stability: Maximum stability** for long sessions. |
 | SRT picture black on the streaming PC | Address, port, Media Source settings and Windows Firewall: [SRT troubleshooting](docs/guides/obs-dual-pc-srt.md#troubleshooting). |
+| Status says **No video** | The app has had no new pictures from this source for 10 seconds, so chests cannot be counted. Check that the source is still sending video. Counting carries on by itself when pictures return, and says that some footage may be missing. |
 | OBS text blank / not updating | The Text source must have **Read from file** ticked and point at the file shown on the Overlay page. |
 | Anything else | Help & diagnostics → **Run diagnostics** → **Copy report**; include any `logs\crash_*.txt` in an [issue](https://github.com/GabrielGzS/fortnite-visual-chest-counter/issues). |
 

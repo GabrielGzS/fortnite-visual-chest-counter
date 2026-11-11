@@ -66,8 +66,11 @@ MUTATIONS = [
     ("GUI", "(\"Not a match\", theme.DIM) if match.excluded else QUALITY_LOOK[match.quality]", "QUALITY_LOOK[match.quality]", "test_not_a_match_updates_the_statistics"),
     ("GUI", "        except OSError as error:\n            show_error(self, f\"The correction could not be saved ({error}).\")\n            return\n        self.refresh()", "        except ZeroDivisionError as error:\n            return\n        self.refresh()", "test_a_failed_save_is_explained"),
     ("GUI", "            if old is not None:\n                old.hide()\n", "            pass\n", "test_replaced_buttons_do_not_stay_on_screen"),
-    ("GUI", "        for column in (4, 5):                                   # Quality and Ending: their text must never be cut off\n            self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)\n", "", "test_the_longest_labels_are_not_cut_off"),
-    ("GUI", "        if widest:\n            self.table.setColumnWidth(len(self.COLUMNS) - 1, widest + 24)\n", "        if widest:\n            self.table.setColumnWidth(len(self.COLUMNS) - 1, 20)\n", "test_the_longest_labels_are_not_cut_off"),
+    ("GUI", "needed = [max(header.sectionSizeHint(column), table.sizeHintForColumn(column)) + 4 for column in range(last)]", "needed = [20 for column in range(last)]", "test_the_longest_labels_are_not_cut_off"),
+    ("GUI", "for row in range(table.rowCount()) if table.cellWidget(row, last)] + [0]) + 12)", "for row in range(0)] + [0]) + 20)", "test_the_longest_labels_are_not_cut_off"),
+    ("GUI", "            table.setColumnWidth(column, width + (spare if column < last else 0))", "            table.setColumnWidth(column, width)", "test_a_wide_table_uses_its_width"),
+    ("GUI", "        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)\n", "", "test_a_narrow_table_scrolls_instead_of_cutting_off"),
+    ("GUI", "        self.table.viewport().installEventFilter(self)\n", "", "test_resizing_the_window_fits_the_columns_again"),
     # the statistics
     ("A", "    for match in reversed(usable[-recent:]):", "    for match in reversed(kept[-recent:]):", "test_not_a_match_updates_the_statistics"),
     ("A", "    summary.manual_added, summary.manual_removed = manual[\"added\"], manual[\"removed\"]\n", "", "test_statistics_ignore_manual_corrections"),

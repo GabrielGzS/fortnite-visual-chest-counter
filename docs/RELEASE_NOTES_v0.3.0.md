@@ -18,6 +18,7 @@ history of them and show what that history says. It is experimental and off by d
 | **+1 / −1** | Fix APPROX by one chest with a click, also while counting, with an optional reason and Undo |
 | **Not a match / Restore** | Leave a wrong match out of the statistics, and put it back any time. Nothing is deleted |
 | **Save progress every** | Choose how often match tracking writes running totals: 30 seconds to 10 minutes |
+| **No video warning** | If a live input stays open but stops delivering pictures for 10 seconds, the Dashboard says so, and tells you when video returns that some footage may be missing |
 
 ### Turning on match tracking
 

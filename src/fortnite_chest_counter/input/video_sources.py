@@ -71,9 +71,27 @@ def list_monitors():
     return monitors
 
 
+def say_source_state(state, text):
+    """live | buffering | ad | incomplete | reconnecting | offline | no_video. The app colours these (green / yellow / red) and
+    shows the non-live ones over the preview; the console prints them as info / warning / error lines."""
+    from fortnite_chest_counter.console import CONSOLE
+    if CONSOLE.machine:
+        CONSOLE.emit("stream", state=state, text=text)
+    elif state in ("reconnecting", "offline"):
+        CONSOLE.error(text)
+    elif state in ("live", "caught_up"):
+        CONSOLE.info(text)
+    else:
+        CONSOLE.warn(text)
+
+
 class LiveSource:
-    def __init__(self, label, input_args, fps):
+    STALL_AFTER = 10.0                      # seconds without a new picture before saying so; a shorter hitch stays silent
+    IDLE_WAIT = 1.0                         # how often frames() wakes up while no picture is arriving
+
+    def __init__(self, label, input_args, fps, watch_stalls=True):
         self.label, self.input_args, self.fps = label, list(input_args), fps
+        self.watch_stalls = watch_stalls    # False for a video file, which simply ends
         self.info = {"input_resolution": None, "input_fps": None}
         self._process, self._thread, self._err_thread = None, None, None
         self._cond = threading.Condition()
@@ -155,21 +173,35 @@ class LiveSource:
 
     # ---- consumer ----
     def frames(self):
-        last = 0
+        """FFmpeg can stay open and stop sending pictures, and nothing else would notice: the status lines come from the loop this feeds.
+        The check runs only while no picture is being delivered, so it cannot change what is analysed. It says what the app knows, that
+        no video is arriving, and not why."""
+        last, stalled, previous = 0, False, None
         while not self._stop:
             with self._cond:
-                self._cond.wait_for(lambda: self._seq > last or self._eof or self._stop, timeout=1.0)
+                self._cond.wait_for(lambda: self._seq > last or self._eof or self._stop, timeout=self.IDLE_WAIT)
                 if self._seq > last:
                     item, seq = self._latest, self._seq
                 else:
                     item, seq = None, last
                     if self._eof:
                         return
-            if item is not None:
-                self.frames_dropped += seq - last - 1       # overwritten before the detector got to them
-                self.frames_processed += 1
-                last = seq
-                yield item
+            if item is None:
+                if self.watch_stalls and not stalled and not self._stop and previous is not None and self.elapsed() - previous >= self.STALL_AFTER:
+                    stalled = True
+                    say_source_state("no_video", f"NOT RECEIVING VIDEO - no new pictures from this source for {self.STALL_AFTER:.0f} s, so chests "
+                                                 "cannot be counted right now. Waiting for video; your counts are kept.")
+                continue
+            if stalled:
+                stalled = False
+                say_source_state("live", "video is coming in again - counting continues.")
+                say_source_state("incomplete", f"about {item[0] - previous:.0f} s of video was not received: chests opened in that part may be "
+                                               "missing from the count.")
+            previous = item[0]
+            self.frames_dropped += seq - last - 1           # overwritten before the detector got to them
+            self.frames_processed += 1
+            last = seq
+            yield item
 
     def elapsed(self):
         return time.monotonic() - self._t0
@@ -544,19 +576,7 @@ class StreamSource:
             raise RuntimeError(self._failure)
         return self.info
 
-    @staticmethod
-    def _say(state, text):
-        """live | buffering | ad | incomplete | reconnecting | offline. The app colours these (green / yellow / red) and
-        shows the non-live ones over the preview; the console prints them as info / warning / error lines."""
-        from fortnite_chest_counter.console import CONSOLE
-        if CONSOLE.machine:
-            CONSOLE.emit("stream", state=state, text=text)
-        elif state in ("reconnecting", "offline"):
-            CONSOLE.error(text)
-        elif state in ("live", "caught_up"):
-            CONSOLE.info(text)
-        else:
-            CONSOLE.warn(text)
+    _say = staticmethod(say_source_state)
 
     def frames(self):
         last, buffering, lagging = time.monotonic(), False, False   # notices are printed here, in the counting thread
@@ -638,5 +658,5 @@ def make_source(kind, fps, device=None, monitor=1, video=None, start=0.0, durati
         return StreamSource(url, fps, quality, stability)
     if kind == "file":
         args = ["-re"] + (["-ss", f"{start:.3f}"] if start else []) + (["-t", f"{duration:.3f}"] if duration else []) + ["-i", str(video)]
-        return LiveSource(f"file (real time): {video}", args, fps)
+        return LiveSource(f"file (real time): {video}", args, fps, watch_stalls=False)
     raise ValueError(f"unknown source '{kind}'")

@@ -5,7 +5,7 @@ Internal / developer note. Signing keys are covered in [UPDATE_SIGNING.md](UPDAT
 **Current state (v0.2.3, unchanged in v0.3.0):** the whole updater is built, including the app's window controls and settings, and passes the automated tests
 on small synthetic installations. Both production public keys are in the trust list. It ships as **experimental**.
 
-**Unverified, not passed.** The project has no users yet, so on 2026-11-09 the real-package checks were postponed to the next release (planned as v0.2.4; if v0.3.0 ships first, it is the updater's first real update):
+**Unverified, not passed.** The project has no users yet, so on 2026-11-09 the real-package checks were postponed to the next release. There is no v0.2.4: the next public release is v0.3.0, so the scenario to prove is v0.2.3 to v0.3.0, and rollback to v0.2.3:
 
 - A complete update of a real package, and the other four scenarios under "Checking with a real package": automatic rollback, crash
   recovery, damaged data and chained updates.

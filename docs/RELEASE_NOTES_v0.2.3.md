@@ -11,7 +11,7 @@ downloads and installs it when you choose to, keeping your counts, profiles and 
 > Install this version by hand once, as described below. Future versions are meant to install from inside the app.
 >
 > **The updater is experimental.** There is no newer version for it to install yet, so a complete update and an automatic
-> rollback have not been run on a real installation. v0.2.4 will be the first. If an update does not work, install that version by
+> rollback have not been run on a real installation. The next release will be the first. If an update does not work, install that version by
 > hand the same way as this one.
 
 ### What's new at a glance
@@ -37,7 +37,7 @@ Unchanged from v0.2.2. This version only adds the updater.
 
 ### Known limitations
 
-- The updater has not yet installed a real update or performed a real rollback. Automated tests cover it, but v0.2.4 will be its first real use.
+- The updater has not yet installed a real update or performed a real rollback. Automated tests cover it, but the next release will be its first real use.
 - v0.2.3 itself has to be installed by hand, and it is only available from the official GitHub releases page.
 - Checking for and downloading updates needs an internet connection and GitHub to be reachable. The app keeps working without them.
 - APPROX is an estimate; CERTAIN is the conservative number.

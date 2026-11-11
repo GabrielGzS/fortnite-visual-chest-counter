@@ -368,21 +368,21 @@ def test_install_needs_a_prepared_update():
 # ---- what the user is told afterwards
 
 def test_results_are_described_plainly():
-    level, text = UM.describe_result({"outcome": "committed", "to": "0.2.4"}, "0.2.4")
-    assert level == "success" and text.startswith("Updated to v0.2.4")
-    level, text = UM.describe_result({"outcome": "rolled_back", "to": "0.2.4", "detail": "It closed early."}, "0.2.3")
+    level, text = UM.describe_result({"outcome": "committed", "to": "0.3.0"}, "0.3.0")
+    assert level == "success" and text.startswith("Updated to v0.3.0")
+    level, text = UM.describe_result({"outcome": "rolled_back", "to": "0.3.0", "detail": "It closed early."}, "0.2.3")
     assert level == "rolled_back" and "went back to v0.2.3" in text and "It closed early." in text and "restored" not in text
-    level, text = UM.describe_result({"outcome": "rolled_back", "to": "0.2.4", "restored": ["state/x.json"]}, "0.2.3")
+    level, text = UM.describe_result({"outcome": "rolled_back", "to": "0.3.0", "restored": ["state/x.json"]}, "0.2.3")
     assert "state\\backups" in text
-    level, text = UM.describe_result({"outcome": "aborted", "to": "0.2.4", "detail": "A file is in use."}, "0.2.3")
+    level, text = UM.describe_result({"outcome": "aborted", "to": "0.3.0", "detail": "A file is in use."}, "0.2.3")
     assert level == "attention" and "not installed" in text and "A file is in use." in text
 
 
 def test_success_is_never_claimed_for_a_version_that_is_not_running():
-    assert UM.describe_result({"outcome": "committed", "to": "0.2.4"}, "0.2.3") is None
+    assert UM.describe_result({"outcome": "committed", "to": "0.3.0"}, "0.2.3") is None
     assert UM.describe_result({"outcome": "committed"}, "0.2.3") is None
-    assert UM.describe_result({"outcome": "something new", "to": "0.2.4"}, "0.2.4") is None
-    assert UM.describe_result({}, "0.2.4") is None
+    assert UM.describe_result({"outcome": "something new", "to": "0.3.0"}, "0.3.0") is None
+    assert UM.describe_result({}, "0.3.0") is None
 
 
 # ---- settings

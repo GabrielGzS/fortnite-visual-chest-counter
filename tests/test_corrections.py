@@ -718,14 +718,55 @@ def test_replaced_buttons_do_not_stay_on_screen():
         assert all(button.isHidden() for button in old) and all(action(page, row) not in old for row in range(page.table.rowCount()))
 
 
+def fits(page):
+    """No column is narrower than its own heading, its widest text, or its buttons."""
+    table, header, last = page.table, page.table.horizontalHeader(), len(page.COLUMNS) - 1
+    for column in range(last):
+        assert table.columnWidth(column) >= max(header.sectionSizeHint(column), table.sizeHintForColumn(column)), (column, table.columnWidth(column))
+    assert all(table.columnWidth(last) >= action(page, row).sizeHint().width() for row in range(table.rowCount())), table.columnWidth(last)
+
+
 def test_the_longest_labels_are_not_cut_off():
-    from PySide6.QtWidgets import QHeaderView
     with G.window() as w:
         page = page_with_matches(w)
-        header = page.table.horizontalHeader()
-        assert all(header.sectionResizeMode(column) == QHeaderView.ResizeToContents for column in (4, 5))
-        last = len(page.COLUMNS) - 1
-        assert all(page.table.columnWidth(last) >= action(page, row).sizeHint().width() for row in range(page.table.rowCount())), page.table.columnWidth(last)
+        for width in (1400, 700, 300):                          # wide, the minimum window, and far narrower than that
+            page.table.resize(width, 300)
+            w.qt.processEvents()
+            page._fit_columns()
+            fits(page)
+
+
+def test_a_wide_table_uses_its_width():
+    with G.window() as w:
+        page = page_with_matches(w)
+        page.table.resize(1600, 300)
+        w.qt.processEvents()
+        page._fit_columns()
+        total = sum(page.table.columnWidth(column) for column in range(len(page.COLUMNS)))
+        assert total >= page.table.viewport().width() - len(page.COLUMNS), (total, page.table.viewport().width())
+
+
+def test_a_narrow_table_scrolls_instead_of_cutting_off():
+    from PySide6.QtWidgets import QAbstractItemView
+    with G.window() as w:
+        page = page_with_matches(w)
+        assert page.table.horizontalScrollMode() == QAbstractItemView.ScrollPerPixel
+        page.table.resize(300, 300)
+        w.qt.processEvents()
+        page._fit_columns()
+        assert sum(page.table.columnWidth(column) for column in range(len(page.COLUMNS))) > page.table.viewport().width()
+
+
+def test_resizing_the_window_fits_the_columns_again():
+    from PySide6.QtCore import QEvent, QSize
+    from PySide6.QtGui import QResizeEvent
+    with G.window() as w:
+        page = page_with_matches(w)
+        calls = []
+        real = page._fit_columns
+        page._fit_columns = lambda: (calls.append(1), real())
+        w.qt.sendEvent(page.table.viewport(), QResizeEvent(QSize(900, 300), QSize(800, 300)))
+        assert calls, "a resize must fit the columns again"
 
 
 def test_a_failed_save_is_explained():

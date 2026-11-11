@@ -18,14 +18,14 @@ Write down the time of anything odd, then keep going. Send `logs\`, `state\histo
 
 | # | Do this | Expect |
 |---|---|---|
-| 1 | Look through Overview, Game, Console, Analytics, Settings at your usual size, then shrink the window as far as it goes | Nothing cut off or overlapping; scrolling works |
+| 1 | Look through Overview, Game, Console, Analytics, Settings at your usual size, then shrink the window as far as it goes | Nothing cut off or overlapping; scrolling works. The Analytics table may scroll sideways at the smallest size, but no column is cut off |
 | 2 | In the lobby, **Start counting**, open **Game** | *In the lobby*; Live preview shows the full picture |
 | 3 | **Play one whole match** from the lobby, through the bus, to YOU PLACED or Victory, back to the lobby. Open some chests | Status follows along: *Loading*, *Waiting for the match to start*, *In match* with a running clock, *Match over*, *In the lobby* |
 | 4 | During that match, compare chests opened with the numbers | CERTAIN / APPROX rise as usual, and OBS shows the same |
 | 5 | After it: **Analytics** > **Refresh** | **1 match, Complete**, sensible duration, its chests listed, an ending of YOU PLACED or Victory |
 | 6 | **Second match:** press **+1** mid-game, choose a **Why?**, then **−1**, then **Undo** | APPROX changes at once, also in OBS; CERTAIN does not; the line shows the split |
 | 7 | **Third match:** **Stop counting** mid-match, wait 30 s, **Start counting** again, finish it | Listed as **Partial**, not Complete; no chest counted twice |
-| 8 | **Fourth match:** mid-game, **Stop Virtual Camera** for 20 s, then start it again | App reports the lost video and recovers, or stops with a clear message; the match becomes **Partial**; counts kept |
+| 8 | **Fourth match:** mid-game, **Stop Virtual Camera** for 20 s, then start it again | If the app stops receiving pictures: after about 10 s the status says **No video**, and when video returns it says some footage may be missing. If OBS sends a placeholder picture instead, no warning appears: note which one happens. The match becomes **Partial**; counts kept; OBS text unchanged by the warning |
 | 9 | Die and spectate, if it comes up | *Spectating or out of the match*; chests opened by the player you watch are still counted, as before |
 | 10 | Analytics: **Not a match** on one match, then **Restore** | Statistics change, then return exactly |
 | 11 | Close the app during a match with Task Manager (**End task** on the app) and reopen it | Counts kept; that match shows as interrupted, not complete |

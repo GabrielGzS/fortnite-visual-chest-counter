@@ -18,6 +18,7 @@ Setup-specific problems: [dual-PC SRT](obs-dual-pc-srt.md#troubleshooting) · [c
 | `projector window is minimized` / black preview | Restore the projector window. It may be behind other windows, but not minimized. |
 | `the projector window was closed, so counting stopped` | Reopen it in OBS and press **Start counting**. |
 | `Could not open the video device` | The card is probably in use by OBS: close OBS or remove the card from it - or use the Virtual Camera or a projector. |
+| Status says **No video** | The app has had no new pictures from this source for 10 seconds, so chests cannot be counted. Check that the source is still sending video. Counting carries on by itself when pictures return, and says that some footage may be missing. Counts are kept. |
 | `already running` / `already open` | Only one counter runs at a time; use the open one (taskbar). |
 | `Could not open the livestream` | The stream must be live and public. Use the full link (`https://www.twitch.tv/CHANNEL`, a YouTube `watch?v=` link or `https://www.youtube.com/@CHANNEL/live`). |
 | Livestream: *buffering* / *reconnecting* | Slow connection, an ad break or the stream restarted. The counter waits and continues by itself; counts are kept. |
