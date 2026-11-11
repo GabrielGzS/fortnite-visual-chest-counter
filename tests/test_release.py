@@ -277,10 +277,16 @@ def test_scale_aware_popup_is_counted_once_when_a_stacked_line_moves_it():
     assert len(events) == 1 and events[0]["approx_counted"] and not events[0]["certain_counted"]
 
 
-def test_scale_aware_channel_only_for_the_specific_english_word():
+def test_scale_aware_channel_respects_language_and_requires_portuguese_interaction_support():
+    import numpy as np
+
     try:
         estimator.configure(dict(DEFAULTS["detector"], languages=["pt"]))
-        assert estimator.ChestEstimator().scaled_templates == {}                     # short PT word: never scaled
+        portuguese = estimator.ChestEstimator()
+        assert list(portuguese.scaled_templates) == [estimator.PORTUGUESE_POPUP]
+        roi = np.full((202, 360, 3), (195, 130, 230), dtype=np.uint8)
+        mask = estimator.V.lavender_mask(roi)
+        assert portuguese._scaled_best(roi, mask, supported_portuguese=False)[4] is None
         estimator.configure(dict(DEFAULTS["detector"], medium_counts_alone_languages=[]))
         assert estimator.ChestEstimator().scaled_templates == {}                     # user: English MEDIUM not alone
         estimator.configure(DEFAULTS["detector"])
