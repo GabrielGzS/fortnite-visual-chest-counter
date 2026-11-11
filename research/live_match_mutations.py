@@ -50,11 +50,11 @@ MUTATIONS = [
     ("S", "\"mode\": \"on\",  ", "\"mode\": \"off\", ", "test_a_new_install_tracks_matches"),
     # the window
     ("G", "        known = match.get(\"english_confirmed\") is True and chests is not None\n", "        known = chests is not None\n", "test_an_unconfirmed_match_shows_no_numbers"),
-    ("G", "        self.game_approx.set_value(chests[\"approx\"] if known else None)\n", "        self.game_approx.set_value(chests[\"approx\"] if known else 0)\n", "test_no_match_shows_dashes_not_zeros"),
-    ("G", "        self.game_approx.set_value(chests[\"approx\"] if known else None)\n", "        self.game_approx.set_value(self.win.counts[1])\n", "test_the_game_shows_this_matchs_numbers_not_the_totals"),
-    ("G", "    if match.get(\"observed_from_start\") is False:\n        return \"Since the app joined this match\"\n", "", "test_a_late_join_says_so"),
+    ("G", "        self.game_approx.set_value(chests[\"approx\"] if known else None, flash=bool(before) and chests[\"approx\"] > before[2])\n", "        self.game_approx.set_value(chests[\"approx\"] if known else 0)\n", "test_no_match_shows_dashes_not_zeros"),
+    ("G", "        self.game_approx.set_value(chests[\"approx\"] if known else None, flash=bool(before) and chests[\"approx\"] > before[2])\n", "        self.game_approx.set_value(self.win.counts[1])\n", "test_the_game_shows_this_matchs_numbers_not_the_totals"),
+    ("G", "    if match.get(\"observed_from_start\") is False:\n        return \"Since counting started\"\n", "", "test_a_late_join_says_so"),
     ("G", "    if match.get(\"discontinuity\"):\n        return \"Part of this match was not seen\"\n", "", "test_a_break_says_so"),
-    ("G", "                tile.set_value(None, \"No video right now\")", "                pass", "test_stalled_video_stops_the_rate_but_keeps_the_count"),
+    ("G", "            self.dashboard.show_game_rate(None, \"No video right now\")", "            pass", "test_stalled_video_stops_the_rate_but_keeps_the_count"),
     ("G", "            d.game_last.setText(\"\")\n            d.game_last.hide()\n", "", "test_stopping_clears_the_match"),
     ("G", "    if not last[\"approx\"] and active < match_analytics.MIN_MATCH_RATE_SECONDS:\n        return \"\"\n", "", "test_a_weak_record_does_not_replace_the_last_match"),
     ("G", "    return f\"{match.rate.approx_per_minute:.2f}\" + (\"\" if match.quality == \"complete\" else \" seen\")", "    return f\"{match.rate.approx_per_minute:.2f}\"", "test_the_table_shows_the_rate_and_marks_partial"),
@@ -74,9 +74,19 @@ MUTATIONS = [
     ("G", "        for toggle in (self.show_preview, self.show_mini):\n", "        for toggle in (self.show_preview,):\n", "test_the_two_buttons_are_one_setting"),
     ("G", "        for preview in (self.dashboard.preview, self.dashboard.mini_preview):\n", "        for preview in (self.dashboard.preview,):\n", "test_a_message_reaches_both_panels"),
     ("G", "            for panel in (d.preview, d.mini_preview):\n                panel.view.setStyleSheet(\"\")", "            for panel in (d.preview,):\n                panel.view.setStyleSheet(\"\")", "test_stopping_clears_both_panels"),
-    ("G", "    tile.value.setText(UNKNOWN_VALUE if rate is None else f\"{rate.approx_per_minute:.2f}\")", "    tile.value.setText(UNKNOWN_VALUE if rate is None else f\"{rate.certain_per_minute:.2f}\")", "test_the_headline_is_the_fuller_rate_with_approx_first"),
+    ("G", "    tile.value.setText(UNKNOWN_VALUE if rate is None else f\"{rate.approx_per_minute:.2f}\")", "    tile.value.setText(UNKNOWN_VALUE if rate is None else f\"{rate.certain_per_minute:.2f}\")", "test_the_headline_is_complete_matches_only_with_approx_first"),
     ("G", "still in progress: left out of the match count, match time and chests per minute until it ends.", "not finished yet, so not counted.", "test_an_unfinished_match_says_what_it_is_left_out_of"),
-    ("G", "        kind_of_chest = f\"{_pad(message['chest_label'], 15)}\" if message.get(\"chest_label\") else \"\"\n", "        kind_of_chest = \"\"\n", "test_the_activity_log_shows_it_and_keeps_the_evidence"),
+    ("G", "        kind_of_chest = f'<span style=\"color:{theme.CHEST_COLORS.get(chest, theme.MUTED)}\">{_pad(chest, 15)}</span>' if chest else \"\"\n", "        kind_of_chest = \"\"\n", "test_the_activity_log_shows_it_and_keeps_the_evidence"),
+    ("G", "<span style=\"color:{theme.CHEST_COLORS.get(chest, theme.MUTED)}\">{_pad(chest, 15)}</span>", "<span>{_pad(chest, 15)}</span>", "test_each_chest_type_has_its_own_colour_apart_from_the_verdict"),
+    # M9G
+    ("G", "flash=bool(before) and chests[\"approx\"] > before[2])", "flash=False)", "test_the_game_count_highlights_when_it_goes_up"),
+    ("G", "flash=bool(before) and chests[\"certain\"] > before[1])", "flash=False)", "test_the_game_count_highlights_when_it_goes_up"),
+    ("G", "before = self._match_shown if now and self._match_shown and self._match_shown[0] == now[0] else None", "before = self._match_shown if now and self._match_shown else None", "test_a_new_match_does_not_highlight"),
+    ("G", "        for tile in (self.game_certain, self.game_approx, self.game_rate):\n            numbers.addWidget(tile, 1)", "        for tile in (self.game_approx, self.game_certain, self.game_rate):\n            numbers.addWidget(tile, 1)", "test_certain_is_on_the_left_on_both_views"),
+    ("G", "        self.dashboard.console_counts.setText(console_counts_text(certain, approx))\n", "", "test_the_console_always_shows_the_counts"),
+    ("G", "self.show_game_rate(f\"{rate.approx_per_minute:.2f}\" if rate else None,", "self.show_game_rate(f\"{rate.certain_per_minute:.2f}\" if rate else None,", "test_there_is_one_live_rate_and_it_is_approx"),
+    ("G", "        headline.addWidget(self.complete_rate, 3)\n        headline.addWidget(self.observed_rate, 2)", "        headline.addWidget(self.observed_rate, 3)\n        headline.addWidget(self.complete_rate, 2)", "test_the_headline_stands_out_on_the_left"),
+    ("G", "rate_tile(self.complete_rate, s.complete_rate, lambda r:", "rate_tile(self.complete_rate, s.complete_rate or s.observed_rate, lambda r:", "test_a_partial_rate_never_stands_in_for_the_headline"),
 ]
 
 

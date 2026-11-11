@@ -318,27 +318,44 @@ def test_the_table_shows_the_rate_and_marks_partial():
 def test_the_rate_wording_is_plain():
     with G.window() as w:
         page = w.win.analytics
-        titles = page.observed_rate.findChildren(ui().QLabel)[0].text(), page.complete_rate.findChildren(ui().QLabel)[0].text()
-        assert titles == ("AVERAGE DETECTED CHESTS / MIN", "COMPLETE MATCHES ONLY"), titles
+        titles = page.complete_rate.findChildren(ui().QLabel)[0].text(), page.observed_rate.findChildren(ui().QLabel)[0].text()
+        assert titles == ("AVERAGE DETECTED CHESTS / MIN", "INCLUDING PARTIAL MATCHES"), titles
         hint = page.rate_hint.text()
-        assert "detected by itself" in hint and "time actively playing" in hint and "Manual" in hint and "not your Fortnite total" in hint
+        assert "detected by itself" in hint and "time actively playing" in hint and "complete matches only" in hint and "Manual" in hint and "not your Fortnite total" in hint
 
 
-def test_the_headline_is_the_fuller_rate_with_approx_first():
+def test_the_headline_is_complete_matches_only_with_approx_first():
     with G.window() as w:
         MA.worked_example(MA.history_folder(w))
         page = w.win.analytics
         page.refresh()
         MA.settle(w)
-        assert page.observed_rate.value.text() == "0.32" and page.observed_rate.sub.text().startswith("APPROX per minute  ·  0.21 CERTAIN"), page.observed_rate.sub.text()
-        assert "complete and partial matches" in page.observed_rate.sub.text()
-        assert page.complete_rate.value.text() == "0.27" and "0.20 CERTAIN" in page.complete_rate.sub.text()
+        assert page.complete_rate.value.text() == "0.27" and page.complete_rate.sub.text().startswith("APPROX per minute  ·  0.20 CERTAIN"), page.complete_rate.sub.text()
+        assert "2 complete matches" in page.complete_rate.sub.text()
+        assert page.observed_rate.value.text() == "0.32" and "0.21 CERTAIN" in page.observed_rate.sub.text() and "complete and partial matches" in page.observed_rate.sub.text()
+
+
+def test_a_partial_rate_never_stands_in_for_the_headline():
+    with G.window() as w:
+        MA.Run(MA.history_folder(w)).match(1, 0.0, 0.0, 700.0, 600.0, completion="partial", ended_by="stopped", from_start=False).chest(100.0).end()
+        page = w.win.analytics
+        page.refresh()
+        MA.settle(w)
+        assert page.complete_rate.value.text() == DASH and page.complete_rate.sub.text().startswith("Not enough complete matches"), page.complete_rate.sub.text()
+        assert page.observed_rate.value.text() == "0.10"
 
 
 def test_the_headline_stands_out():
     with G.window() as w:
         page = w.win.analytics
-        assert isinstance(page.observed_rate, ui().CountCard) and isinstance(page.complete_rate, ui().StatTile)
+        assert isinstance(page.complete_rate, ui().CountCard) and isinstance(page.observed_rate, ui().StatTile)
+
+
+def test_the_headline_stands_out_on_the_left():
+    with G.window() as w:
+        page = w.win.analytics
+        row = layout_holding(page, page.complete_rate)
+        assert row.indexOf(page.complete_rate) < row.indexOf(page.observed_rate)
 
 
 def test_no_internal_words_remain_on_the_page():
@@ -373,7 +390,76 @@ def test_the_game_shows_this_matchs_numbers_not_the_totals():
         w.win.handle(status())
         assert (d.game_approx.value.text(), d.game_certain.value.text()) == ("28", "23")
         assert (d.approx.value.text(), d.certain.value.text()) == ("700", "500"), "the Overview keeps the lifetime totals"
-        assert d.game_approx_rate.value.text() == "5.26" and d.game_certain_rate.value.text() == "4.32"
+        assert d.game_rate.value.text() == "5.26"
+
+
+def layout_holding(root, widget):
+    from PySide6.QtWidgets import QLayout
+    return next(item for item in root.findChildren(QLayout) if item.indexOf(widget) >= 0)
+
+
+def test_certain_is_on_the_left_on_both_views():
+    with G.window() as w:
+        d = w.win.dashboard
+        for certain, approx in ((d.certain, d.approx), (d.game_certain, d.game_approx)):
+            row = layout_holding(d, certain)
+            assert row.indexOf(certain) < row.indexOf(approx) and certain.color == ui().theme.CERTAIN and approx.color == ui().theme.APPROX
+
+
+def test_the_game_count_highlights_when_it_goes_up():
+    with G.window() as w:
+        d = w.win.dashboard
+        counting(w)
+        w.win.handle(status({"certain": 3, "approx": 4}))
+        assert not d.game_approx._flash.isActive() and not d.game_certain._flash.isActive(), "the first reading is not an increase"
+        w.win.handle(status({"certain": 3, "approx": 5}))
+        assert d.game_approx._flash.isActive() and not d.game_certain._flash.isActive()
+        w.win.handle(status({"certain": 4, "approx": 5}))
+        assert d.game_certain._flash.isActive()
+
+
+def test_a_new_match_does_not_highlight():
+    with G.window() as w:
+        d = w.win.dashboard
+        counting(w)
+        w.win.handle(status({"certain": 0, "approx": 0}))
+        w.win.handle(status({"certain": 2, "approx": 2}, match_number=2))
+        assert not d.game_approx._flash.isActive() and not d.game_certain._flash.isActive()
+
+
+def test_there_is_one_live_rate_and_it_is_approx():
+    with G.window() as w:
+        d = w.win.dashboard
+        counting(w)
+        w.win.handle(status())
+        assert not hasattr(d, "game_certain_rate") and d.game_rate.value.text() == "5.26" and d.game_rate.sub.text() == "APPROX per minute of play"
+
+
+def test_approx_is_explained_as_including_certain():
+    with G.window() as w:
+        d = w.win.dashboard
+        assert "Already includes CERTAIN" in d.approx.sub.text() and "Strongest evidence" in d.certain.sub.text()
+        assert "includes CERTAIN" in d.game_approx.toolTip()
+
+
+def test_the_console_always_shows_the_counts():
+    with G.window() as w:
+        d = w.win.dashboard
+        w.win.set_counts(3, 7)
+        text = d.console_counts.text()
+        assert "CERTAIN 3" in text and "APPROX 7" in text and text.index("CERTAIN") < text.index("APPROX")
+        w.win.set_counts(3, 8)
+        assert "APPROX 8" in d.console_counts.text()
+
+
+def test_each_chest_type_has_its_own_colour_apart_from_the_verdict():
+    colors = ui().theme.CHEST_COLORS
+    assert set(colors) == {"Regular chest", "Rare chest", "Sprite chest", "Unknown chest"} and len(set(colors.values())) == 4
+    assert not set(colors.values()) & {ui().theme.CERTAIN, ui().theme.APPROX, ui().theme.REJECT}
+    for verdict in ("certain", "approx"):
+        for name, color in colors.items():
+            html = ui().log_entries({"type": "event", "verdict": verdict, "chest_label": name, "evidence": "", "clock": "05:05:49"})[0][1]
+            assert f"color:{color}" in html, (name, html)
 
 
 def test_a_correction_does_not_touch_the_match_numbers():
@@ -390,7 +476,7 @@ def test_no_match_shows_dashes_not_zeros():
         d = w.win.dashboard
         counting(w)
         w.win.handle(U.status("LOBBY"))
-        assert (d.game_approx.value.text(), d.game_certain.value.text(), d.game_approx_rate.value.text()) == (DASH, DASH, DASH)
+        assert (d.game_approx.value.text(), d.game_certain.value.text(), d.game_rate.value.text()) == (DASH, DASH, DASH)
         assert d.game_approx.sub.text() == "No match right now"
 
 
@@ -399,7 +485,7 @@ def test_an_unconfirmed_match_shows_no_numbers():
         d = w.win.dashboard
         counting(w)
         w.win.handle(status(english_confirmed=False))
-        assert d.game_approx.value.text() == DASH and d.game_approx_rate.value.text() == DASH and d.game_approx.sub.text() == "Not confirmed as a match yet"
+        assert d.game_approx.value.text() == DASH and d.game_rate.value.text() == DASH and d.game_approx.sub.text() == "Not confirmed as a match yet"
 
 
 def test_a_late_join_says_so():
@@ -407,7 +493,7 @@ def test_a_late_join_says_so():
         d = w.win.dashboard
         counting(w)
         w.win.handle(status(observed_from_start=False))
-        assert d.game_approx.value.text() == "28" and d.game_approx.sub.text() == "Since the app joined this match"
+        assert d.game_approx.value.text() == "28" and d.game_approx.sub.text() == "Since counting started"
 
 
 def test_a_break_says_so():
@@ -422,7 +508,7 @@ def test_too_little_play_gives_no_rate():
         d = w.win.dashboard
         counting(w)
         w.win.handle(status(active_seconds=30.0))
-        assert d.game_approx.value.text() == "28" and d.game_approx_rate.value.text() == DASH and d.game_approx_rate.sub.text() == "Needs a minute of play"
+        assert d.game_approx.value.text() == "28" and d.game_rate.value.text() == DASH and d.game_rate.sub.text() == "Needs a minute of play"
 
 
 def test_a_new_match_clears_the_old_numbers():
@@ -441,7 +527,7 @@ def test_stalled_video_stops_the_rate_but_keeps_the_count():
         w.win.handle(status())
         w.win.match_seen_at -= 60
         w.win._check_match_video()
-        assert d.game_approx.value.text() == "28" and d.game_approx_rate.value.text() == DASH and d.game_approx_rate.sub.text() == "No video right now"
+        assert d.game_approx.value.text() == "28" and d.game_rate.value.text() == DASH and d.game_rate.sub.text() == "No video right now"
 
 
 def test_stopping_clears_the_match():
@@ -457,7 +543,7 @@ def test_stopping_clears_the_match():
 
 def test_the_last_match_is_shown_with_its_ending():
     text = ui().last_match_text({"certain": 23, "approx": 28, "active_seconds": 319.4, "completion": "partial", "ended_by": "left_or_unknown", "reasons": ["connecting_seen"], "english_confirmed": True})
-    assert "APPROX 28" in text and "CERTAIN 23" in text and "5.26 per minute" in text and "Partial" in text and "Left the match" in text
+    assert "APPROX 28" in text and "CERTAIN 23" in text and text.index("CERTAIN") < text.index("APPROX") and "5.26 per minute" in text and "Partial" in text and "Left the match" in text
 
 
 def test_a_weak_record_does_not_replace_the_last_match():

@@ -32,7 +32,9 @@ MUTATIONS = [
     ("A", "        if chest[\"credited\"]:\n", "        if chest[\"match_number\"] is not None:\n", "test_chests_are_not_double_counted"),
     ("A", "    for match in complete + partial:\n        totals = credited", "    for match in kept:\n        totals = credited", "test_unconfirmed_matches_stay_out_of_every_statistic"),
     # rates
-    ("A", "summary.complete_rate = _rate(complete_ready, credited)", "summary.complete_rate = _rate(seen_ready, credited)", "test_the_complete_rate_uses_only_complete_matches"),
+    ("A", "summary.complete_rate = _rate(complete_ready, credited, MIN_COMPLETE_RATE_SECONDS)", "summary.complete_rate = _rate(seen_ready, credited, MIN_COMPLETE_RATE_SECONDS)", "test_the_complete_rate_uses_only_complete_matches"),
+    ("A", "summary.complete_rate = _rate(complete_ready, credited, MIN_COMPLETE_RATE_SECONDS)", "summary.complete_rate = _rate(complete_ready, credited)", "test_the_complete_rate_waits_for_five_minutes_across_matches"),
+    ("A", "summary.complete_rate = _rate(complete_ready, credited, MIN_COMPLETE_RATE_SECONDS)", "summary.complete_rate = _rate(seen_ready, credited, MIN_COMPLETE_RATE_SECONDS)", "test_partial_matches_do_not_fill_the_complete_rate"),
     ("A", "summary.observed_rate = _rate(seen_ready, credited, MIN_OBSERVED_RATE_SECONDS)", "summary.observed_rate = _rate(complete_ready, credited, MIN_OBSERVED_RATE_SECONDS)", "test_the_observed_rate_includes_partial_matches_and_stays_separate"),
     ("A", "summary.observed_rate = _rate(seen_ready, credited, MIN_OBSERVED_RATE_SECONDS)", "summary.observed_rate = _rate(seen_ready, credited)", "test_too_little_observed_play_gives_no_observed_rate"),
     ("A", "seconds < enough_seconds:", "seconds <= enough_seconds:", "test_exactly_enough_observed_play_gives_a_rate"),

@@ -7,7 +7,7 @@ Write down the time of anything odd, then keep going. Send `logs\`, `state\histo
 
 ## Setup
 
-1. Right-click `build_out\v0.3.0-rc4\Fortnite-Visual-Chest-Counter-v0.3.0.zip` and **Extract All**, right where it is, which is where rc3 failed. It should finish with no error. Leave your normal
+1. Right-click `build_out\v0.3.0-rc5\Fortnite-Visual-Chest-Counter-v0.3.0.zip` and **Extract All**, right where it is. It should finish with no error. Leave your normal
    install alone, and close it first: only one counter can run at a time.
 2. Open **Fortnite Visual Chest Counter.exe**. Create a profile called `RC test` and select it.
 3. **Settings > Match tracking (experimental)**: it should already be ticked. Keep **1 minute**.
@@ -38,8 +38,13 @@ Write down the time of anything odd, then keep going. Send `logs\`, `state\histo
 | 18 | Start a new match | Game's counts start again from zero, Overview's do not; **Last match** shows the finished one |
 | 19 | Press **+1** during a match | Overview changes; Game does not |
 | 20 | Switch Overview, Game, Console, Analytics while counting; click **Live preview** to hide it | Only the visible preview moves; hiding it changes nothing about counting |
-| 21 | Quit a match on purpose from the menu | It closes as Partial, ending *Left the match* or *Returned to lobby* |
-| 22 | Look at the Console view | Each counted chest names its type: Regular, Rare, Sprite or Unknown |
+| 21 | Quit a match on purpose from the menu, having counted from the lobby | It closes as **Complete**, ending *Left the match* or *Returned to lobby* |
+| 22 | Look at the Console view | Each counted chest names its type, in its own colour: Regular, Rare, Sprite or Unknown. **CERTAIN** and **APPROX** stay visible under Mark moment and change with each chest and each +1 / −1 |
+| 23 | Compare Overview and Game | CERTAIN on the left and APPROX on the right on both, same colours; both highlight briefly when they go up; Game has one chests-per-minute figure |
+| 24 | A small-HUD streamer from the lobby into a match | The island reads *Waiting for the match to start*, not *In match*; after the bus, **START SEEN** says Yes |
+| 25 | **Analytics** with under five minutes of complete matches | The main figure is a dash saying *Not enough complete matches*; **Including partial matches** is shown apart |
+| 26 | During a match, hold the **full-screen map** open for 20 s, then the **inventory** for 20 s, with **Whole session** recording on | Note what **UNCLEAR** does. Keep that `captures\` folder: no footage of these exists yet, and it decides whether a browser switch can ever make a match Partial |
+| 27 | During a match watched in a browser, switch to another page for 20 s and back | **UNCLEAR** rises by about 20 s and active play does not; the match stays open |
 
 ## Pass or fail
 
@@ -47,8 +52,7 @@ Write down the time of anything odd, then keep going. Send `logs\`, `state\histo
 
 **Needed before calling the projector tested:** 14 to 16. Until then the docs keep saying it is less tested.
 
-**Should pass:** 3 and 5. This is the first time a whole real match goes through match tracking. If it is not marked Complete,
-send the logs. It can still ship as experimental with that limit written down, if the counts and history were right.
+**Should pass:** 3, 5, 21, 23, 24 and 25. If a whole real match is not marked Complete, send the logs. It can still ship as experimental with that limit written down, if the counts and history were right.
 
 **Your judgment:** 1 and how the new Dashboard and Analytics feel to use.
 
@@ -71,11 +75,6 @@ and for test 14, compare each chest:
 
 Only one counter runs at a time, so two inputs cannot watch the same match live. To compare inputs, label each one's match
 separately and compare miss and false-positive rates, never just the totals.
-
-## Catching the waiting-island problem
-
-Keep **Whole session** recording on from the lobby through a few game starts. If a very short match appears right at a game start,
-keep that session's `captures\` folder: no recording of this has been caught yet, and it is the evidence the proposed fix needs.
 
 ## Not covered
 

@@ -17,6 +17,8 @@ REJECT = "#f87171"
 DANGER = "#ef4444"
 WARN = "#c084fc"
 INFO = "#67c7e8"
+# What kind of chest it was, apart from how sure the counter is, so none of these repeats a verdict's colour.
+CHEST_COLORS = {"Regular chest": "#f0a868", "Rare chest": "#6ea8fe", "Sprite chest": "#f28cc8", "Unknown chest": MUTED}
 
 LOG_COLORS = {"certain": CERTAIN, "approx": APPROX, "rejected": REJECT, "generic": DIM, "info": INFO, "warn": WARN,
               "error": REJECT, "line": MUTED, "status": DIM, "detail": DIM}

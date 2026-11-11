@@ -359,11 +359,11 @@ English pop-ups.</p>
 history of them, per profile, in <code>state\history\</code> on your PC. It <b>never changes your counts or what OBS shows</b>.</p>
 <p><b>Save progress every</b> (30 seconds, 1 minute, 5 minutes or 10 minutes) sets how often running totals are written. Matches are followed once a second whatever you choose. A longer interval writes less to the disk, but after a crash more of the last moments count as uncertain.</p>
 <p>The <b>Game</b> view counts only chests detected during the current match, starting from zero each match. Your lifetime totals and manual +1 / &minus;1 do not change it. It shows a dash, not a zero, until the app is sure it is watching a match.</p>
-<p>The <b>Analytics</b> page shows <b>Average detected chests / min</b>: chests the app detected by itself, divided by your time actively playing, across complete and partial matches. <b>Complete matches only</b> is the same sum over fully seen matches. <b>Recent matches</b> shows each match&rsquo;s own rate. Manual +1 / &minus;1 are never included, and your official totals stay the numbers on the Dashboard.</p>
+<p>The <b>Analytics</b> page shows <b>Average detected chests / min</b>: APPROX chests the app detected by itself, divided by your time actively playing, across complete matches only. It needs five minutes of active play across those matches; until then it says <i>Not enough complete matches</i>. <b>Including partial matches</b> is the same sum with partial matches added, shown apart. <b>Recent matches</b> shows each match&rsquo;s own rate. Manual +1 / &minus;1 are never included, and your official totals stay the numbers on the Dashboard.</p>
 <table>
   <tr><th>Quality</th><th>Meaning</th></tr>
-  <tr><td><b>Complete</b></td><td>Its start and its ending were both seen in English, with no break in the video. Only these enter complete-match averages.</td></tr>
-  <tr><td><b>Partial</b></td><td>Joined late, part of it was not seen, or play went back to the menus with no ending on screen (<i>Left the match</i>, <i>Returned to lobby</i>). Quitting and a disconnect look the same, so the app does not guess. Its time still shows.</td></tr>
+  <tr><td><b>Complete</b></td><td>Its start and the end of your part in it were both seen in English, with no break in the video. How it ended and how long it lasted do not matter: placed, won, or back to the menus (<i>Left the match</i>, <i>Returned to lobby</i>). Only these enter the main rate and complete-match averages.</td></tr>
+  <tr><td><b>Partial</b></td><td>The start or the end was not seen: joined late, counting stopped, or the video was lost. Its time still shows.</td></tr>
   <tr><td><b>Unconfirmed</b></td><td>No English evidence that it was really a match. Left out of every statistic.</td></tr>
 </table>
 <p>If a recorded match was wrong, <b>Not a match</b> leaves it out of the statistics and <b>Restore</b> puts it back. Nothing is deleted, and the chests stay in your totals.</p>

@@ -51,8 +51,8 @@ def test_every_control_is_on_its_view():
     with G.window() as w:
         d, A = w.win.dashboard, ui()
         placed = {A.OVERVIEW_VIEW: ("show_mini", "mini_preview", "profile", "profile_new", "profile_rename", "profile_delete", "certain", "approx", "plus", "minus", "correction_row", "types", "match_row", "viewers", "obs_line", "source", "refresh", "start", "url_row", "url", "stability", "stability_hint", "source_hint", "metrics", "analyse"),
-                  A.GAME_VIEW: ("game_approx", "game_certain", "game_approx_rate", "game_certain_rate", "game_last", "game_status", "game_hint", "game_settings", "game_active", "game_seen", "game_unclear", "game_start", "game_language", "show_preview", "preview"),
-                  A.CONSOLE_VIEW: ("rec_mode", "mark", "rec_status", "detail", "clear", "open_logs", "log")}
+                  A.GAME_VIEW: ("game_approx", "game_certain", "game_rate", "game_last", "game_status", "game_hint", "game_settings", "game_active", "game_seen", "game_unclear", "game_start", "game_language", "show_preview", "preview"),
+                  A.CONSOLE_VIEW: ("rec_mode", "mark", "rec_status", "console_counts", "detail", "clear", "open_logs", "log")}
         for view, names in placed.items():
             for name in names:
                 assert d.views.widget(view).isAncestorOf(getattr(d, name)), name

@@ -50,7 +50,9 @@ Setup-specific problems: [dual-PC SRT](obs-dual-pc-srt.md#troubleshooting) · [c
 |---|---|
 | Analytics says *No matches recorded yet* | Check **Settings > Match tracking (experimental)** is ticked, then **Start counting** and play a match. A match appears after it ends. |
 | Game view stays on *Not sure yet* | Match tracking reads English screens only. Check that the picture is 16:9 with the menus and HUD visible (**Live preview**, same view). Your chests are still counted. |
-| A match is **Partial** | Part of it was not seen, or you left it with no ending on screen: you started counting after it began, stopped before the end, the video dropped, or you went back to the menus. This is expected, and its time still shows. |
+| A match is **Partial** | Its start or its end was not seen: you started counting after it began, stopped before the end, or the video dropped. This is expected, and its time still shows. |
+| CERTAIN stays at 0 while APPROX climbs | Expected on a small HUD: those pop-ups only ever count as APPROX. APPROX is the best estimate and already includes CERTAIN. |
+| Analytics says *Not enough complete matches* | The main chests per minute needs five minutes of active play in complete matches. **Including partial matches** shows the wider figure meanwhile. |
 | Game shows a dash | No match is open yet, or the app is not yet sure it is a match. Chests per minute need a minute of play. Your Overview totals keep counting. |
 | A recorded match was not a real match | Analytics -> **Not a match**. **Restore** puts it back. |
 | Analytics total differs from the Dashboard | Expected. Analytics only covers chests recorded with match tracking on, and leaves out **+1** / **−1** and **Edit counts...**. The Dashboard stays the official total. |

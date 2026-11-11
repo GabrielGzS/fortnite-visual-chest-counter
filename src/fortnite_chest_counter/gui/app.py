@@ -277,7 +277,7 @@ def match_note(match):
     if match.get("discontinuity"):
         return "Part of this match was not seen"
     if match.get("observed_from_start") is False:
-        return "Since the app joined this match"
+        return "Since counting started"
     return "This match only"
 
 
@@ -298,7 +298,7 @@ def last_match_text(last):
     if not last["approx"] and active < match_analytics.MIN_MATCH_RATE_SECONDS:
         return ""
     rate = match_analytics.match_rate(last["certain"], last["approx"], active)
-    parts = [f"APPROX {fmt(last['approx'])}", f"CERTAIN {fmt(last['certain'])}"] + ([f"{rate.approx_per_minute:.2f} per minute"] if rate else [])
+    parts = [f"CERTAIN {fmt(last['certain'])}", f"APPROX {fmt(last['approx'])}"] + ([f"{rate.approx_per_minute:.2f} per minute"] if rate else [])
     return "Last match:   " + "   ·   ".join(parts + [QUALITY_LOOK[last["completion"]][0], match_analytics.ending_text(last)])
 
 
@@ -428,7 +428,8 @@ def log_entries(message):
         totals = ""
         if message.get("certain_text") is not None:
             totals = "&nbsp;" * 3 + _span(f"CERTAIN {message['certain_text']} | APPROX {message['approx_text']}", theme.DIM)
-        kind_of_chest = f"{_pad(message['chest_label'], 15)}" if message.get("chest_label") else ""
+        chest = message.get("chest_label")
+        kind_of_chest = f'<span style="color:{theme.CHEST_COLORS.get(chest, theme.MUTED)}">{_pad(chest, 15)}</span>' if chest else ""
         main = (stamp + f'<span style="color:{color};font-weight:600">{_pad(text, 12)}</span>' + kind_of_chest
                 + escape(f"{message.get('evidence', '')}{why}") + totals)
         detail = "&nbsp;" * 10 + _span(f"{message.get('event_id', '')} at {message.get('stamp', '')} | {message.get('source', '')}"
@@ -975,8 +976,8 @@ class Dashboard(QWidget):
         # the two numbers
         counts = QHBoxLayout()
         counts.setSpacing(14)
-        self.certain = CountCard("CERTAIN", "Chests confirmed by strong evidence", theme.CERTAIN)
-        self.approx = CountCard("APPROX", "Estimated total - already includes CERTAIN", theme.APPROX)
+        self.certain = CountCard("CERTAIN", "Strongest evidence only. Can stay low on a small HUD", theme.CERTAIN)
+        self.approx = CountCard("APPROX", "Best estimate of chests opened. Already includes CERTAIN", theme.APPROX)
         counts.addWidget(self.certain, 1)
         counts.addWidget(self.approx, 1)
         actions = QVBoxLayout()
@@ -1124,12 +1125,14 @@ class Dashboard(QWidget):
         game.addWidget(box)
         numbers = QHBoxLayout()
         numbers.setSpacing(12)
-        self.game_approx = CountCard("MATCH APPROX", "", theme.APPROX)
         self.game_certain = CountCard("MATCH CERTAIN", "", theme.CERTAIN)
-        self.game_approx_rate = StatTile("APPROX / MIN")
-        self.game_certain_rate = StatTile("CERTAIN / MIN")
-        for tile, stretch in ((self.game_approx, 3), (self.game_certain, 3), (self.game_approx_rate, 2), (self.game_certain_rate, 2)):
-            numbers.addWidget(tile, stretch)
+        self.game_approx = CountCard("MATCH APPROX", "", theme.APPROX)
+        self.game_certain.setToolTip("Only the strongest evidence. Can stay low on a small HUD or blurry video.")
+        self.game_approx.setToolTip("Best estimate of chests opened in this match. Already includes CERTAIN.")
+        self.game_rate = CountCard("DETECTED CHESTS / MIN", "", theme.APPROX)
+        self._match_shown = None                              # (match number, certain, approx): a highlight means this match's count went up
+        for tile in (self.game_certain, self.game_approx, self.game_rate):
+            numbers.addWidget(tile, 1)
         game.addLayout(numbers)
         self.game_last = label("", "hint", wrap=True)
         self.game_last.hide()
@@ -1138,7 +1141,7 @@ class Dashboard(QWidget):
         tiles.setSpacing(12)
         self.game_active = StatTile("ACTIVE PLAY", "Alive on the map")
         self.game_seen = StatTile("SEEN SO FAR", "This match, on screen")
-        self.game_unclear = StatTile("UNCLEAR", "Black, frozen or missing")
+        self.game_unclear = StatTile("UNCLEAR", "No picture, or not the game")
         self.game_start = StatTile("START SEEN", "From before the bus")
         self.game_language = StatTile("LANGUAGE", "From text on screen")
         for tile in (self.game_active, self.game_seen, self.game_unclear, self.game_start, self.game_language):
@@ -1172,8 +1175,14 @@ class Dashboard(QWidget):
         self.mark = button("Mark moment   Ctrl+Alt+M", on_click=win.mark_moment)
         row.addWidget(self.mark)
         box_layout.addLayout(row)
+        row = QHBoxLayout()
         self.rec_status = label("", "hint", wrap=True)
-        box_layout.addWidget(self.rec_status)
+        row.addWidget(self.rec_status, 1)
+        self.console_counts = label(console_counts_text(0, 0), "metrics")
+        self.console_counts.setTextFormat(Qt.RichText)
+        self.console_counts.setToolTip("Your current counts. APPROX already includes CERTAIN.")
+        row.addWidget(self.console_counts, 0, Qt.AlignTop | Qt.AlignRight)
+        box_layout.addLayout(row)
         console.addWidget(box)
 
         row = QHBoxLayout()
@@ -1257,14 +1266,19 @@ class Dashboard(QWidget):
         """This match only, from its own chests. Nothing is shown until it is known to be a match: a zero would say more than is known."""
         known = match.get("english_confirmed") is True and chests is not None
         note = match_note(match)
-        self.game_approx.set_value(chests["approx"] if known else None)
-        self.game_certain.set_value(chests["certain"] if known else None)
+        now = (match.get("match_number"), chests["certain"], chests["approx"]) if known else None
+        before = self._match_shown if now and self._match_shown and self._match_shown[0] == now[0] else None
+        self._match_shown = now
+        self.game_certain.set_value(chests["certain"] if known else None, flash=bool(before) and chests["certain"] > before[1])
+        self.game_approx.set_value(chests["approx"] if known else None, flash=bool(before) and chests["approx"] > before[2])
         self.game_approx.sub.setText(note)
         self.game_certain.sub.setText(note)
         rate = match_analytics.match_rate(chests["certain"], chests["approx"], match.get("active_seconds")) if known else None
-        hint = "Detected chests per minute of play" if rate else "Needs a minute of play" if known else ""
-        self.game_approx_rate.set_value(f"{rate.approx_per_minute:.2f}" if rate else None, hint)
-        self.game_certain_rate.set_value(f"{rate.certain_per_minute:.2f}" if rate else None, hint)
+        self.show_game_rate(f"{rate.approx_per_minute:.2f}" if rate else None, "APPROX per minute of play" if rate else "Needs a minute of play" if known else "")
+
+    def show_game_rate(self, text, hint):
+        self.game_rate.value.setText(UNKNOWN_VALUE if text is None else text)
+        self.game_rate.sub.setText(hint)
 
     def _show_last_match(self, last):
         text = last_match_text(last)
@@ -1815,6 +1829,10 @@ class SettingsPage(QWidget):
 QUALITY_LOOK = {"complete": ("Complete", theme.CERTAIN), "partial": ("Partial", theme.APPROX), "unconfirmed": ("Unconfirmed", theme.MUTED)}
 
 
+def console_counts_text(certain, approx):
+    return f'{_span("CERTAIN " + fmt(certain), theme.CERTAIN, bold=True)}&nbsp;&nbsp;&nbsp;{_span("APPROX " + fmt(approx), theme.APPROX, bold=True)}'
+
+
 def rate_tile(tile, rate, label_text, missing):
     """APPROX first, because it is the fuller count. CERTAIN stays beside it, never added to it."""
     tile.value.setText(UNKNOWN_VALUE if rate is None else f"{rate.approx_per_minute:.2f}")
@@ -1886,12 +1904,12 @@ class AnalyticsPage(QWidget):
         self.certain = StatTile("CERTAIN CHESTS", "In recorded history")
         self.approx = StatTile("APPROX CHESTS", "In recorded history, includes CERTAIN")
         self.per_match = StatTile("AVERAGE CHESTS PER COMPLETE MATCH")
-        self.observed_rate = CountCard("AVERAGE DETECTED CHESTS / MIN", "", theme.APPROX)        # the one number most people want
-        self.complete_rate = StatTile("COMPLETE MATCHES ONLY")
+        self.complete_rate = CountCard("AVERAGE DETECTED CHESTS / MIN", "", theme.APPROX)        # the comparable figure: whole matches only
+        self.observed_rate = StatTile("INCLUDING PARTIAL MATCHES")
         headline = QHBoxLayout()
         headline.setSpacing(12)
-        headline.addWidget(self.observed_rate, 3)
-        headline.addWidget(self.complete_rate, 2)
+        headline.addWidget(self.complete_rate, 3)
+        headline.addWidget(self.observed_rate, 2)
         layout.addLayout(headline)
         for tiles in ((self.matches, self.observed, self.confirmed, self.session), (self.certain, self.approx, self.per_match)):
             line = QHBoxLayout()
@@ -1899,8 +1917,8 @@ class AnalyticsPage(QWidget):
             for tile in tiles:
                 line.addWidget(tile, 1)
             layout.addLayout(line)
-        self.rate_hint = label("Chests per minute are the chests the app detected by itself, divided by your time actively playing. Manual +1 and −1 are not included, "
-                               "and this is not your Fortnite total.", "hint", wrap=True)
+        self.rate_hint = label("Chests per minute are the APPROX chests the app detected by itself, divided by your time actively playing. The main figure uses complete matches only, "
+                               "meaning their start and their end were both seen. Manual +1 and −1 are not included, and this is not your Fortnite total.", "hint", wrap=True)
         layout.addWidget(self.rate_hint)
         self.notes = label("", "hint", wrap=True)
         layout.addWidget(self.notes)
@@ -1978,7 +1996,8 @@ class AnalyticsPage(QWidget):
         self.approx.set_value(fmt(s.approx_chests) if not s.empty else None)
         per = s.per_complete_match
         self.per_match.set_value(f"{per.approx:.1f}" if per else None, f"APPROX  ·  {per.certain:.1f} CERTAIN  ·  {plural(per.matches, 'match')}" if per else "No complete matches yet")
-        rate_tile(self.complete_rate, s.complete_rate, lambda r: plural(r.matches, "match"), "No complete matches yet")
+        rate_tile(self.complete_rate, s.complete_rate, lambda r: f"{plural(r.matches, 'complete match')}, {duration(r.minutes * 60)} of active play",
+                  f"Not enough complete matches: needs {match_analytics.MIN_COMPLETE_RATE_SECONDS // 60} minutes of active play across them")
         rate_tile(self.observed_rate, s.observed_rate, lambda r: f"over {duration(r.minutes * 60)} of active play, complete and partial matches",
                   f"Needs at least {match_analytics.MIN_OBSERVED_RATE_SECONDS // 60} minutes of active play")
         self.notes.setText(analytics_notes(s))
@@ -2981,8 +3000,7 @@ class MainWindow(QMainWindow):
             for line in (self.dashboard.match, self.dashboard.game_status):
                 line.setText("No video right now")
                 line.setStyleSheet(f"color: {theme.MUTED};")
-            for tile in (self.dashboard.game_approx_rate, self.dashboard.game_certain_rate):
-                tile.set_value(None, "No video right now")      # the counts stay: they were real, but the rate is no longer current
+            self.dashboard.show_game_rate(None, "No video right now")      # the counts stay: they were real, but the rate is no longer current
 
     def update_game_idle(self):
         """What the Game view says while no match status is coming in."""
@@ -3021,6 +3039,7 @@ class MainWindow(QMainWindow):
         self.counts = (certain, approx)
         self.dashboard.certain.set_value(certain, flash=flash and changed)
         self.dashboard.approx.set_value(approx, flash=flash and changed)
+        self.dashboard.console_counts.setText(console_counts_text(certain, approx))
         self.update_correction_buttons()
         if changed:
             self.refresh_viewers()

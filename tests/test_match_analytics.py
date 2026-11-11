@@ -158,6 +158,30 @@ def test_the_observed_rate_includes_partial_matches_and_stays_separate():
         assert s.observed_rate.matches == 3 and s.observed_rate.minutes == 19 and s.complete_rate.certain_per_minute != s.observed_rate.certain_per_minute
 
 
+def test_the_complete_rate_waits_for_five_minutes_across_matches():
+    with folder() as f:
+        Run(f).match(1, 0.0, 0.0, 41.0, 40.0, ended=40.0).match(2, 100.0, 100.0, 161.0, 60.0, ended=160.0).match(3, 200.0, 200.0, 399.0, 199.0, ended=398.0).end()
+        assert summary_of(f).complete_rate is None                        # 299 s
+
+
+def test_short_complete_matches_count_and_are_weighted_by_their_time():
+    with folder() as f:
+        run = Run(f).match(1, 0.0, 0.0, 41.0, 40.0, ended=40.0).match(2, 100.0, 100.0, 161.0, 60.0, ended=160.0).match(3, 200.0, 200.0, 411.0, 210.0, ended=410.0)
+        for t in (5.0, 6.0, 7.0, 105.0, 106.0, 107.0, 108.0, *(210.0 + i for i in range(12))):
+            run.chest(t)
+        run.end()
+        rate = summary_of(f).complete_rate
+        close(rate.approx_per_minute, 19 / (310 / 60))                    # the mean of each match's own rate would be about 4.1
+        assert rate.matches == 3
+
+
+def test_partial_matches_do_not_fill_the_complete_rate():
+    with folder() as f:
+        Run(f).match(1, 0.0, 0.0, 700.0, 600.0, completion="partial", ended_by="stopped", from_start=False).chest(100.0).end()
+        s = summary_of(f)
+        assert s.complete_rate is None and s.observed_rate is not None
+
+
 def test_a_rate_is_total_over_total_not_an_average_of_rates():
     with folder() as f:
         Run(f).match(1, 0.0, 0.0, 60.0, 60.0, ended=50.0).chest(10.0).match(2, 100.0, 100.0, 1000.0, 900.0, ended=990.0).end()
@@ -510,7 +534,7 @@ def test_the_empty_page_shows_dashes_and_explains():
         assert not page.empty.isHidden() and not page.empty_settings.isHidden() and "Turn on match tracking" in page.empty_hint.text()
         for tile in (page.observed, page.confirmed, page.session, page.certain, page.approx, page.per_match, page.complete_rate, page.observed_rate):
             assert text_of(tile) == DASH, tile.sub.text()
-        assert page.table.rowCount() == 0 and page.table.isHidden() and page.recent_title.isHidden() and "No complete matches yet" in page.complete_rate.sub.text()
+        assert page.table.rowCount() == 0 and page.table.isHidden() and page.recent_title.isHidden() and page.complete_rate.sub.text().startswith("Not enough complete matches")
 
 
 def test_the_page_shows_the_worked_example():
@@ -523,7 +547,7 @@ def test_the_page_shows_the_worked_example():
         assert text_of(page.observed) == "20m 20s" and text_of(page.confirmed) == "15m 00s" and text_of(page.session) == "1h 06m"
         assert text_of(page.certain) == "6" and text_of(page.approx) == "9" and text_of(page.per_match) == "2.0" and "1.5 CERTAIN" in page.per_match.sub.text()
         assert text_of(page.complete_rate) == "0.27" and text_of(page.observed_rate) == "0.32"
-        assert "0.20 CERTAIN" in page.complete_rate.sub.text() and "2 matches" in page.complete_rate.sub.text() and "0.21 CERTAIN" in page.observed_rate.sub.text() and "partial" in page.observed_rate.sub.text()
+        assert "0.20 CERTAIN" in page.complete_rate.sub.text() and "2 complete matches" in page.complete_rate.sub.text() and "0.21 CERTAIN" in page.observed_rate.sub.text() and "partial" in page.observed_rate.sub.text()
         assert page.table.rowCount() == 4
         assert [page.table.item(3, c).text() for c in (1, 2, 3, 4, 5, 6)] == ["10m 00s", "2", "3", "0.30", "Complete", "Placed"]
         assert [page.table.item(1, c).text() for c in (1, 4, 5, 6)] == ["4m 00s seen", "0.50 seen", "Partial", "Counting stopped"]

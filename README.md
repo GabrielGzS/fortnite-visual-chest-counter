@@ -141,9 +141,9 @@ New in v0.3.0 and **on by default**; turn it off in **Settings > Match tracking 
 follows your matches and keeps a history of them, per profile, on your PC. It never changes your counts or what OBS shows.
 
 The **Game** view shows the current match's own chests and chests per minute. The **Analytics** page shows average detected
-chests per minute, overall and per match, using only chests the app detected, never manual +1 / −1. A
-match only counts as **complete** if its start and its ending were both seen with no break in the video. A **partial** match
-(joined late, or the video stopped) still shows its observed time but never enters complete-match averages. If a recorded
+chests per minute from complete matches, and per match, using only chests the app detected, never manual +1 / −1. A
+match counts as **complete** if its start and the end of your part in it were both seen with no break in the video, however it
+ended. A **partial** match (joined late, or the video stopped) still shows its observed time but stays out of the main rate. If a recorded
 match was wrong, **Not a match** leaves it out of the statistics, and **Restore** puts it back; nothing is deleted.
 
 Match recognition reads **English** screens only for now, and has been tested on only a few real matches. Chest counting is

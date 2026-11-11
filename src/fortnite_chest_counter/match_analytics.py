@@ -5,8 +5,8 @@ and history never replaces the counter's totals, which stay the official numbers
 What it will not do:
   * Invent a value. Anything unknown is None, which the app shows as a dash; zero always means a real zero.
   * Average what cannot be compared. Complete, partial and unconfirmed matches are counted apart, and unconfirmed ones stay out of every statistic.
-  * Mix the two chest rates. The complete rate uses complete matches only and is the comparable figure. The observed rate also includes partial
-    matches, measures only what was seen, and needs enough play to mean anything.
+  * Mix the two chest rates. The complete rate uses complete matches only and is the headline. The observed rate also includes partial matches and
+    measures only what was seen. Each needs enough play to mean anything, and one never stands in for the other.
   * Use a match whose history lost chests in either rate: its count would be too low.
   * Add CERTAIN to APPROX. APPROX is the total and already includes CERTAIN.
   * Claim an outcome. An ending is reported only as it was observed; placement numbers are not read.
@@ -24,6 +24,7 @@ from fortnite_chest_counter import match_history as H
 COMPLETE, PARTIAL, UNCONFIRMED = "complete", "partial", "unconfirmed"
 QUALITIES = (COMPLETE, PARTIAL, UNCONFIRMED)
 MIN_OBSERVED_RATE_SECONDS = 300            # under five minutes of play, a chest more or less would swing the rate wildly
+MIN_COMPLETE_RATE_SECONDS = 300            # the same, across all complete matches together: short matches still count towards it
 MIN_MATCH_RATE_SECONDS = 60                # one match, live or in the list: under a minute of play the figure says nothing yet
 RECENT_MATCHES = 25
 READ_KINDS = H.MATCH_KINDS | H.CORRECTION_KINDS | {"transition", "counter_change", "chest", "chest_type"}      # everything but the heartbeats, which are most of the file
@@ -195,7 +196,7 @@ def summarize(history, recent=RECENT_MATCHES):
 
     complete_ready, seen_ready = [m for m in complete if rate_ready(m)], [m for m in complete + partial if rate_ready(m)]
     summary.matches_left_out_of_rates = len(complete + partial) - len(seen_ready)
-    summary.complete_rate = _rate(complete_ready, credited)
+    summary.complete_rate = _rate(complete_ready, credited, MIN_COMPLETE_RATE_SECONDS)
     summary.observed_rate = _rate(seen_ready, credited, MIN_OBSERVED_RATE_SECONDS)
     if complete_ready:
         keys = [(match["run_id"], match["match_number"]) for match in complete_ready]

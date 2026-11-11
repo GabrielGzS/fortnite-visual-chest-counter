@@ -49,15 +49,17 @@ totals. The two can differ, because Analytics only covers chests recorded with m
 
 | Quality | Meaning | In the statistics? |
 |---|---|---|
-| **Complete** | Its start and its ending (YOU PLACED or Victory) were seen in English, with no break in the video before the ending | Everywhere |
-| **Partial** | You joined late, or part of it was not seen: counting stopped, or the video was lost | Observed time and observed rate, never complete-match averages |
+| **Complete** | Its start and the end of your part in it were both seen in English, with no break in the video before that end. It does not matter how it ended or how long it lasted: placed, won, or back to the menus | Everywhere |
+| **Partial** | The start or the end was not seen: you joined late, counting stopped, or the video was lost | Match time and the rate including partial matches, never the main rate or complete-match averages |
 | **Unconfirmed** | No English evidence that it was a real match | Listed only |
 
-CERTAIN and APPROX are always shown apart.
+CERTAIN and APPROX are always shown apart. APPROX is the best estimate and already includes CERTAIN. CERTAIN needs the strongest
+evidence, so on a small HUD it can stay at 0 while APPROX climbs. That is expected.
 
-**Average detected chests / min** is the main number: chests the app detected by itself, divided by your time actively
-playing, across complete and partial matches. It needs five minutes of play. **Complete matches only** is the same sum using
-only fully seen matches. Manual **+1** and **−1** are in neither. Where there is not enough data, a tile says so.
+**Average detected chests / min** is the main number: APPROX chests the app detected by itself, divided by your time actively
+playing, across complete matches only. It needs five minutes of active play across those matches together, and until then it says
+*Not enough complete matches*. Short matches count, weighted by their length. **Including partial matches** is the same sum with
+partial matches added, shown apart and never used in its place. Manual **+1** and **−1** are in neither.
 
 **Recent matches** shows each match's own chests per minute. "seen" means only part of that match was seen, and a dash means
 there is under a minute of play, or it is not a confirmed match.
@@ -67,7 +69,12 @@ or the app closes during a match, that match becomes partial.
 
 **How a match ended** only says what was on screen. *Placed* and *Victory Royale* were seen. *Left the match* and *Returned
 to lobby* mean play went back to the menus with neither on screen: quitting, a disconnect or a missed ending all look the
-same, so the app does not guess, and such a match stays Partial.
+same, so the app does not guess why. Such a match is still Complete if its start was seen: Complete says what was observed, not how
+it went. *Waiting island* marks a record the countdown showed was never a match, and it stays out of the statistics.
+
+**If something else is on screen during a match**, such as a browser page, the app stops counting that time as play after about
+10 seconds, and Game shows it as **Unclear**. A hidden health bar alone does not do this, because the compass and the icons beside
+the minimap still show the game is there. Such a break does not by itself make a match Partial, and over a minute of it does.
 
 ## Fixing mistakes
 

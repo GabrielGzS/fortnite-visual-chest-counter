@@ -15,9 +15,9 @@ turn it off in Settings. Chest detection has not changed.
 | **Match tracking (experimental)** | Follows lobby, loading, match and ending while counting. On by default. It never changes your counts or what OBS shows |
 | **Live match stats** | The Game view shows this match's chests and chests per minute as you play, apart from your lifetime totals |
 | **Analytics** | A new page with matches, match time and chests per minute, overall and for each match |
-| **Honest match quality** | A match only counts as **Complete** if its start and ending were both seen. **Partial** matches never enter complete-match averages |
+| **Honest match quality** | A match is **Complete** if its start and the end of your part in it were both seen, however it ended. **Partial** matches stay out of the main chests-per-minute figure |
 | **Dashboard views** | **Overview**, **Game** and **Console** replace one long page. A Live preview is on by default and can be hidden; Activity and Diagnostic recording are in Console |
-| **Chest types in the log** | Activity now names each chest: Regular, Rare, Sprite, or Unknown when it could not be read |
+| **Chest types in the log** | Activity now names each chest in its own colour: Regular, Rare, Sprite, or Unknown when it could not be read |
 | **+1 / −1** | Fix APPROX by one chest with a click, also while counting, with an optional reason and Undo |
 | **Not a match / Restore** | Leave a wrong match out of the statistics, and put it back any time. Nothing is deleted |
 | **Save progress every** | Choose how often match tracking writes running totals: 30 seconds to 10 minutes |
@@ -37,7 +37,9 @@ Unchanged from v0.2.3. With match tracking on or off, the chests counted, CERTAI
 - **Match tracking reads English screens only.** In another language your chests are still counted, but matches show as *Not
   sure yet* and no statistics are made up.
 - Match tracking has been tested on recordings and a few real matches, which is still little evidence. Other game modes, reboots
-  and squads are untested.
+  and squads are untested. Game starts on a small HUD have been checked on one streamer only.
+- A short switch away from the game during a match, such as to a browser page, is left out of play time but does not make the match
+  Partial, because telling it apart from a full-screen map or the inventory has not been tested.
 - Analytics only covers chests recorded with match tracking on, and leaves out manual corrections. The Dashboard stays the
   official total.
 - The built-in updater is experimental. v0.3.0 is the first release it can install, so this is its first real update. If it
