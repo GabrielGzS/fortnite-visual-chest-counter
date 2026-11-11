@@ -18,6 +18,9 @@ on small installations. The cause of one intermittent `disk_error` while prepari
 it. v0.2.3's own code performs the first real update, so a defect in it cannot be fixed by the new package, and that release may need a
 manual install.
 
+Before v0.3.0's release the real test was reviewed and not run, because the cause of the crash is unknown and this PC has no safe isolation. See
+"The blue screen" in [M9_VALIDATION.md](M9_VALIDATION.md).
+
 ## In the app
 
 Shortly after opening, the app checks for a new version in the background, unless that is turned off in Settings > Updates. A failed

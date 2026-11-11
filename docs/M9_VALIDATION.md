@@ -1,14 +1,14 @@
 # M9 validation record
 
-Date: 2026-11-11. Branch `dev/v0.3.0`. Tests and rc1 were built from `e44a7e4`. Nothing was pushed, merged, tagged or
-published, and the production keys were not used.
+Date: 2026-11-11. Branch `dev/v0.3.0`. The full run and rc1 are from `e44a7e4`; rc2, the candidate for hands-on testing, is
+from `a77847b`. Nothing was pushed, merged, tagged or published, and the production keys were not used.
 
 ## Not verified
 
 - **No person has used this build, and no real OBS Virtual Camera or live Fortnite session has run through it.** See
   [M9_ACCEPTANCE_TEST.md](M9_ACCEPTANCE_TEST.md).
-- **A real in-app update from v0.2.3 has not been run**, and neither has a real rollback. Extract-over upgrades were
-  tested instead. The kit is prepared, but it signs a copy of the RC with a test key, so it needs the maintainer's approval.
+- **A real in-app update from v0.2.3 has not been run**, and neither has a real rollback or retry. It is blocked: see "The
+  blue screen" below. Extract-over upgrades were tested instead.
 - **No real footage has produced a Complete match.** The English clip ends Partial and the Portuguese one Unconfirmed,
   both as designed. The Complete path is proven on synthetic timelines only.
 - OBS Windowed Projector with a real capture card, and OBS WebSocket with a real OBS on a second PC, remain untested.
@@ -43,7 +43,29 @@ rc1 is `build_out\v0.3.0-rc1\Fortnite-Visual-Chest-Counter-v0.3.0.zip`, 155.9 MB
 module and template is byte-identical to the repository, the real launcher started the real window, and no development
 files or user data are shipped.
 
-`packaging/README.html` changed after rc1 (streamer audit below), so rc1's offline guide is out of date.
+rc1 is superseded by rc2.
+
+## rc2
+
+`build_out\v0.3.0-rc2\Fortnite-Visual-Chest-Counter-v0.3.0.zip`, 155.9 MB, unsigned, SHA-256
+`a08783ad4b7ffd62527a584841550e5d1984d9b2ee11ec62776bfa34a1379fa3`.
+
+Compared with rc1, exactly five files differ: `README.html`, `gui/app.py`, `input/video_sources.py` and those two modules'
+compiled copies. The full-video comparison was not repeated: neither change is on its path, because `simulate` does not use
+`LiveSource`, and the frozen detector files are still identical to `032df3b`.
+
+| Check on rc2 | Result |
+|---|---:|
+| Actual zip from a clean folder: contents, guide, launcher, real counting, corrections, a real kill | 27 of 27 |
+| Release gate on contents, sums and keys, with no signature involved | Pass |
+| v0.2.3's own shipped code reading rc2's layout, unpacking nothing | Accepted |
+| Affected suites, including 23 new stall checks | All pass |
+| Affected mutations, including 19 new stall mutations | All caught |
+| Real worker and real FFmpeg, stalled 15 s, tracking off and on | Warned at 10 s, cleared on return, reported about 15 s missed, OBS text untouched |
+| Screenshots at 1120x800 and 920x640 | Nothing cut off |
+
+At the minimum window size the Analytics table scrolls sideways when labels are long, by up to 170 pixels. The default size
+does not. The first fix cut off the Not a match links by a few pixels; the screenshots caught it before rc2 was handed over.
 
 ## Real runs of the package
 
@@ -103,26 +125,48 @@ for 15 s:
 - The app has no pause feature, recorded video reaches end of file, and Stop exits the wait.
 
 **Assumed, not reproduced.** Which real inputs do this. A capture card losing signal or being unplugged may stall this way.
-OBS Virtual Camera may instead send a placeholder picture when stopped, which would be a different symptom. Test 8 of the
-acceptance plan will show which.
+OBS Virtual Camera may instead send a placeholder picture when stopped, which would be a different symptom and would not
+trigger the warning. Test 8 of the acceptance plan will show which.
 
-**Severity: medium.** The number stays correct for what was seen, but chests during a stall are lost with nothing to say so.
+**Fixed in rc2**, in the idle branch of `LiveSource.frames()` only:
 
-**Proposed fix, not implemented.** In the idle branch of `LiveSource.frames()` only:
+- After 10 s without a new picture, the app says it is not receiving video, and does not guess why. When pictures return, the
+  warning clears and it reports how long was not received and that chests may be missing.
+- The Dashboard shows **No video**, and the old rate is cleared.
+- No restart and no detector change. The check runs only when no frame is delivered, so it cannot affect a counted frame. The
+  OBS text is not touched.
+- It covers live inputs only, not the `file` source. `video` and `simulate` use a different class. End of file and Stop leave
+  the loop before the check, and a hitch under 10 s stays silent.
 
-- After 10 s without a picture, warn once. When pictures return, say how long was not seen.
-- A new "no video" state shows on the Dashboard, and the frozen rate is cleared.
-- No restart and no detector change. The check runs only when no frame is delivered, so it cannot affect a counted frame.
-- It is enabled only for live inputs, not the `file` source. `video` and `simulate` use a different class. End of file and
-  Stop leave the loop before the check. Startup is already covered by `open()`, and a hitch under 10 s stays silent.
+## The blue screen
+
+**What the evidence shows.** One bugcheck in the log: `0x101` CLOCK_WATCHDOG_TIMEOUT at 00:39 on 2026-11-09, during the first
+real staging run. Its parameters name logical processor 18. It means one CPU stopped answering clock interrupts.
+
+- No WHEA hardware errors are logged, and no disk errors around that time.
+- The CPU is an i9-13900KF, on microcode `0x12B` and a BIOS from October 2024. VirtualBox is installed and VMware kernel
+  drivers were loaded when last checked.
+- Windows has not rebooted since. That span includes today's full test runs, 3 package builds and 7 full unpacks of the
+  5,000-file package with real-time scanning on, with no crash.
+
+**What it does not show.** The cause. A normal program cannot directly stop a CPU answering interrupts, which points to the CPU,
+firmware or a kernel driver, with heavy work as a possible trigger. That is an inference, not a finding. The minidump
+(`C:\Windows\Minidump\110926-11218-01.dmp`) needs administrator rights and was not read. Today's unpacks are not the same
+operation as staging, which also reads everything back and runs the staged program.
+
+**Decision: not run.** There is no credible explanation or mitigation yet, and no safe isolation on this PC. The only VM is
+Ubuntu, which cannot run the Windows updater, and Windows 11 Home has no Sandbox. A Windows VM would protect data but not the
+host from this kind of crash, because the guest runs on the same CPU. No test key was generated for this.
+
+**What is covered without staging.** The updater code is unchanged since v0.2.3, passes 102 install checks on small synthetic
+installations, and v0.2.3's shipped code accepted rc2's layout. Extract-over upgrades passed in both directions.
 
 ## Known issues
 
 | Severity | Issue |
 |---|---|
-| Medium | Stale status during an input stall (above) |
-| Medium | Real in-app update and rollback never run; a defect in v0.2.3's installer may force a manual install |
+| Medium | Real in-app update, rollback and retry never run; a defect in v0.2.3's installer may force a manual install |
 | Medium | No real full match through match tracking yet |
-| Low | At the minimum window size, the Analytics table cuts off its Started, Duration, CERTAIN and APPROX columns. Fine at the default size |
+| Low | At the minimum window size, the Analytics table scrolls sideways when labels are long |
 | Low | While counting, a correction applies on the next frame, so during a stall it waits |
 | Low | The updater's backup covers saved counts and settings, not `state\history\`. Updates leave that folder in place |
