@@ -1,12 +1,14 @@
 # M9 validation record
 
-Date: 2026-11-11. Branch `dev/v0.3.0`. The full run and rc1 are from `e44a7e4`, rc2 from `a77847b`, rc3 from `116e5a9`, and rc4,
-the current candidate, from `20447a6`. Nothing was pushed, merged, tagged or published, and the production keys were not used.
+Date: 2026-11-11. Branch `dev/v0.3.0`. The full run and rc1 are from `e44a7e4`, rc2 from `a77847b`, rc3 from `116e5a9`, rc4 from
+`20447a6`, and rc5, the current candidate, from `fd7bc0f`. Nothing was pushed, merged, tagged or published, and the production keys were not used.
 
 ## Not verified
 
-- **rc4 has not been used by hand yet.** rc2 was, in a real session; see "M9F" below and
+- **rc5 has not been used by hand yet.** rc2 and rc4 were, in real sessions; see "M9F" and "M9G" below and
   [M9_ACCEPTANCE_TEST.md](M9_ACCEPTANCE_TEST.md).
+- **No footage has a full-screen map or the inventory,** so a switch away from the game moves time out of play but never makes a
+  match Partial. See "M9G".
 - **A real in-app update from v0.2.3 has not been run**, and neither has a real rollback or retry. It is blocked: see "The
   blue screen" below. Extract-over upgrades were tested instead.
 - **Only one real match has been recognised as Complete** so far, in the maintainer's rc2 session. The reference clips end
@@ -185,8 +187,8 @@ measurable worker cost. Drawing takes 0.26 to 0.89 ms per picture, under 0.5% of
 
 **How the rates are calculated** (read from `match_analytics.py`, unchanged). Both divide chests credited during active play by
 active seconds. Active time counts only usable pictures while alive on the bus or map, so frozen, black and spectating time is
-out. Manual corrections are never included. The main rate uses complete and partial matches and needs 5 minutes in total. The
-complete-only rate has no minimum. A single match's rate needs 1 minute: the 5-minute rule is for a total, and would hide the
+out. Manual corrections are never included. The main rate used complete and partial matches and needed 5 minutes in total; the
+complete-only rate had no minimum. *Changed in M9G: the main rate is complete matches only, with the 5-minute minimum.* A single match's rate needs 1 minute: the 5-minute rule is for a total, and would hide the
 live figure for most of a match.
 
 **Settings audit.** No published version ever wrote `[match]`, so an upgrade from v0.2.3 has made no choice and gets the new
@@ -196,7 +198,8 @@ default. An explicit `off` or `shadow` is kept. An invalid value falls back to `
 
 The rc2 session shows the state machine already handles this. Match 1 went from play straight to CONNECTING at 05:09:22 and
 closed as Partial with 319 s of play and 28 chests. Only its label was unhelpful ("Left or not seen"). It now reads *Left the
-match*, *Returned to lobby* or *Next match began*, from what was seen next. It stays Partial, and never claims why.
+match*, *Returned to lobby* or *Next match began*, from what was seen next, and never claims why. *Changed in M9G: with its start seen,
+such a match is Complete.*
 
 ### The 9-second match
 
@@ -214,7 +217,7 @@ It is not a duplicate or a session boundary: it is mid-run, holds no chests, and
 At the other two game starts in this session the text was read first, so this is a race. It counted as Partial because the
 WAITING FOR PLAYERS text arrived just before it closed and supplied the English evidence.
 
-**Proposed fix, not implemented, awaiting review.** Use evidence, not a delay. WAITING FOR PLAYERS only appears before a game, so
+**Proposed fix, implemented in M9G.** Use evidence, not a delay. WAITING FOR PLAYERS only appears before a game, so
 when it closes a match that opened on a health bar straight after a loading screen, with no chest counted in it, that record was the
 waiting island. It is marked Unconfirmed, which keeps it in history for diagnostics and out of every statistic. Nothing waits, so
 a real reconnect opens exactly when it does today. About 8 lines in `match_state.py`.
@@ -286,11 +289,119 @@ refused as a whole ("Unexpected package contents: START_HERE.md"). The same text
 never replace anything. They now say to copy `state` and `config.toml` across. The earlier upgrade test copied files over directly,
 so it does prove the data carries over, but it was not that documented step.
 
+## M9G: final recognition fixes and rc5
+
+**rc5:** `build_out\v0.3.0-rc5\Fortnite-Visual-Chest-Counter-v0.3.0.zip`, 155.8 MB, unsigned, SHA-256
+`9d953e0661322e8849902bdaf9cb730766aab80f5fefd09c4258d3d3a0f45765`, built from `fd7bc0f`. It keeps rc4's Explorer fix.
+
+From the maintainer's hands-on test on a streamer's broadcast (captures `20261111_071106`, a private copy used here). Commits `7f50f5b`,
+`2ab3cdd`, `e3ed346`, `3d09066` and `fd7bc0f`. The detector, its templates and the updater are unchanged.
+
+### Why that stream had no complete match and 0 CERTAIN
+
+The streamer draws the HUD at about 0.78x. WAITING FOR PLAYERS and the bus countdown were on screen, but the templates scored under 0.3,
+so every game read as *joined late*, and the waiting island counted as play. All 83 chests were small-HUD pop-ups, which are APPROX only
+by design, so 0 CERTAIN was correct.
+
+**Fix:** one more template at that size for each of the two sentences, through the existing signal table. No new matcher.
+
+| Method, on 2,358 frames | Small HUD, waiting / bus | Highest on wrong screens | Cost, both cues |
+|---|---|---|---|
+| Normal template only | 0.17 to 0.19 / 0.14 to 0.17 | 0.21 / 0.27 | 0.17 ms |
+| **Small-size template (chosen)** | **0.92 to 0.98 / 0.93 to 0.99** | **0.34 / 0.30** | **+0.11 ms** |
+| Scale search, plain | 0.67 to 0.70 / 0.53 to 0.57 | 0.35 / 0.36 | 1.36 ms |
+| Scale search, blurred | 0.82 to 0.86 / 0.82 to 0.85 | 0.63 / 0.56 | 3.44 ms |
+
+### Complete, by what was observed
+
+A match is Complete when its start was seen and the player's part in it ended on screen, for any reason: placed, won, eliminated and
+left, or back to the menus. There is no minimum length. Partial means the start or the end was not seen. Video stopping is not an
+ending. How it ended stays a separate field and is never guessed. A record the countdown proves was the waiting island is Unconfirmed,
+with no timer involved (the proposal in "The 9-second match" above).
+
+### Is the game still on screen?
+
+The maintainer asked whether the minimap, compass and hotbar could tell gameplay from something else. Average edges over many seconds
+of play leave only the fixed shapes. Templates were built from one source per HUD size and judged on the others.
+
+| Piece of the HUD | Browser pages, highest | Held-out play, 10th percentile | Verdict |
+|---|---:|---:|---|
+| Stat icons beside the minimap | 0.19 | 0.54 | Used |
+| Compass arrow | 0.00 | 0.41 | Used |
+| Minimap frame | 0.28 | 0.39 | Left out: too close |
+| Map pin | 0.65 | 0.41 | Left out: browser pages score higher |
+| Hotbar | 0.18 | 0.16 | Left out: it moves with the selected slot |
+
+With the two used pieces: held-out play 162 of 162 seen, browser pages 0 of 36, waiting island 55 of 58. Over 1,447 s inside matches the
+longest stretch with nothing of the game in view was 3 s; the two browser pages ran 18 s and 20 s. The jump in the picture when the page
+appeared (76) is within ordinary play (99th percentile 66) and below a real loading screen (82), so it is not used. Lines 0.8x to 1.25x
+of the chosen ones give the same results.
+
+What it does: the HUD keeps a match alive without a health bar, and after 10 s with nothing in view that time moves from play to
+uncertain. It never opens or closes a match, because the waiting island has the same HUD.
+
+**Not done, deliberately:** making such a match Partial. No footage contains a full-screen map or the inventory, so it cannot be shown
+that they would be told apart from a browser page. Acceptance test 26 asks for that footage.
+
+### Before and after on the real clip
+
+| | Before | After |
+|---|---|---|
+| Waiting island | Read as play, joined late at 1769.5 | Read as pre-game at 1766.5 |
+| Play starts | 1765.5 | 1785.5 |
+| Start seen | No | Yes |
+| Active time | 54 s | 34 s |
+| Quality | Partial | Partial, correctly: the recording stops mid-match |
+| The clip's one chest (1818.1) | In that match | In that match |
+| Browser page inside an open match | 151 s active, 2 s unclear | 135 s active, 18 s unclear, "game not in view" |
+
+The last row first showed no change. A still page reads as a frozen picture now and then, which restarted the count, so 18 s split into
+9 s and 6 s. Fixed in `fd7bc0f`, with a test copying the real sequence.
+
+### Interface
+
+Overview and Game: CERTAIN left, APPROX right, same colours, both highlight on an increase. Game has one live rate, APPROX per minute.
+"Since counting started" replaces "Since the app joined this match". Console keeps CERTAIN and APPROX under Mark moment, and chest types
+have their own colours. The main Analytics rate uses complete matches only and needs 5 minutes of active play across them, as total
+chests over total minutes. **Including partial matches** is shown apart and never stands in for it.
+
+### Validation
+
+| Check | Result |
+|---|---:|
+| Test suites (26) | 1,280 of 1,282; the other 2 are timing budgets that failed under load and passed on rerun |
+| Mutations (11 runners) | 418 of 418 caught |
+| Cue evaluation | Accepted: every signal passes, p99 8.9 ms against a 10 ms budget |
+| HUD evaluation, held-out footage | Accepted (above) |
+| Frozen detector files against `032df3b` | Identical |
+| Full video, repository and **packaged**, tracking on | Byte-identical to M0 (6 and 24 events) |
+| Recorded timelines | Same match events as before |
+| rc5 from a clean folder | 24 of 25: the known last-second gap below |
+| Windows Explorer's engine, folder at the edge of the budget | 5,036 files, none missing or damaged, longest path 257, then counted |
+| Screenshots at 1120x800 and 920x640, packaged | Nothing cut off |
+
+The one failed package check compares the final live status with history. The sixth chest is at 83 s of an 85 s run and is finalised
+after the last status, the case explained under "M9F" above. History and Analytics have all 6.
+
+**Timing under load.** Fortnite was running at about 65% CPU throughout. Measured with old and new code interleaved, tracking costs
+0.26 to 0.46% of one core on real footage (before: 0.24 to 0.40%). The worst painted frames cost 0.82% with a health bar and 0.87%
+without, against a 1% budget. Inside the test suite the same measurement read up to 0.3 points higher, from what earlier tests leave
+in the process, so the budget tests now measure in a fresh one with the same line. Two exact savings: the HUD is read only when no health
+bar, chest or text shows the game, and a box with too few edges is not compared.
+
+### Limits
+
+- The small-HUD templates come from one streamer; other sizes are untested.
+- No footage shows an end screen at the small HUD, so it is not known whether YOU PLACED is read there. Leaving through the menus
+  completes a match either way.
+- Short Complete matches now exist, so the per-match minimum for a rate in Recent matches (1 minute) matters more.
+
 ## Known issues
 
 | Severity | Issue |
 |---|---|
-| Medium | False short match on the waiting island when the health bar is read before the countdown text. Fix proposed, awaiting review |
+| Medium | A switch away from the game is left out of play time but does not make the match Partial, until footage of the full-screen map and inventory exists |
+| Low | Small-HUD start text has been checked on one streamer only |
 | Medium | Real in-app update, rollback and retry never run; a defect in v0.2.3's installer may force a manual install |
 | Low | At the minimum window size, the Analytics table scrolls sideways when labels are long |
 | Low | While counting, a correction applies on the next frame, so during a stall it waits |
