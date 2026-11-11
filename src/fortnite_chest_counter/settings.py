@@ -67,9 +67,9 @@ DEFAULTS = {
         "obs_dir": "obs_output",
     },
     "logging": {
-        "enabled": True,
-        "log_candidates": True,                 # also log events that were NOT counted
-        "save_snapshots": True,                # save a small PNG of the popup area for every popup event (for reporting misses)
+        "enabled": False,
+        "log_candidates": False,                # opt in to events that were NOT counted
+        "save_snapshots": False,               # opt in to small popup PNGs for reporting misses
         "dir": "logs",
     },
     "capture": {

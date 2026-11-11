@@ -299,6 +299,7 @@ def test_snapshots_are_saved_only_when_enabled_and_never_logged_as_pixels():
     import numpy as np
     with tempfile.TemporaryDirectory() as tmp:
         cfg = tmp_config(tmp)
+        cfg["logging"]["enabled"] = True
         cfg["logging"]["save_snapshots"] = True
         s = chest_counter.CounterSession(cfg)
         ev = dict(event(False, True), _snapshot=np.full((6, 9, 3), 200, np.uint8))
@@ -326,9 +327,10 @@ def test_manual_adjust_keeps_invariant():
 
 def test_first_run_creates_folders_and_zero_files():
     with tempfile.TemporaryDirectory() as tmp:
-        code, text = run_main(["show"] + args_for(tmp))
+        code, text = run_main(["show", "--config", str(Path(tmp) / "missing.toml")] + args_for(tmp))
         assert code == 0, text
         assert (Path(tmp) / "state").is_dir() and (Path(tmp) / "logs").is_dir()
+        assert not list((Path(tmp) / "logs").iterdir())  # preflight creates folders, but logging is opt-in
         assert (Path(tmp) / "obs_output" / "certain_chests.txt").read_text(encoding="utf-8") == "CERTAIN OPENED CHESTS: 0\n"
         assert (Path(tmp) / "obs_output" / "approximate_chests.txt").read_text(encoding="utf-8") == "APPROX. OPENED CHESTS: 0\n"
         assert (Path(tmp) / "obs_output" / "chest_status.txt").exists() and (Path(tmp) / "obs_output" / "last_chest.txt").exists()
@@ -598,12 +600,13 @@ def test_console_close_is_a_clean_stop():
         return
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
+        (tmp / "config.toml").write_text('[logging]\nenabled = true\n', encoding="utf-8")
         video = tmp / "black.mp4"
         subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=30", "-t", "40",
                         "-c:v", "mpeg4", str(video)], check=True)
         env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent / "src"))
         child = subprocess.Popen([sys.executable, "-m", "fortnite_chest_counter", "live", "--source", "file", "--video", str(video),
-                                  *args_for(tmp)], cwd=tmp, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  "--config", str(tmp / "config.toml"), *args_for(tmp)], cwd=tmp, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                  creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
         try:
             state_file = tmp / "state" / "chest_state.json"
@@ -817,7 +820,9 @@ def _run_with_answers(argv, answers):
 
 def test_set_count_sets_approx_and_certain_zero_and_updates_obs():
     with tempfile.TemporaryDirectory() as tmp:
-        code, text = run_main(["set-count", "150"] + args_for(tmp))
+        config = Path(tmp) / "config.toml"
+        config.write_text('[logging]\nenabled = true\n', encoding="utf-8")
+        code, text = run_main(["set-count", "150", "--config", str(config)] + args_for(tmp))
         assert code == 0 and "Starting count set" in text
         st = _state_of(tmp)
         assert (st["certain"], st["approximate"]) == (0, 150)

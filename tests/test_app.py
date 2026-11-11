@@ -171,12 +171,14 @@ def test_gui_worker_runs_live_and_stops_cleanly_on_request():
     stdin = sys.stdin
     try:
         with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "config.toml"
+            config.write_text('[logging]\nenabled = true\n', encoding="utf-8")
             sys.stdin = os.fdopen(read, "r")
             threading.Timer(1.5, lambda: os.write(write, b"stop\n")).start()
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 code = C.main(["live", "--gui", "--state", str(Path(tmp) / "s.json"), "--obs-dir", str(Path(tmp) / "o"),
-                               "--log-dir", str(Path(tmp) / "l")])
+                               "--log-dir", str(Path(tmp) / "l"), "--config", str(config)])
             log = [json.loads(l) for l in next((Path(tmp) / "l").glob("*.jsonl")).read_text(encoding="utf-8").splitlines()]
     finally:
         sources.make_source, paths.ffmpeg_executable, sys.stdin = real_make, real_ff, stdin
@@ -246,6 +248,7 @@ def test_hdr_capture_can_publish_a_preview_without_detector_frames():
 def test_set_counts_and_reset_from_the_app():
     with tempfile.TemporaryDirectory() as tmp:
         cfg = tmp_cfg(tmp)
+        cfg["logging"]["enabled"] = True
         session = C.set_counts(cfg, 3, 150)
         assert (session.state["certain"], session.state["approximate"]) == (3, 150)
         assert C.load_state(cfg["state"]["path"])["approximate"] == 150

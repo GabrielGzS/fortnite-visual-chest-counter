@@ -146,20 +146,19 @@ class FrenchQualifiedPopups:
                           for kind, quantity, name in ((RARE, 1, "rare"), (RARE, 2, "x2"),
                                                       (SPRITE, 1, "sprite"))]
         self.exp = np.load(folder / "stack_exp.npy")
-        self.last_seen = None
+        self.exp_blurred = V.blur_template(self.exp, SIGMA)
+        self.missing_since = None
+        self.missing_frames = 0
         self.rows = []
         self.totals = Counter()
         self.candidate = None
         self.frames = 0
 
     def observe(self, t, roi):
-        if self.last_seen is not None and t - self.last_seen > 0.55:
-            self.rows = []
-            self.totals.clear()
-            self.candidate = None
-            self.frames = 0
-        # The qualifiers and multiplier appear on the right side of the XP notification.
-        bright = roi[33:124, 125:225].min(axis=2)
+        # XP groups shift horizontally as their longest line changes; keep the full
+        # qualified word, including a sprite suffix at the right edge of the group.
+        y0, x0 = 25, 75
+        bright = roi[y0:140, x0:250].min(axis=2)
         peaks = []
         for level in (155, 178):
             mask = (bright > level).astype(np.float32)
@@ -167,23 +166,37 @@ class FrenchQualifiedPopups:
                 continue
             for kind, quantity, template in self.templates:
                 for score, y, x in popup_lines.correlation_peaks(mask, template, 0.76):
-                    if 5 <= x <= 45:
-                        peaks.append((score, y + 36, x + 139, kind, quantity))
+                    peaks.append((score, y + y0 + 3, x + x0 + 14, kind, quantity))
         rows = []
         for row in sorted(peaks, reverse=True):
             if all(abs(row[1] - other[1]) >= 6 for other in rows):
                 rows.append(row)
         if not rows:
+            self.candidate, self.frames = None, 0
+            self.missing_frames += 1
+            if self.missing_since is None:
+                self.missing_since = t
+            elif self.missing_frames >= VOTES_MIN and t - self.missing_since >= 0.55:
+                # Only an observed disappearance re-arms the group. A slow frame
+                # or paused capture alone cannot make unchanged X2 lines new.
+                self.rows = []
+                self.totals.clear()
             return []
+        self.missing_since = None
+        self.missing_frames = 0
         if not self.totals:
             top = min(row[1] for row in rows) - 3
-            # Require the XP heading above a new group before owning the individual lines.
-            exp = roi[max(0, top - 23):top - 1, 157:207]
+            # Ammo/upgrade notifications can sit between the XP heading and the
+            # first chest. Anchor the heading search to the detected text group,
+            # rather than assuming it immediately precedes a chest at a fixed x.
+            left = max(0, min(row[2] for row in rows) - 29)
+            right = min(roi.shape[1], max(row[2] for row in rows) + 70)
+            exp = roi[max(0, top - 90):top - 1, left:right]
             if exp.shape[0] < self.exp.shape[0] or max(
-                    V.best_template_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp)[0]
+                    max(V.best_template_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp)[0],
+                        V.robust_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp_blurred, SIGMA))
                     for level in (135, 155)) < 0.60:
                 return []
-        self.last_seen = t
         counts = Counter()
         for _, _, _, kind, quantity in rows:
             counts[kind] += quantity

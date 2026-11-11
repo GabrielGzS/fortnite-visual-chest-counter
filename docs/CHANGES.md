@@ -7,10 +7,15 @@ changes; the pull request links here. Versioned release notes describe published
 
 - Add French HUD detection and multi-frame classification for normal, Rare and Sprite chests. Deduplicate
   overlapping readings and retain an unknown type for ambiguous openings.
+- Follow French qualified lines when notifications reflow around ammo/upgrade messages. Keep the XP gate and three
+  stable readings, retain quantities across capture pauses, and rearm only after an observed disappearance.
+  Keep a qualified chest's known type independent of another generic line as the stack moves.
 - Keep one capture per app. Improve HDR-to-SDR handling and preview delivery, keep the original SDR colour path,
   and cap live preview at 5 FPS independently of the detector's 5/10/15 FPS settings.
 - Close video pipes and reap stopped FFmpeg encoders and decoders, including command-wrapper shutdown, so recording
   and review cleanup does not race Windows file locks. Keep the console stop path nonblocking and bound stop waits.
+- Replay diagnostics using the original recorded frame intervals. Keep video playback positions separate from the
+  detector clock, so irregular live capture does not change temporal confidence or deduplication rules on replay.
 - Canonicalize process paths during update safety checks, so Windows short-name and junction aliases cannot hide
   a running program inside the runtime or staged package.
 - Separate confirmed openings, estimated-only openings and Total in the Dashboard. Use Total and the manual
@@ -40,6 +45,7 @@ changes; the pull request links here. Versioned release notes describe published
 The portable defaults mirror the verified setup in `config.example.toml`. Match automation and Auto mode are enabled,
 the app opens normally and closes to the tray, and the on-screen overlay is visible in screen sharing. Group sharing remains
 off. Automatic match reports also require a configured bot and enabled sharing.
+Session logs, candidate logs, detection snapshots and diagnostic video are all off by default and require opt-in.
 The example configuration is checked against the code defaults. Portable builds include no saved configuration,
 credentials, player names, counters, diagnostic recordings or sample match data.
 
@@ -52,6 +58,11 @@ credentials, player names, counters, diagnostic recordings or sample match data.
   Duo on both PCs. Automated tests exercised local history, mode selection, Discord publication and settings sync
   using simulated Discord responses.
 - App previews capture the current interface with sample data. The Discord leaderboard and profile previews are locally rendered simulations, with the leaderboard using the actual embed payload.
+- A further local HDR recording contains 9,168 frames. Both the unchanged baseline and the corrected full replay
+  count 31 openings; the visually checked burst is exactly four Rare chests and one Sprite chest, with no extra
+  count from ammo, fading notifications or inventory. One opening logged live is absent in both replays near a
+  weak glyph threshold in the standard MJPEG recording; this is not counted as a new detector regression or hidden
+  by lowering confidence thresholds. Static saved images additionally exercise the previously clipped X2 layouts.
 - Before release, repeat tests with an installed Windows build, HDR and SDR capture, Discord screen sharing and
   a live Host/Guest setup. Live performance and Discord delivery need separate verification.
 

@@ -14,6 +14,10 @@ live session (app or console) --[capture on]--> captures/<session>/  video + eve
 
 ## Using it
 
+Session logs, rejected-candidate logs, popup snapshots and diagnostic video recording are **off by default**.
+Enable only the diagnostics you need in Settings before reproducing a problem. Counts, saved state and OBS output
+continue updating with diagnostics off. Existing saved preferences are kept.
+
 * App: Dashboard -> **Diagnostic recording** (Off / only around my marks / around chest decisions and marks / whole
   session) - switchable while counting: the worker gets `capture <mode>` on its control pipe, the old recording finishes
   in a background thread (its encoder flush never holds up counting) and the new one starts in its own folder. Press

@@ -109,12 +109,12 @@ path = "state/chest_state.json"
 obs_dir = "obs_output"
 
 [logging]
-enabled = true
+enabled = false
 # Also record detections that were NOT counted (useful when reporting a problem).
-log_candidates = true
+log_candidates = false
 # Save a small picture of the pop-up area for every pop-up the counter considered (counted or not) into
 # logs/snapshots/. Turn on if you want to report missed or wrong chests: the pictures show exactly what it saw.
-save_snapshots = true
+save_snapshots = false
 dir = "logs"
 
 [capture]

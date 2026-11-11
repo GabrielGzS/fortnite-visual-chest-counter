@@ -486,7 +486,7 @@ Copy `config.example.toml` to `config.toml` (next to `chest_counter.py`), or pas
 | | `combined_status_format` | `{certain} certain • ~{approximate} estimated` | `chest_status.txt` line; placeholders `{certain}` `{approximate}` |
 | | `use_thousands_separator` | true | `1,232` instead of `1232` |
 | `[state]` | `persist`, `path`, `obs_dir` | true, `state/chest_state.json`, `obs_output` | counter state file and OBS text folder |
-| `[logging]` | `enabled`, `log_candidates`, `dir` | true, true, `logs` | JSONL session log; `log_candidates` also records events that were not counted |
+| `[logging]` | `enabled`, `log_candidates`, `save_snapshots`, `dir` | false, false, false, `logs` | Opt-in JSONL session log, rejected candidates and popup PNGs; counting and OBS output work with all three off |
 | `[live]` | `source`, `device`, `monitor`, `status_interval_seconds` | `obs-camera`, `OBS Virtual Camera`, 1, 5 | default live source and its options |
 
 Detector internals (template thresholds, windows, weights) deliberately stay constants in the code.

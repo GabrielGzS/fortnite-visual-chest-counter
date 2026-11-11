@@ -34,6 +34,29 @@ def event(second, *, counted=True):
             "approx_counted": counted, "reason": "fixture", "_snapshot": np.full((3, 4, 3), 123, np.uint8)}
 
 
+def test_no_config_defaults_keep_diagnostics_off_without_disabling_counts(tmp_path, monkeypatch):
+    config = tmp_path / "missing.toml"
+    monkeypatch.setattr(settings, "DEFAULT_CONFIG_PATH", config)
+    cfg, _, warnings = settings.load_config(None, {
+        ("state", "path"): str(tmp_path / "state.json"),
+        ("state", "obs_dir"): str(tmp_path / "obs"),
+        ("logging", "dir"): str(tmp_path / "logs"),
+    })
+    assert not warnings and not config.exists()
+    assert all(cfg["logging"][key] is False for key in ("enabled", "log_candidates", "save_snapshots"))
+    assert cfg["capture"]["mode"] == "off"
+    session = counter.CounterSession(cfg)
+    # Both a rejected candidate and a counted popup carry snapshot pixels: neither
+    # may create diagnostics when the user has not opted in.
+    session.apply([event(1, counted=False), event(3)], 4, quiet=True)
+    assert session.log.path is None and not (tmp_path / "logs").exists()
+    assert not list(tmp_path.rglob("*.jsonl")) and not list(tmp_path.rglob("*.png"))
+    assert session.state["certain"] == session.state["approximate"] == 1
+    assert json.loads((tmp_path / "state.json").read_text())["certain"] == 1
+    assert (tmp_path / "obs" / "certain_chests.txt").read_text() == "CERTAIN OPENED CHESTS: 1\n"
+    assert (tmp_path / "obs" / "approximate_chests.txt").read_text() == "APPROX. OPENED CHESTS: 1\n"
+
+
 def test_saved_logging_switch_stops_files_and_snapshots_then_resumes_same_session(tmp_path, monkeypatch):
     config, session, watcher = make_session(tmp_path)
     monkeypatch.setattr(estimator, "SAVE_SNAPSHOTS", True)

@@ -70,6 +70,7 @@
 <p>Group updates use per-client stagger and small random variation. Discord retry delays pause submissions and shared-board requests together; pending results remain queued until delivery is possible.</p>
 
 <h2 id="diagnostics">Diagnostics and maintenance</h2>
+<p>Session logs, rejected-candidate logs, popup snapshots and diagnostic recording are <b>off by default</b>. Enable them in Settings only when needed. Counts, saved state and OBS output continue updating with diagnostics off. Existing saved preferences are kept.</p>
 <p>Use <b>Help &amp; diagnostics → Run diagnostics</b>, then <b>Copy report</b> when reporting a problem. Enable diagnostic recording in Capture settings to keep footage around a miss. Press <b>Ctrl+Alt+M</b> to mark the moment and use <b>Review captures</b> to replay it.</p>
 <p><b>Clean logs and captures</b> removes generated diagnostics after counting stops. <b>Settings → Reset all</b> restores that page's defaults. Counts, profiles, history, overlay and Discord setup are kept.</p>
 <p>The app stores configuration, counter state and diagnostic files beside the executable. Keep <code>state</code> and <code>config.toml</code> when updating. Packaged builds can check for updates and offer a download limit.</p>

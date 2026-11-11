@@ -858,7 +858,8 @@ class ChestEstimator:
             reason += "; NOT counted"
         extra = {"_snapshot": p["roi"]} if "roi" in p else {}
         kind, confidence, type_evidence = self._label(p.get("slot"))
-        if kind == chest_types.UNKNOWN and p.get("french_type", chest_types.UNKNOWN) != chest_types.UNKNOWN:
+        qualified_type = p.get("qualified_french") and p.get("french_type") in chest_types.KNOWN
+        if qualified_type or (kind == chest_types.UNKNOWN and p.get("french_type", chest_types.UNKNOWN) != chest_types.UNKNOWN):
             kind, confidence, type_evidence = p["french_type"], 1.0, {"read": "aligned French XP line", "frames": 3}
         extra.update(chest_type=kind, type_confidence=confidence, type_evidence=type_evidence)
         if scaled is not None:
@@ -877,7 +878,9 @@ class ChestEstimator:
                 "certain_counted": certain, "approx_counted": approx, "reason": reason}
         slot = p.get("slot")
         tracker = self.trackers.get(slot[0]) if slot else None
-        if approx and tracker is not None and tracker.active and tracker.run == slot[1]:
+        # A qualified line already identifies this particular chest. Generic COFFRE
+        # tracking can follow another row as the stack reflows and must not relabel it.
+        if approx and not qualified_type and tracker is not None and tracker.active and tracker.run == slot[1]:
             self.open_labels.append((event, slot))          # its pop-up is still on screen: the label may still improve
         return event
 
