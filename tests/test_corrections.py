@@ -721,8 +721,11 @@ def test_replaced_buttons_do_not_stay_on_screen():
 def test_the_longest_labels_are_not_cut_off():
     from PySide6.QtWidgets import QHeaderView
     with G.window() as w:
-        header = w.win.analytics.table.horizontalHeader()
-        assert all(header.sectionResizeMode(column) == QHeaderView.ResizeToContents for column in (4, 5, 6))
+        page = page_with_matches(w)
+        header = page.table.horizontalHeader()
+        assert all(header.sectionResizeMode(column) == QHeaderView.ResizeToContents for column in (4, 5))
+        last = len(page.COLUMNS) - 1
+        assert all(page.table.columnWidth(last) >= action(page, row).sizeHint().width() for row in range(page.table.rowCount())), page.table.columnWidth(last)
 
 
 def test_a_failed_save_is_explained():

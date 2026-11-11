@@ -1800,8 +1800,9 @@ class AnalyticsPage(QWidget):
         self.table.setSelectionMode(QAbstractItemView.NoSelection)
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        for column in (4, 5, 6):                                # Quality, Ending and the action: their text must never be cut off
+        for column in (4, 5):                                   # Quality and Ending: their text must never be cut off
             self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(len(self.COLUMNS) - 1, QHeaderView.Fixed)     # sized to its buttons: Qt's own sizing ignores them
         self.table.setMinimumHeight(170)
         layout.addWidget(self.table, 1)
 
@@ -1872,6 +1873,7 @@ class AnalyticsPage(QWidget):
             if old is not None:
                 old.hide()
         self.table.setRowCount(len(s.recent))
+        widest = 0
         for row, match in enumerate(s.recent):
             seen = duration(match.duration_seconds)
             more = "+" if match.chests_may_be_missing else ""
@@ -1888,6 +1890,9 @@ class AnalyticsPage(QWidget):
                             tip="Put this match back in your statistics" if match.excluded else "Leave this out of your statistics. Nothing is deleted, and you can restore it.",
                             on_click=lambda _checked=False, m=match: self.set_not_a_match(m, not m.excluded))
             self.table.setCellWidget(row, len(self.COLUMNS) - 1, action)
+            widest = max(widest, action.sizeHint().width())
+        if widest:
+            self.table.setColumnWidth(len(self.COLUMNS) - 1, widest + 24)
 
     def set_not_a_match(self, match, flag):
         """A new correction row: the match itself, its chests and your totals are not touched, and it can always be restored."""

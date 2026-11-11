@@ -66,7 +66,8 @@ MUTATIONS = [
     ("GUI", "(\"Not a match\", theme.DIM) if match.excluded else QUALITY_LOOK[match.quality]", "QUALITY_LOOK[match.quality]", "test_not_a_match_updates_the_statistics"),
     ("GUI", "        except OSError as error:\n            show_error(self, f\"The correction could not be saved ({error}).\")\n            return\n        self.refresh()", "        except ZeroDivisionError as error:\n            return\n        self.refresh()", "test_a_failed_save_is_explained"),
     ("GUI", "            if old is not None:\n                old.hide()\n", "            pass\n", "test_replaced_buttons_do_not_stay_on_screen"),
-    ("GUI", "        for column in (4, 5, 6):                                # Quality, Ending and the action: their text must never be cut off\n            self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)\n", "", "test_the_longest_labels_are_not_cut_off"),
+    ("GUI", "        for column in (4, 5):                                   # Quality and Ending: their text must never be cut off\n            self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)\n", "", "test_the_longest_labels_are_not_cut_off"),
+    ("GUI", "        if widest:\n            self.table.setColumnWidth(len(self.COLUMNS) - 1, widest + 24)\n", "        if widest:\n            self.table.setColumnWidth(len(self.COLUMNS) - 1, 20)\n", "test_the_longest_labels_are_not_cut_off"),
     # the statistics
     ("A", "    for match in reversed(usable[-recent:]):", "    for match in reversed(kept[-recent:]):", "test_not_a_match_updates_the_statistics"),
     ("A", "    summary.manual_added, summary.manual_removed = manual[\"added\"], manual[\"removed\"]\n", "", "test_statistics_ignore_manual_corrections"),

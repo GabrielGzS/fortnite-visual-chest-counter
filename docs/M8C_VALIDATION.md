@@ -48,7 +48,7 @@ deleted, the chest rows and totals are untouched, and the match stays listed so 
 | Check | Result |
 |---|---:|
 | M8C corrections suite (`tests/test_corrections.py`) | 68/68 pass |
-| M8C targeted mutations (`research/corrections_mutations.py`) | 47/47 caught |
+| M8C targeted mutations (`research/corrections_mutations.py`) | 48/48 caught |
 | M8B analytics suite and mutations | 52/52, 43/43 |
 | M8A views suite and mutations | 27/27, 25/25 |
 | M7 UI suite and mutations | 50/50, 41/41 |
@@ -79,9 +79,10 @@ misses.
 **Real video, first 100 s.** `counter.py` changed in this milestone, so the comparison was repeated. Events, OBS files and
 saved counts were identical across `off`, `shadow` and `on`, and match the frozen M0 baseline.
 
-The visual review found two Analytics table bugs that tests could not: "Counting stopped" was cut off, and a replaced
-button stayed drawn in the corner. Both are fixed and now have tests. Screenshots are in `analysis_output/m8c/screens/`,
-which is git-ignored.
+The visual review found three Analytics table bugs that tests had not: "Counting stopped" was cut off, a replaced button
+stayed drawn in the corner, and the first fix then clipped the Not a match links, because Qt sizes a column from cell text
+and ignores buttons. All three are fixed and now have tests. Screenshots are in `analysis_output/m8c/screens/`, which is
+git-ignored.
 
 Existing tests changed: M5's allowed-modules list gained `app.py`, M8B's Not a match test now expects the excluded
 match to stay listed, and the Dashboard inventory gained the new controls.
