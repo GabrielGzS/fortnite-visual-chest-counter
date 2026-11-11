@@ -26,6 +26,8 @@ These are captures of the application using sample data. Click an image to view 
 
 ![Settings](settings.png)
 
+![Replay verification settings and defaults](replay-settings.png)
+
 ## Discord simulations
 
 These are local renderings of sample data. The leaderboard uses the app's embed payload.

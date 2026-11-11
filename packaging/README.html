@@ -42,9 +42,15 @@
 </table>
 
 <h2 id="matches">Matches and mode detection</h2>
+<p>Open <b>Setup</b> above Dashboard for shortcuts to capture, match detection, overlay and Group configuration.</p>
 <p>For manual tracking, reset before the match and use <b>Finish match</b> after counting. With <b>Settings → Match automation</b> enabled, new warmup and lobby entries in Fortnite's local Windows log drive reset, start and save. A match already underway when the app opens may need manual tracking.</p>
 <p>The mode menu defaults to <b>Auto</b>. It reads the Battle Royale playlist from the log independently of automatic start and finish. You can also choose Solo, Duo, Trio or Squad manually. Set the Pirate Token boost manually.</p>
 <p><b>Group → Match history</b> lets you edit saved counts, tick rows and delete them. Verified shared matches also show teammates, team totals and team odds. Private or unverified matches keep their personal stats. Local deletion preserves results already shared in Discord.</p>
+
+<h3 id="replays">Verify matches with Fortnite replays</h3>
+<p>For local screen capture, enable automatic match detection in the app and replay recording in Fortnite. After returning to the lobby, <b>Verify saved matches using Fortnite replays</b> reads the matching local replay. This setting is on by default. If verification succeeds, the opened-chest total replaces the live estimate in Match history. Destroyed chests are shown separately in <b>Compare replay</b>. If the replay is unavailable, the live total is kept.</p>
+<p>Install <b>.NET Runtime 10</b> and <b>ASP.NET Core Runtime 10</b> for Windows x64 if they are missing. Get both from the <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0">Microsoft download page</a>. This feature also requires the packaged replay reader in <code>runtime/replay-reader</code>.</p>
+<p><b>Delete local Fortnite replays after successful verification</b> is off by default. The saved comparison remains available after cleanup.</p>
 
 <h2 id="overlay">On-screen overlay and Pirate Token odds</h2>
 <p>Under <b>Overlay</b>, choose the global optional statistics, enable the sections you want and edit their headings and multiline content. The preview, floating overlay and app-managed OBS text use those same sections. Adjust its transparency and choose whether it appears in screen sharing, then apply your changes.</p>
@@ -74,7 +80,7 @@
 <p>Session logs, rejected-candidate logs, popup snapshots and diagnostic recording are <b>off by default</b>. Enable them in Settings only when needed. Counts, saved state and OBS output continue updating with diagnostics off. Existing saved preferences are kept.</p>
 <p>Use <b>Help &amp; diagnostics → Run diagnostics</b>, then <b>Copy report</b> when reporting a problem. Enable diagnostic recording in Capture settings to keep footage around a miss. Press <b>Ctrl+Alt+M</b> to mark the moment and use <b>Review captures</b> to replay it.</p>
 <p><b>Clean logs and captures</b> removes generated diagnostics after counting stops. <b>Settings → Reset all</b> restores that page's defaults. Counts, profiles, history, overlay and Discord setup are kept.</p>
-<p>The app stores configuration, counter state and diagnostic files beside the executable. Keep <code>state</code> and <code>config.toml</code> when updating. Packaged builds can check for updates and offer a download limit.</p>
+<p>The app stores configuration, counter state and diagnostic files beside the executable. Close the app, extract the entire new ZIP into a new folder, then copy your own <code>state</code> folder and <code>config.toml</code> from the old installation. Discord credentials remain available on the same Windows account. Packaged builds can check for updates and offer a download limit.</p>
 
 <h2 id="limits">Compatibility and data</h2>
 <p>HUD size, compression, occlusion and quick consecutive openings can affect counts. Chest-type detection has been exercised on English and French footage. Unsupported playlists and matches already underway may require manual tracking. The team total includes received submissions, so missing or delayed players can leave it incomplete.</p>

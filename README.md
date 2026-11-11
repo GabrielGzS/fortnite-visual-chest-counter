@@ -29,6 +29,8 @@ The tray menu opens the window or quits the app. Closing the window can keep cou
 
 Open **Setup** above Dashboard for shortcuts to capture, match detection, overlay and Group configuration.
 
+When updating an existing installation, close the app, extract the whole ZIP into a new folder and copy your own `config.toml` and `state/` into it. Discord credentials remain available on the same Windows account. For optional replay verification, see the [Windows runtime requirements](docs/guides/matches-and-discord.md#automatic-replay-verification).
+
 ## Features
 
 ### Your counter, live

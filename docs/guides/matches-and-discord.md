@@ -64,7 +64,7 @@ Commands work in the configured server wherever Discord allows them. From **Grou
 
 [Chest Tracker setup reference](https://github.com/Xxoris190/chest-tracker#set-up-the-discord-bot)
 
-To compare a saved match with a Fortnite replay analyzed by LED-N, select the match in **Match history**, click **Compare replay…**, and open LED-N's `data.json`. The comparison shows both totals, chest types and the replay timeline.
+Select a match in **Match history** and click **Compare replay…**. An automatically verified match opens its saved comparison immediately, including after replay cleanup. For an unverified match, choose the `data.json` report exported by LED-N.
 
 ### What the replay can verify
 
@@ -78,6 +78,8 @@ In the 2026-11-11 HDR test, the replay identified normal, rare, rare sprite and 
 | Fast stacked openings and different HUD sizes | Compare against the replay in HDR and SDR | Verify the count and types after returning to the lobby |
 
 ### Automatic replay verification
+
+![Match automation and replay settings](../previews/replay-settings.png)
 
 **Verify saved matches using Fortnite replays** in Settings is on by default. Disable it to keep the live results and skip replay reading. With automatic match detection enabled, a local Fortnite desktop capture can be checked against its automatic replay after returning to the lobby. Enable replay recording in Fortnite. The reader runs outside capture and uses the Epic display name, when set as your Group player name, and the match end time to associate the replay. The app keeps the live result if it cannot identify and read a single replay.
 
