@@ -721,3 +721,28 @@ def test_disabling_replay_verification_keeps_the_live_result(app):
     gui.match_history.save_match(win.match_history_path(), match)
     win.apply_verified_replay((match, None, (None, None, 1, {}, 0, [(1, "Chest", False)], "Rin")))
     assert gui.match_history.read_history(win.match_history_path()) == [match]
+
+def test_local_replay_uses_timestamps_instead_of_group_alias(tmp_path):
+    from datetime import datetime, timedelta
+    import json
+    from fortnite_chest_counter import match_history, replay_comparison
+
+    start = datetime(2026, 11, 11, 14, 47, 19).astimezone()
+    match = match_history.Match("match", "2026-11-11 15:04", "p", "Default", "Squad",
+                                0, 21, "0%", player="Lionel")
+    row = {
+        "MatchStartUtc": start.isoformat(),
+        "DurationSeconds": 996,
+        "PlayerName": "lionicolas399",
+        "IsReplayOwner": True,
+        "IsBattleRoyale": True,
+        "ChestsOpened": 1,
+        "Chests": [{"TimeSeconds": 103.3, "Kind": "Chest", "Destroyed": False}],
+    }
+    report = tmp_path / "data.json"
+    report.write_text(json.dumps({"Matches": [row]}), encoding="utf-8")
+    assert replay_comparison.read_report(report, match, local_start=start)[4] == 1
+    with pytest.raises(ValueError, match="Expected one replay"):
+        replay_comparison.read_report(report, match, local_start=start + timedelta(seconds=4))
+    with pytest.raises(ValueError, match="Expected one replay"):
+        replay_comparison.read_report(report, match)

@@ -14,7 +14,7 @@ import time
 from fortnite_chest_counter import paths
 
 
-def read_report(path, match):
+def read_report(path, match, *, local_start=None):
     report = json.loads(path.read_text(encoding="utf-8-sig"))
     rows = report.get("Matches") if isinstance(report, dict) else None
     if not isinstance(rows, list):
@@ -27,12 +27,14 @@ def read_report(path, match):
         player = row.get("PlayerName")
         if not isinstance(player, str) or not player.strip():
             continue
-        if match.player and player.strip().casefold() != match.player.strip().casefold():
+        if local_start is None and match.player and player.strip().casefold() != match.player.strip().casefold():
             continue
         try:
             started = datetime.fromisoformat(row["MatchStartUtc"])
             if started.tzinfo is None:
                 started = started.replace(tzinfo=timezone.utc)
+            if local_start is not None and abs((started - local_start).total_seconds()) > 3:
+                continue
             duration = row["DurationSeconds"]
             if type(duration) not in (int, float) or not 0 < duration <= 7200:
                 continue
@@ -197,7 +199,12 @@ def verify_local_replay(match, finished_at):
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 report = work / "report" / "data.json"
-                replay, _, total, kinds, _, destroyed, timeline = read_report(report, match)
+                # A Group alias is not an Epic identity. Match the game-owned
+                # replay against its filename timestamp and the saved match end.
+                stamp = path.stem.removeprefix("UnsavedReplay-")
+                local_start = datetime.strptime(stamp, "%Y.%m.%d-%H.%M.%S").astimezone()
+                replay, _, total, kinds, _, destroyed, timeline = read_report(
+                    report, match, local_start=local_start)
                 return path, identity, total, kinds, destroyed, timeline, replay["PlayerName"]
         previous = candidates[0] if len(candidates) == 1 else None
     return None

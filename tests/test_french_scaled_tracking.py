@@ -146,3 +146,35 @@ def test_saturated_background_requires_three_aligned_header_and_word_reads():
     assert est._recover_saturated_french(.1, roi, mask) is None
     assert est._recover_saturated_french(.2, roi, mask) is None
     assert est._recover_saturated_french(.3, roi, mask)[2:] == (CT.NORMAL, False)
+
+def test_bright_french_header_confirms_only_an_aligned_bare_chest():
+    est = E.ChestEstimator()
+    roi = np.zeros((182, 324, 3), dtype=np.uint8)
+    xp, dx = est.french_xp_templates[CT.NORMAL]
+    y, x = 47, 138
+    header = xp[:14]
+    h, w = header.shape
+    roi[y:y + h, x:x + w][header > 0.5] = (230, 200, 250)
+    assert est._recover_bright_french(0, roi) is None
+    h, w = est.french_template.shape
+    roi[y + 14:y + 14 + h, x + dx:x + dx + w][est.french_template > 0.5] = (230, 200, 250)
+    assert est._recover_bright_french(.1, roi) is None
+    assert est._recover_bright_french(.2, roi) is None
+    assert est._recover_bright_french(.3, roi)[2:] == (CT.NORMAL, True)
+    roi[y + 12:y + 14 + h, x + dx + w + 3:x + dx + w + 10] = (230, 200, 250)
+    assert est._recover_bright_french(.4, roi) is None
+
+def test_bright_stacked_word_needs_its_exp_header():
+    est = E.ChestEstimator()
+    roi = np.zeros((182, 324, 3), dtype=np.uint8)
+    y, x = 70, 116
+    word = est.french_template
+    h, w = word.shape
+    roi[y:y + h, x:x + w][word > 0.5] = (230, 200, 250)
+    assert all(est._recover_bright_exp_line(t, roi) is None for t in (0, .1, .2))
+    exp = est.french_xp_templates[CT.NORMAL][0][:14, :22]
+    h, w = exp.shape
+    roi[y - 29:y - 29 + h, x + 25:x + 25 + w][exp > 0.5] = (230, 200, 250)
+    assert est._recover_bright_exp_line(.3, roi) is None
+    assert est._recover_bright_exp_line(.4, roi) is None
+    assert est._recover_bright_exp_line(.5, roi)[2:] == (CT.NORMAL, False)

@@ -81,7 +81,7 @@ In the 2026-11-11 HDR test, the replay identified normal, rare, rare sprite and 
 
 ![Match automation and replay settings](../previews/replay-settings.png)
 
-**Verify saved matches using Fortnite replays** in Settings is on by default. Disable it to keep the live results and skip replay reading. With automatic match detection enabled, a local Fortnite desktop capture can be checked against its automatic replay after returning to the lobby. Enable replay recording in Fortnite. The reader runs outside capture and uses the Epic display name, when set as your Group player name, and the match end time to associate the replay. The app keeps the live result if it cannot identify and read a single replay.
+**Verify saved matches using Fortnite replays** in Settings is on by default. Disable it to keep the live results and skip replay reading. With automatic match detection enabled, a local Fortnite desktop capture can be checked against its automatic replay after returning to the lobby. Enable replay recording in Fortnite. The reader runs outside capture and matches the local replay against its start time and the saved match end. The Group display name can differ from the Epic display name. The app keeps the live result if it cannot identify and read a single replay.
 
 The verified opened-chest total replaces the live estimate in match history. Destroyed chests remain in the replay comparison. Group publishes a correction under the same contribution ID, so updated hosts and guests see one result per player and match. The live timestamp history is saved with the match without video diagnostics.
 

@@ -246,6 +246,8 @@ class ChestEstimator:
         self.french_reads = deque()
         self.french_faint_reads = {}
         self.french_saturated_reads = deque()
+        self.french_bright_reads = deque()
+        self.french_exp_reads = deque()
         self.french_type_history = deque()
         self.french_scaled_reads = {}       # no votes shared between different glyph scales
         self.french_plane = None           # this frame's winning (scale, RGB ROI, mask)
@@ -264,7 +266,9 @@ class ChestEstimator:
         self.pending_popups, self.pending_interactions = [], []
         self.sprite_events = []
         if self.french_xp_templates:
-            self.french_normal_xp_blurred = V.blur_template(self.french_xp_templates[chest_types.NORMAL][0], ROBUST_SIGMA)
+            normal_xp = self.french_xp_templates[chest_types.NORMAL][0]
+            self.french_normal_xp_blurred = V.blur_template(normal_xp, ROBUST_SIGMA)
+            self.french_exp_blurred = V.blur_template(normal_xp[:14, :22], ROBUST_SIGMA)
         self.prompt_series = deque()       # (t, score) every prompt sample
         self.prompt_obs = deque()          # (t, score, gold, gem, chest_like) for scores >= SUPPORT_MIN
         self.ammo_steps = deque()          # times of ammo-region steps
@@ -572,6 +576,20 @@ class ChestEstimator:
                     plane = None
         else:
             recovered = self._recover_french_line(t, roi, mask, score, cy, cx) if "fr:COFFRE" in self.scaled_templates else None
+        if recovered is None and plane is not None and 0.9 in self._scaled_scales() and score >= 0.58:
+            # A shrunken word can be readable in the bright text pixels even
+            # when the normal lavender mask drops parts of the EXP header.
+            bright_scale = 0.9
+            bright_roi = (plane[1] if plane[0] == bright_scale else
+                          V.resize_box(roi, round(roi.shape[1] * bright_scale),
+                                       round(roi.shape[0] * bright_scale)))
+            recovered = self._recover_bright_french(t, bright_roi)
+            if recovered is None:
+                recovered = self._recover_bright_exp_line(t, bright_roi)
+            if recovered is not None:
+                ry, rx, kind, confirmed = recovered
+                recovered = (round(ry / bright_scale), round(rx / bright_scale), kind, confirmed)
+                s = bright_scale
         saturated_french = False
         if recovered is None and score < 0.50 and "fr:COFFRE" in self.scaled_templates:
             recovered = self._recover_saturated_french(t, roi, mask)
@@ -711,6 +729,57 @@ class ChestEstimator:
         if sum(votes.values()) < FRENCH_SCALED_CONFIRM_FRAMES:
             return None
         return y + th // 2, x + tw // 2, chest_types.decide(votes)[0], True
+
+    def _recover_bright_french(self, t, roi):
+        """Confirm a normal French chest from the bright EXP header and bare word."""
+        y0, x0 = 25, 85
+        bright = (roi[y0:112, x0:250].min(axis=2) > 145).astype(np.float32)
+        xp, xp_y, xp_x = V.robust_correlation_at(bright, self.french_normal_xp_blurred, ROBUST_SIGMA)
+        if xp < 0.62:
+            return None
+        h, w = self.french_template.shape
+        y, x = xp_y + 14, xp_x + self.french_xp_templates[chest_types.NORMAL][1]
+        top, left = max(0, y - 3), max(0, x - 5)
+        crop = bright[top:y + h + 4, left:x + w + 6]
+        word, word_y, word_x = V.robust_correlation_at(crop, self.robust_templates["fr:COFFRE"], ROBUST_SIGMA)
+        y, x = top + word_y, left + word_x
+        if word < 0.69 or chest_types.classify_french_line(
+                bright, y, x, h, w, self.french_suffixes) != chest_types.NORMAL:
+            return None
+        reads = self.french_bright_reads
+        while reads and t - reads[0][0] > 0.36:
+            reads.popleft()
+        reads.append((t, y, x))
+        if sum(abs(ry - y) <= 2 and abs(rx - x) <= 3 for _, ry, rx in reads) < FRENCH_SCALED_CONFIRM_FRAMES:
+            return None
+        return y0 + y + h // 2, x0 + x + w // 2, chest_types.NORMAL, True
+
+    def _recover_bright_exp_line(self, t, roi):
+        """Find a chest line beside the EXP glyph when the complete header is unreadable."""
+        y0, x0 = 25, 85
+        bright = (roi[y0:112, x0:250].min(axis=2) > 145).astype(np.float32)
+        word, y, x = V.robust_correlation_at(bright, self.robust_templates["fr:COFFRE"], ROBUST_SIGMA)
+        if word < 0.78:
+            return None
+        h, w = self.french_template.shape
+        kind = chest_types.classify_french_line(bright, y, x, h, w, self.french_suffixes)
+        if kind not in (chest_types.NORMAL, chest_types.UNKNOWN):
+            return None
+        # The EXP glyph can sit left of an isolated chest or right of the
+        # left-aligned chest line when a different reward occupies the row above.
+        xp = max(V.robust_correlation_at(
+            bright[max(0, y - dy - 3):max(0, y - dy + 17), max(0, x + dx - 4):max(0, x + dx + 26)],
+            self.french_exp_blurred, ROBUST_SIGMA)[0] for dy, dx in ((14, -10), (29, 25)))
+        if xp < 0.55:
+            return None
+        reads = self.french_exp_reads
+        while reads and t - reads[0][0] > 0.75:
+            reads.popleft()
+        reads.append((t, y, x, kind))
+        aligned = [seen for _, ry, rx, seen in reads if abs(ry - y) <= 2 and abs(rx - x) <= 3]
+        if len(aligned) < FRENCH_SCALED_CONFIRM_FRAMES or chest_types.NORMAL not in aligned:
+            return None
+        return y0 + y + h // 2, x0 + x + w // 2, chest_types.NORMAL, False
 
     def _recover_saturated_french(self, t, roi, mask):
         """Recover a bare French XP notification when the lavender mask is saturated."""
