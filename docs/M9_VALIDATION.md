@@ -1,16 +1,16 @@
 # M9 validation record
 
-Date: 2026-11-11. Branch `dev/v0.3.0`. The full run and rc1 are from `e44a7e4`; rc2, the candidate for hands-on testing, is
-from `a77847b`. Nothing was pushed, merged, tagged or published, and the production keys were not used.
+Date: 2026-11-11. Branch `dev/v0.3.0`. The full run and rc1 are from `e44a7e4`, rc2 from `a77847b`, and rc3, the current
+candidate, from `116e5a9`. Nothing was pushed, merged, tagged or published, and the production keys were not used.
 
 ## Not verified
 
-- **No person has used this build, and no real OBS Virtual Camera or live Fortnite session has run through it.** See
+- **rc3 has not been used by hand yet.** rc2 was, in a real session; see "M9F" below and
   [M9_ACCEPTANCE_TEST.md](M9_ACCEPTANCE_TEST.md).
 - **A real in-app update from v0.2.3 has not been run**, and neither has a real rollback or retry. It is blocked: see "The
   blue screen" below. Extract-over upgrades were tested instead.
-- **No real footage has produced a Complete match.** The English clip ends Partial and the Portuguese one Unconfirmed,
-  both as designed. The Complete path is proven on synthetic timelines only.
+- **Only one real match has been recognised as Complete** so far, in the maintainer's rc2 session. The reference clips end
+  Partial (English) and Unconfirmed (Portuguese), both as designed.
 - OBS Windowed Projector with a real capture card, and OBS WebSocket with a real OBS on a second PC, remain untested.
 
 ## Results
@@ -161,12 +161,73 @@ host from this kind of crash, because the guest runs on the same CPU. No test ke
 **What is covered without staging.** The updater code is unchanged since v0.2.3, passes 102 install checks on small synthetic
 installations, and v0.2.3's shipped code accepted rc2's layout. Extract-over upgrades passed in both directions.
 
+## M9F: hands-on feedback on rc2
+
+**rc3:** `build_out\v0.3.0-rc3\Fortnite-Visual-Chest-Counter-v0.3.0.zip`, 155.9 MB, unsigned, SHA-256
+`d4ba5aca59a80872b8ffd8b253eaae0541187b445a7e81a2b506332411070fb5`.
+
+Added: live per-match numbers on Game, a preview on Overview, match tracking on by default, a per-match rate in Recent
+matches, chest types in the log, clearer Analytics, and endings that say where play went. `match_state.py`, the detector and the
+updater are unchanged.
+
+| Check on rc3 | Result |
+|---|---:|
+| Actual zip from a clean folder, including the default path with no options | 24 of 24 |
+| Live numbers against the stored history, real worker | Equal (6 and 6) |
+| A manual +1 during a match | Reached the total, not the match |
+| Full video, packaged, tracking on | Byte-identical to M0 (6 and 24 events) |
+| Affected suites, including 78 new checks | All pass |
+| Affected mutations, including 50 new ones | All caught |
+| Screenshots at 1120x800 and 920x640 | Nothing cut off; Overview and Game fit at the default size |
+
+**Preview cost**, packaged, three alternating rounds: 48.2 to 61.2% of a core with it on, 48.0 to 64.1% with it off, so no
+measurable worker cost. Drawing takes 0.26 to 0.89 ms per picture, under 0.5% of a core.
+
+**How the rates are calculated** (read from `match_analytics.py`, unchanged). Both divide chests credited during active play by
+active seconds. Active time counts only usable pictures while alive on the bus or map, so frozen, black and spectating time is
+out. Manual corrections are never included. The main rate uses complete and partial matches and needs 5 minutes in total. The
+complete-only rate has no minimum. A single match's rate needs 1 minute: the 5-minute rule is for a total, and would hide the
+live figure for most of a match.
+
+**Settings audit.** No published version ever wrote `[match]`, so an upgrade from v0.2.3 has made no choice and gets the new
+default. An explicit `off` or `shadow` is kept. An invalid value falls back to `off`, so a typo cannot switch history on.
+
+### Quitting a match
+
+The rc2 session shows the state machine already handles this. Match 1 went from play straight to CONNECTING at 05:09:22 and
+closed as Partial with 319 s of play and 28 chests. Only its label was unhelpful ("Left or not seen"). It now reads *Left the
+match*, *Returned to lobby* or *Next match began*, from what was seen next. It stays Partial, and never claims why.
+
+### The 9-second match
+
+**Verified from the stored history. Cause: a false match on the waiting island.**
+
+| Time | Source time | What happened |
+|---|---:|---|
+| 05:10:16 | 428.7 | CONNECTING |
+| 05:10:22 | 434.9 | Health bar first seen: the waiting island has a HUD |
+| 05:10:26 | 439.0 | Health bar in 5 of 8 samples and no text yet, so the rule for joining a match in progress opened match 2 |
+| 05:10:31 | 443.1 | WAITING FOR PLAYERS first read |
+| 05:10:32 | 445.2 | Text confirmed, match 2 closed, countdown begins |
+
+It is not a duplicate or a session boundary: it is mid-run, holds no chests, and does not overlap match 3 (0.00 s between them).
+At the other two game starts in this session the text was read first, so this is a race. It counted as Partial because the
+WAITING FOR PLAYERS text arrived just before it closed and supplied the English evidence.
+
+**Proposed fix, not implemented.** In `_maybe_joined_late`, when coming from LOADING, require a counted chest or about 30 s of
+health bar before opening a match, giving the countdown text time to appear. Cost: a real reconnect into a match opens up to
+30 s later, and is Partial anyway. It would need tests for this sequence, reconnects, back-to-back matches and lobby transitions,
+the replay scorecard and one full-video pass. Existing records would not change; **Not a match** handles this one.
+
+**The 12-minute Complete match is genuine.** Countdown from 445.2, bus at 460.9, YOU PLACED read at 1186.5 (score 0.978), then
+ELIMINATED BY and CONNECTING. Duration 725.6 s, 53 English chests, no break.
+
 ## Known issues
 
 | Severity | Issue |
 |---|---|
+| Medium | False short match on the waiting island when the health bar is read before the countdown text. Fix proposed, awaiting review |
 | Medium | Real in-app update, rollback and retry never run; a defect in v0.2.3's installer may force a manual install |
-| Medium | No real full match through match tracking yet |
 | Low | At the minimum window size, the Analytics table scrolls sideways when labels are long |
 | Low | While counting, a correction applies on the next frame, so during a stall it waits |
 | Low | The updater's backup covers saved counts and settings, not `state\history\`. Updates leave that folder in place |
