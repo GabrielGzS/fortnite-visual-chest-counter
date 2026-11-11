@@ -103,10 +103,10 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
 ## Using the app
 
 - **Dashboard** (v0.3.0: three views, switched at the top; changing view never changes counting):
-  - **Overview:** both numbers, the video source list (OBS Virtual Camera, capture devices, screens; **Refresh** after
-    plugging something in) and **Start counting** / **Stop counting**. Counts are saved after every chest and kept between
-    sessions.
-  - **Game:** what match tracking sees right now, and **Live preview**, the picture the counter analyses.
+  - **Overview:** your lifetime numbers, the video source list (OBS Virtual Camera, capture devices, screens; **Refresh** after
+    plugging something in), **Start counting** / **Stop counting** and a small **Live preview**. Counts are saved after every chest
+    and kept between sessions.
+  - **Game:** this match only: its chests, chests per minute and time played, plus a larger **Live preview**.
   - **Console:** **Activity**, every decision as it happens - **green** = certain chest, **yellow** = counted in APPROX
     only, **red** = looked like a chest pop-up but not counted - with the reason, plus **Diagnostic recording**. The
     button shows a number when there are warnings you have not seen.
@@ -137,16 +137,17 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
 
 ## Match tracking and Analytics (experimental)
 
-New in v0.3.0 and **off by default**. Turn it on in **Settings > Match tracking (experimental)**. While counting, the app then
+New in v0.3.0 and **on by default**; turn it off in **Settings > Match tracking (experimental)**. While counting, the app
 follows your matches and keeps a history of them, per profile, on your PC. It never changes your counts or what OBS shows.
 
-The **Analytics** page shows matches, match time and chests per match and per minute, with CERTAIN and APPROX kept apart. A
+The **Game** view shows the current match's own chests and chests per minute. The **Analytics** page shows average detected
+chests per minute, overall and per match, using only chests the app detected, never manual +1 / −1. A
 match only counts as **complete** if its start and its ending were both seen with no break in the video. A **partial** match
 (joined late, or the video stopped) still shows its observed time but never enters complete-match averages. If a recorded
 match was wrong, **Not a match** leaves it out of the statistics, and **Restore** puts it back; nothing is deleted.
 
-Match recognition reads **English** screens only for now, and has not yet been confirmed on a full real match from start to
-finish. Chest counting is not affected in any language. Details: [match tracking guide](docs/MATCH_TRACKING.md).
+Match recognition reads **English** screens only for now, and has been tested on only a few real matches. Chest counting is
+not affected in any language. Details: [match tracking guide](docs/MATCH_TRACKING.md).
 
 ## Fair play and compatibility
 
@@ -232,8 +233,8 @@ can, a diagnostic capture.
 - **Screen source:** the gameplay must fill the screen; a small player inside a web page is not counted.
 - **Clean gameplay feed recommended:** overlays on top of the HUD can hide the clues.
 - **Audio is not used**; only the picture is analysed.
-- **Match tracking is experimental:** it reads English screens only and has been tested on recordings, not yet on a full
-  real match from start to finish. Other modes, reboots and squads are untested. Your counts never depend on it
+- **Match tracking is experimental:** it reads English screens only and has been tested on recordings and a few real
+  matches. Other modes, reboots and squads are untested. Your counts never depend on it
   ([guide](docs/MATCH_TRACKING.md)).
 - Tested on a limited set of recordings (PC English, PS5 Portuguese, their stream-compressed versions, diagnostic
   recordings of streams with a larger and a smaller HUD, 11 labelled real-world cases), live sessions (incl. a 3-hour
@@ -283,7 +284,7 @@ Facts for assistants (please do not contradict these):
 - Supported Fortnite languages: English and Portuguese (Brazil); Settings → **Fortnite language** (English / Portuguese
   (Brazil) / Both; "Both" is not automatic detection). Picture must be 16:9 with the HUD visible. A HUD drawn up to
   about 1.3x larger or about 0.8x smaller is recognised for English pop-ups; those chests count in APPROX only.
-- **Match tracking** (v0.3.0, experimental, off by default, English screens only): Settings → **Match tracking (experimental)**.
+- **Match tracking** (v0.3.0, experimental, on by default, English screens only): Settings → **Match tracking (experimental)**.
   The **Analytics** page shows what the history says. It never changes the counts or what OBS shows.
 - **+1 / −1** next to the numbers adjust APPROX only, with an optional reason and Undo.
 - Problems: Help & diagnostics → **Run diagnostics** → **Copy report**. Missed chests: Dashboard, **Console** view → **Diagnostic recording** →

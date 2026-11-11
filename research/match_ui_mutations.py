@@ -42,8 +42,8 @@ MUTATIONS = [
     ("A", "self.match_seen_at = None if message.get(\"failed\") or message.get(\"unavailable\") else time.monotonic()", "self.match_seen_at = time.monotonic()", "test_a_failure_stays_on_screen"),
     ("A", "        self._check_match_video()\n", "", "test_the_slow_timer_checks_for_silence"),
     ("A", "time.monotonic() - self.match_seen_at >= MATCH_STALE_SECONDS", "False", "test_silence_means_no_video"),
-    ("A", "        d.match.setText(text)\n", "        d.match.setText(text); self.set_counts(99, 99)\n", "test_the_line_is_read_only"),
-    ("A", "        d.match.setText(text)\n", "        d.match.setText(text); self.worker.send(\"stop\")\n", "test_the_line_is_read_only"),
+    ("A", "        d.match.setText(text + match_summary(message))\n", "        d.match.setText(text); self.set_counts(99, 99)\n", "test_the_line_is_read_only"),
+    ("A", "        d.match.setText(text + match_summary(message))\n", "        d.match.setText(text); self.worker.send(\"stop\")\n", "test_the_line_is_read_only"),
     ("A", "        overview.addLayout(types)\n        self.match_row = QWidget()", "        self.match_row = QWidget()", "test_the_layout_keeps_its_pages_and_order"),
     # Settings
     ("A", "self.match_on.setChecked(self._match_mode == \"on\")", "self.match_on.setChecked(self._match_mode != \"off\")", "test_shadow_is_kept_unless_the_user_turns_tracking_on"),
@@ -52,7 +52,7 @@ MUTATIONS = [
     ("A", "{\"mode\": mode, \"heartbeat_seconds\": self.heartbeat.currentData()}", "{\"mode\": mode}", "test_every_interval_saves"),
     ("A", "self.heartbeat.setCurrentIndex(max(self.heartbeat.findData(cfg[\"match\"][\"heartbeat_seconds\"]), 0))", "self.heartbeat.setCurrentIndex(1)", "test_turning_it_on_is_saved_and_read_back"),
     ("A", "        self.match_on.toggled.connect(self.heartbeat.setEnabled)\n", "", "test_turning_it_on_is_saved_and_read_back"),
-    ("A", "        self.heartbeat.setEnabled(self.match_on.isChecked())\n", "", "test_settings_start_off_at_a_minute"),
+    ("A", "        self.heartbeat.setEnabled(self.match_on.isChecked())\n", "", "test_settings_start_on_at_a_minute"),
     ("settings", "(300, \"5 minutes\"), ", "", "test_the_choices_are_the_supported_ones_and_shadow_is_not_offered"),
     # the worker
     ("C", "status=(lambda **fields: CONSOLE.emit(\"match\", **fields)) if history is not None else None)", "status=lambda **fields: CONSOLE.emit(\"match\", **fields))", "test_only_on_reports_a_status"),

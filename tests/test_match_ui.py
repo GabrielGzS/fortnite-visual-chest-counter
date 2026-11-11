@@ -402,11 +402,15 @@ def saved(w):
     return settings.load_config(w.dir / "config.toml")
 
 
-def test_settings_start_off_at_a_minute():
+def test_settings_start_on_at_a_minute():
     with G.window() as w:
         page = w.win.settings_page
         page.load()
-        assert not page.match_on.isChecked() and page.heartbeat.currentData() == 60 and not page.heartbeat.isEnabled()
+        assert page.match_on.isChecked() and page.heartbeat.currentData() == 60 and page.heartbeat.isEnabled()
+    with G.window(config='[match]\nmode = "off"\n') as w:
+        page = w.win.settings_page
+        page.load()
+        assert not page.match_on.isChecked() and not page.heartbeat.isEnabled()
 
 
 def test_the_choices_are_the_supported_ones_and_shadow_is_not_offered():
@@ -419,9 +423,10 @@ def test_the_choices_are_the_supported_ones_and_shadow_is_not_offered():
 
 
 def test_turning_it_on_is_saved_and_read_back():
-    with G.window() as w:
+    with G.window(config='[match]\nmode = "off"\n') as w:
         page = w.win.settings_page
         page.load()
+        assert not page.heartbeat.isEnabled()
         page.match_on.setChecked(True)
         assert page.heartbeat.isEnabled()
         page.heartbeat.setCurrentIndex(page.heartbeat.findData(300))
@@ -484,7 +489,7 @@ def test_a_config_from_before_this_version_gains_the_section():
         page.load()
         page.save()
         cfg, _, warnings = saved(w)
-        assert warnings == [] and cfg["match"] == {"mode": "off", "heartbeat_seconds": 60} and cfg["display"]["show"] == "certain"
+        assert warnings == [] and cfg["match"] == {"mode": "on", "heartbeat_seconds": 60} and cfg["display"]["show"] == "certain"
 
 
 def test_saving_keeps_comments_and_other_sections():

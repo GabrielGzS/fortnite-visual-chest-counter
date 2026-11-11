@@ -132,8 +132,8 @@ def toml(tmp, text):
 
 # ------------------------------------------------------------------ the [match] setting
 
-def test_tracking_is_off_by_default():
-    assert settings.DEFAULTS["match"]["mode"] == "off"
+def test_tracking_is_on_by_default():
+    assert settings.DEFAULTS["match"]["mode"] == "on"
 
 
 def test_shadow_can_be_chosen_in_the_config_and_on_the_command_line():
@@ -760,9 +760,9 @@ def test_counted_chests_reach_the_tracker_from_both_loops():
         assert summary["match_samples"] == 20 and summary["stop_reason"] == "stream ended", (command, summary)
 
 
-def test_off_is_the_default_and_leaves_the_session_log_as_it_was():
+def test_off_leaves_the_session_log_as_it_was():
     with tempfile.TemporaryDirectory() as tmp:
-        _, log = run_command(tmp, "live", None)
+        _, log = run_command(tmp, "live", "off")
     end = next(row for row in log if row.get("event") == "session_end")
     assert match_lines(log) == [] and not [key for key in end if key.startswith("match_")]
 

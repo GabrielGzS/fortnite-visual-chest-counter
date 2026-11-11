@@ -112,13 +112,13 @@ mark_after_seconds = 10
 dir = "captures"
 
 [match]
-# Match tracking (experimental, OFF by default; the app's Settings page sets this). English games only for now.
-#   "off"    = nothing runs (the default)
+# Match tracking (experimental, ON by default; the app's Settings page sets this). English games only for now.
+#   "off"    = nothing runs
 #   "shadow" = follow the match and only write what it sees to the session log in logs/. It needs [logging] enabled.
 #              It never changes your counts, your profiles, the OBS text or the app.
-#   "on"     = also keep a history of your matches and chests in state/history/. It needs saving turned on in [state].
+#   "on"     = also keep a history of your matches and chests in state/history/ (the default). It needs saving turned on in [state].
 #              Your counts and the OBS text stay exactly as they would be with this off.
-mode = "off"
+mode = "on"
 # Only for mode = "on": how often running totals are saved, in seconds: 30, 60 (recommended), 300 or 600. Matches are still followed
 # once a second whatever this is. A longer interval writes less, but after a crash more of the last moments count as uncertain.
 heartbeat_seconds = 60
@@ -165,6 +165,8 @@ source_uuid = ""
 # The desktop app reopens with the size, position and maximised state it was closed with (saved in state/window.json).
 # false = always open at the default size. If the saved place is no longer on any screen, the window is moved back.
 remember_window = true
+# The live preview on the Dashboard. It only shows what the counter already analyses, and never changes what is counted.
+show_preview = true
 
 [update]
 # Look for a new version shortly after the app opens. Nothing is downloaded or installed unless you choose to.

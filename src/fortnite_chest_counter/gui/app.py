@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
                                QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
+from fortnite_chest_counter.console import CHEST_LABELS
 from fortnite_chest_counter import match_analytics, match_history, paths, profiles, settings
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import theme
@@ -267,6 +268,40 @@ def match_line(message):
     return text, color
 
 
+def match_note(match):
+    """What the numbers of the current match can be taken to mean."""
+    if not match:
+        return "No match right now"
+    if match.get("english_confirmed") is not True:
+        return "Not confirmed as a match yet"
+    if match.get("discontinuity"):
+        return "Part of this match was not seen"
+    if match.get("observed_from_start") is False:
+        return "Since the app joined this match"
+    return "This match only"
+
+
+def match_summary(message):
+    """The current match on the Overview line, or nothing when it is not known to be a match."""
+    match, chests = message.get("match") or {}, message.get("chests")
+    if chests is None or match.get("english_confirmed") is not True:
+        return ""
+    rate = match_analytics.match_rate(chests["certain"], chests["approx"], match.get("active_seconds"))
+    return f"   ·   {plural(chests['approx'], 'chest')} this match" + (f"   ·   {rate.approx_per_minute:.2f} per minute" if rate else "")
+
+
+def last_match_text(last):
+    """The final numbers of the match that just ended. Empty for a record too weak to be worth replacing the last real one."""
+    if not last or last.get("english_confirmed") is not True:
+        return ""
+    active = last.get("active_seconds") or 0
+    if not last["approx"] and active < match_analytics.MIN_MATCH_RATE_SECONDS:
+        return ""
+    rate = match_analytics.match_rate(last["certain"], last["approx"], active)
+    parts = [f"APPROX {fmt(last['approx'])}", f"CERTAIN {fmt(last['certain'])}"] + ([f"{rate.approx_per_minute:.2f} per minute"] if rate else [])
+    return "Last match:   " + "   ·   ".join(parts + [QUALITY_LOOK[last["completion"]][0], match_analytics.ending_text(last)])
+
+
 def label(text, name=None, wrap=False):
     widget = QLabel(text)
     if name:
@@ -393,13 +428,16 @@ def log_entries(message):
         totals = ""
         if message.get("certain_text") is not None:
             totals = "&nbsp;" * 3 + _span(f"CERTAIN {message['certain_text']} | APPROX {message['approx_text']}", theme.DIM)
-        main = (stamp + f'<span style="color:{color};font-weight:600">{_pad(text, 12)}</span>'
+        kind_of_chest = f"{_pad(message['chest_label'], 15)}" if message.get("chest_label") else ""
+        main = (stamp + f'<span style="color:{color};font-weight:600">{_pad(text, 12)}</span>' + kind_of_chest
                 + escape(f"{message.get('evidence', '')}{why}") + totals)
         detail = "&nbsp;" * 10 + _span(f"{message.get('event_id', '')} at {message.get('stamp', '')} | {message.get('source', '')}"
                        f" | latency {message.get('latency_s') or 0:.1f}s | {message.get('reason', '')}", theme.DIM)
         return [(bool(message.get("generic")), main), (True, detail)]
     if kind == "status":
         return [(True, stamp + _span(message.get("text", ""), theme.DIM))]
+    if kind == "type_update":
+        return [(False, stamp + _span(f"Chest type read again: {CHEST_LABELS.get(message.get('chest_type'), 'Unknown chest')} ({message.get('event_id', '')})", theme.DIM))]
     if kind == "stream":
         color = STREAM_STATES.get(message.get("state"), (theme.MUTED,))[0]
         return [(False, stamp + _span(message.get("text", ""), color, bold=message.get("state") != "incomplete"))]
@@ -440,14 +478,15 @@ class CountCard(QFrame):
         self.value = label("0", "countValue")
         self.value.setStyleSheet(f"color: {color};")
         box.addWidget(self.value)
-        box.addWidget(label(subtitle, "countSub", wrap=True))
+        self.sub = label(subtitle, "countSub", wrap=True)
+        box.addWidget(self.sub)
         layout.addLayout(box, 1)
         self._flash = QTimer(self)
         self._flash.setSingleShot(True)
         self._flash.timeout.connect(lambda: self.setStyleSheet(""))
 
     def set_value(self, value, flash=False):
-        text = fmt(value)
+        text = UNKNOWN_VALUE if value is None else fmt(value)
         if text != self.value.text() and flash:
             self.setStyleSheet(f"#countCard {{ border: 1px solid {self.color}; background: {theme.rgba(self.color, 0.08)}; }}")
             self._flash.start(900)
@@ -485,7 +524,7 @@ class PreviewPanel(QFrame):
         self.view.setObjectName("previewBox")
         self.view.setAlignment(Qt.AlignCenter)
         self.view.setMinimumSize(320, 180)
-        self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.view.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)     # the picture fits the box: left to itself, it would make the page longer each time
         layout.addWidget(self.view, 1)
         self.caption = label("Preview: what the counter analyses (a few pictures per second).", "hint", wrap=True)
         layout.addWidget(self.caption)
@@ -1039,10 +1078,11 @@ class Dashboard(QWidget):
         self.stability.currentIndexChanged.connect(lambda _: self.stability_hint.setText(
             next(text for key, _, text in settings.STREAM_STABILITY_CHOICES if key == self.stability.currentData())
             + " A bigger buffer cannot bring back video the platform never delivered (outages, ad breaks)."))
-        url_layout.addWidget(label("Counts from the public stream as viewers get it, a few seconds behind, at 720p - no OBS "
-                                   "or browser needed. Twitch and YouTube; the stream must be live and public. Video can "
-                                   "arrive in bursts or pause to buffer. If the connection drops, the app reconnects by itself, "
-                                   "keeps your counts and tells you which part could not be seen.", "hint", wrap=True))
+        self.url_note = label("Counts from the public stream as viewers get it, a few seconds behind, at 720p - no OBS "
+                              "or browser needed. Twitch and YouTube; the stream must be live and public. Video can "
+                              "arrive in bursts or pause to buffer. If the connection drops, the app reconnects by itself, "
+                              "keeps your counts and tells you which part could not be seen.", "hint", wrap=True)
+        url_layout.addWidget(self.url_note)
         self.url_row.hide()
         box_layout.addWidget(self.url_row)
         self.source.currentIndexChanged.connect(lambda _: self.url_row.setVisible(
@@ -1054,11 +1094,18 @@ class Dashboard(QWidget):
         row = QHBoxLayout()
         self.metrics = label("Not counting.", "metrics", wrap=True)
         row.addWidget(self.metrics, 1)
+        self.show_mini = button("Live preview", "toggle", tip="Show or hide the video the counter is analysing. Counting carries on either way.")
+        self.show_mini.setCheckable(True)
+        row.addWidget(self.show_mini)
         self.analyse = button("Analyse a recording...", tip="Count the chests in a video file (does not change your counter)",
                               on_click=win.analyse_video)
         row.addWidget(self.analyse)
         box_layout.addLayout(row)
         overview.addWidget(box)
+        self.mini_preview = PreviewPanel()
+        self.mini_preview.caption.hide()
+        self.mini_preview.view.setMinimumSize(240, 120)
+        overview.addWidget(self.mini_preview, 100)
         overview.addStretch(1)
         self._build_game(win, game)
         self._build_console(win, console)
@@ -1075,6 +1122,18 @@ class Dashboard(QWidget):
         row.addStretch(1)
         box_layout.addLayout(row)
         game.addWidget(box)
+        numbers = QHBoxLayout()
+        numbers.setSpacing(12)
+        self.game_approx = CountCard("MATCH APPROX", "", theme.APPROX)
+        self.game_certain = CountCard("MATCH CERTAIN", "", theme.CERTAIN)
+        self.game_approx_rate = StatTile("APPROX / MIN")
+        self.game_certain_rate = StatTile("CERTAIN / MIN")
+        for tile, stretch in ((self.game_approx, 3), (self.game_certain, 3), (self.game_approx_rate, 2), (self.game_certain_rate, 2)):
+            numbers.addWidget(tile, stretch)
+        game.addLayout(numbers)
+        self.game_last = label("", "hint", wrap=True)
+        self.game_last.hide()
+        game.addWidget(self.game_last)
         tiles = QHBoxLayout()
         tiles.setSpacing(12)
         self.game_active = StatTile("ACTIVE PLAY", "Alive on the map")
@@ -1092,9 +1151,13 @@ class Dashboard(QWidget):
         row.addStretch(1)
         game.addLayout(row)
         self.preview = PreviewPanel()
+        self.preview.view.setMinimumSize(240, 120)
         game.addWidget(self.preview, 1)
         game.addStretch(0)
-        self.show_preview.toggled.connect(self._panels)
+        self.show_preview.toggled.connect(self._preview_toggled)
+        self.show_mini.toggled.connect(self._preview_toggled)
+        self.source.currentIndexChanged.connect(lambda _: self._panels())
+        self._show_match_numbers({}, None)
 
     def _build_console(self, win, console):
         box, box_layout = card()
@@ -1139,8 +1202,24 @@ class Dashboard(QWidget):
         self.detail.currentIndexChanged.connect(lambda _: win.render_log())
 
     def _panels(self):
-        self.preview.setVisible(self.show_preview.isChecked())
+        on = self.show_preview.isChecked()
+        counting = self.win.mode in ("connecting", "counting", "stopping")
+        link_help_showing = (self.source.currentData() or {}).get("source") == "stream" and not counting       # needed before starting, and it is tall
+        self.preview.setVisible(on)
+        self.mini_preview.setVisible(on and not link_help_showing)
         self.win.preview_visibility_changed()
+
+    def set_preview_on(self, on):
+        """One setting behind both buttons."""
+        for toggle in (self.show_preview, self.show_mini):
+            toggle.blockSignals(True)
+            toggle.setChecked(on)
+            toggle.blockSignals(False)
+        self._panels()
+
+    def _preview_toggled(self, on):
+        self.set_preview_on(on)
+        self.win.remember_preview(on)
 
     def show_view(self, index):
         """Only changes what is on screen: counting, recognition and history do not know about it."""
@@ -1171,6 +1250,27 @@ class Dashboard(QWidget):
         self.game_unclear.set_value(match_clock(match.get("uncertain_seconds")))
         self.game_start.set_value({True: "Yes", False: "No"}.get(match.get("observed_from_start")))
         self.game_language.set_value({True: "English", False: "Not confirmed"}.get(match.get("english_confirmed")))
+        self._show_match_numbers(match, message.get("chests"))
+        self._show_last_match(message.get("last_match"))
+
+    def _show_match_numbers(self, match, chests):
+        """This match only, from its own chests. Nothing is shown until it is known to be a match: a zero would say more than is known."""
+        known = match.get("english_confirmed") is True and chests is not None
+        note = match_note(match)
+        self.game_approx.set_value(chests["approx"] if known else None)
+        self.game_certain.set_value(chests["certain"] if known else None)
+        self.game_approx.sub.setText(note)
+        self.game_certain.sub.setText(note)
+        rate = match_analytics.match_rate(chests["certain"], chests["approx"], match.get("active_seconds")) if known else None
+        hint = "Detected chests per minute of play" if rate else "Needs a minute of play" if known else ""
+        self.game_approx_rate.set_value(f"{rate.approx_per_minute:.2f}" if rate else None, hint)
+        self.game_certain_rate.set_value(f"{rate.certain_per_minute:.2f}" if rate else None, hint)
+
+    def _show_last_match(self, last):
+        text = last_match_text(last)
+        if text:                                             # a weak record does not replace the last real one
+            self.game_last.setText(text)
+            self.game_last.show()
 
     def show_game_idle(self, text, hint, offer_settings):
         self.game_status.setText(text)
@@ -1179,6 +1279,7 @@ class Dashboard(QWidget):
         self.game_settings.setVisible(offer_settings)
         for tile in (self.game_active, self.game_seen, self.game_unclear, self.game_start, self.game_language):
             tile.set_value(None)
+        self._show_match_numbers({}, None)
 
     def set_pill(self, text, color):
         self.pill.setText(f"●  {text}")
@@ -1715,10 +1816,15 @@ QUALITY_LOOK = {"complete": ("Complete", theme.CERTAIN), "partial": ("Partial", 
 
 
 def rate_tile(tile, rate, label_text, missing):
-    if rate is None:
-        tile.set_value(None, missing)
-    else:
-        tile.set_value(f"{rate.certain_per_minute:.2f} / {rate.approx_per_minute:.2f}", f"CERTAIN / APPROX per minute · {label_text(rate)}")
+    """APPROX first, because it is the fuller count. CERTAIN stays beside it, never added to it."""
+    tile.value.setText(UNKNOWN_VALUE if rate is None else f"{rate.approx_per_minute:.2f}")
+    tile.sub.setText(missing if rate is None else f"APPROX per minute  ·  {rate.certain_per_minute:.2f} CERTAIN  ·  {label_text(rate)}")
+
+
+def rate_cell(match):
+    if match.rate is None:
+        return UNKNOWN_VALUE
+    return f"{match.rate.approx_per_minute:.2f}" + ("" if match.quality == "complete" else " seen")
 
 
 def plural(count, word):
@@ -1729,13 +1835,13 @@ def analytics_notes(summary):
     """Plain sentences for whatever a reader needs to know before trusting the numbers."""
     notes = []
     if summary.unfinished:
-        notes.append(f"{plural(summary.unfinished, 'match')} not finished yet, so not counted.")
+        notes.append(f"{plural(summary.unfinished, 'match')} still in progress: left out of the match count, match time and chests per minute until it ends.")
     if summary.excluded:
         notes.append(f"{plural(summary.excluded, 'match')} marked as not a match, left out of every statistic.")
     if summary.manual_added or summary.manual_removed:
-        notes.append(f"Manual chest corrections are not part of these statistics (+{fmt(summary.manual_added)}, −{fmt(summary.manual_removed)}).")
+        notes.append(f"Manual corrections are not part of these numbers (+{fmt(summary.manual_added)}, −{fmt(summary.manual_removed)}).")
     if summary.matches_left_out_of_rates:
-        notes.append(f"{plural(summary.matches_left_out_of_rates, 'match')} left out of the chest rates: history lost chests during them, or their play time is unknown.")
+        notes.append(f"{plural(summary.matches_left_out_of_rates, 'match')} left out of chests per minute: some of their chests were not recorded, or their play time is unknown.")
     if summary.missing_approx or summary.missing_certain:
         notes.append(f"History is missing {fmt(summary.missing_approx)} chests that your totals include ({fmt(summary.missing_certain)} CERTAIN).")
     if summary.damaged_rows:
@@ -1748,7 +1854,7 @@ def analytics_notes(summary):
 class AnalyticsPage(QWidget):
     """What the recorded matches show. Read-only, and worked out away from this window's thread so a huge history cannot freeze it."""
 
-    COLUMNS = ("Started", "Duration", "CERTAIN", "APPROX", "Quality", "Ending", "")
+    COLUMNS = ("Started", "Duration", "CERTAIN", "APPROX", "Chests/min", "Quality", "Ending", "")
 
     def __init__(self, win):
         super().__init__()
@@ -1774,26 +1880,35 @@ class AnalyticsPage(QWidget):
         layout.addWidget(self.empty)
 
         self.matches = StatTile("MATCHES")
-        self.observed = StatTile("OBSERVED MATCH TIME", "On screen, complete and partial matches")
-        self.confirmed = StatTile("CONFIRMED PLAY", "Alive on the map, complete matches only")
+        self.observed = StatTile("MATCH TIME SEEN", "On screen, complete and partial matches")
+        self.confirmed = StatTile("TIME ACTIVELY PLAYING", "Alive on the map, complete matches only")
         self.session = StatTile("TIME COUNTING")
         self.certain = StatTile("CERTAIN CHESTS", "In recorded history")
         self.approx = StatTile("APPROX CHESTS", "In recorded history, includes CERTAIN")
-        self.per_match = StatTile("PER COMPLETE MATCH")
-        self.complete_rate = StatTile("COMPLETE-MATCH RATE")
-        self.observed_rate = StatTile("OBSERVED RATE")
-        for tiles in ((self.matches, self.observed, self.confirmed, self.session), (self.certain, self.approx, self.per_match), (self.complete_rate, self.observed_rate)):
+        self.per_match = StatTile("AVERAGE CHESTS PER COMPLETE MATCH")
+        self.observed_rate = CountCard("AVERAGE DETECTED CHESTS / MIN", "", theme.APPROX)        # the one number most people want
+        self.complete_rate = StatTile("COMPLETE MATCHES ONLY")
+        headline = QHBoxLayout()
+        headline.setSpacing(12)
+        headline.addWidget(self.observed_rate, 3)
+        headline.addWidget(self.complete_rate, 2)
+        layout.addLayout(headline)
+        for tiles in ((self.matches, self.observed, self.confirmed, self.session), (self.certain, self.approx, self.per_match)):
             line = QHBoxLayout()
             line.setSpacing(12)
             for tile in tiles:
                 line.addWidget(tile, 1)
             layout.addLayout(line)
+        self.rate_hint = label("Chests per minute are the chests the app detected by itself, divided by your time actively playing. Manual +1 and −1 are not included, "
+                               "and this is not your Fortnite total.", "hint", wrap=True)
+        layout.addWidget(self.rate_hint)
         self.notes = label("", "hint", wrap=True)
         layout.addWidget(self.notes)
         self.recent_title = label("Recent matches", "cardTitle")
         layout.addWidget(self.recent_title)
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.horizontalHeaderItem(4).setToolTip("Detected APPROX chests per minute of active play in that match. \"seen\" means only part of the match was seen. A dash means there is not enough to go on.")
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.table.verticalHeader().hide()
         self.table.setShowGrid(False)
@@ -1862,10 +1977,10 @@ class AnalyticsPage(QWidget):
         self.certain.set_value(fmt(s.certain_chests) if not s.empty else None)
         self.approx.set_value(fmt(s.approx_chests) if not s.empty else None)
         per = s.per_complete_match
-        self.per_match.set_value(f"{per.certain:.1f} / {per.approx:.1f}" if per else None, f"CERTAIN / APPROX chests · {plural(per.matches, 'match')}" if per else "Not enough complete match data")
-        rate_tile(self.complete_rate, s.complete_rate, lambda r: plural(r.matches, "complete match"), "Not enough complete match data")
-        rate_tile(self.observed_rate, s.observed_rate, lambda r: f"over {duration(r.minutes * 60)} seen, partial matches included. Not comparable with the complete-match rate",
-                  f"Needs at least {match_analytics.MIN_OBSERVED_RATE_SECONDS // 60} minutes of confirmed play")
+        self.per_match.set_value(f"{per.approx:.1f}" if per else None, f"APPROX  ·  {per.certain:.1f} CERTAIN  ·  {plural(per.matches, 'match')}" if per else "No complete matches yet")
+        rate_tile(self.complete_rate, s.complete_rate, lambda r: plural(r.matches, "match"), "No complete matches yet")
+        rate_tile(self.observed_rate, s.observed_rate, lambda r: f"over {duration(r.minutes * 60)} of active play, complete and partial matches",
+                  f"Needs at least {match_analytics.MIN_OBSERVED_RATE_SECONDS // 60} minutes of active play")
         self.notes.setText(analytics_notes(s))
         self.notes.setVisible(bool(self.notes.text()))
         for row in range(self.table.rowCount()):                # replaced buttons wait to be deleted: they must not stay on screen until then
@@ -1879,10 +1994,10 @@ class AnalyticsPage(QWidget):
             quality, color = ("Not a match", theme.DIM) if match.excluded else QUALITY_LOOK[match.quality]
             cells = (match.started_at.strftime("%b %d, %H:%M") if match.started_at else UNKNOWN_VALUE,
                      UNKNOWN_VALUE if seen is None else seen if match.duration_is_full else f"{seen} seen",
-                     f"{fmt(match.certain)}{more}", f"{fmt(match.approx)}{more}", quality + (" (interrupted)" if match.interrupted else ""), match.ending)
+                     f"{fmt(match.certain)}{more}", f"{fmt(match.approx)}{more}", rate_cell(match), quality + (" (interrupted)" if match.interrupted else ""), match.ending)
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)
-                if column == 4:
+                if column == 5:
                     item.setForeground(QColor(color))
                 self.table.setItem(row, column, item)
             action = button("Restore" if match.excluded else "Not a match", "link",
@@ -2178,8 +2293,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.pages, 1)
         self.setCentralWidget(root)
 
-        self.dashboard.show_preview.setChecked(False)
-        self.dashboard._panels()
+        self.dashboard.set_preview_on(load_cfg()[0]["app"]["show_preview"])
         self.fill_profiles()
         self.set_mode("stopped")
         self.read_state(force=True)
@@ -2250,6 +2364,12 @@ class MainWindow(QMainWindow):
             self.settings_page.load()
         elif page is self.analytics:
             self.analytics.refresh()
+        self.preview_visibility_changed()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange and hasattr(self, "dashboard"):
+            self.preview_visibility_changed()               # minimised: nothing is on screen to draw
 
     # ---- sources
     def refresh_sources(self):
@@ -2560,6 +2680,8 @@ class MainWindow(QMainWindow):
         d.stability.setEnabled(not running)
         d.refresh.setEnabled(not running)
         d.analyse.setEnabled(not running)
+        d.stability_hint.setVisible(not running)
+        d.url_note.setVisible(not running)
         if mode == "connecting":
             self.marks_this_session = 0
         if not running:
@@ -2573,13 +2695,16 @@ class MainWindow(QMainWindow):
             self.match_seen_at = None
             d.match.setText("")
             d.match_row.hide()
+            d.game_last.setText("")
+            d.game_last.hide()
             d.metrics.setText("Not counting.")
         self.update_game_idle()
         self.update_correction_buttons()
         if not running:
-            d.preview.view.setStyleSheet("")
-            d.preview.clear()
-        self.preview_visibility_changed()
+            for panel in (d.preview, d.mini_preview):
+                panel.view.setStyleSheet("")
+                panel.clear()
+        d._panels()
 
     def _tick(self):
         if self._source_scan is not None and self._scan_result is not None:
@@ -2844,7 +2969,7 @@ class MainWindow(QMainWindow):
             return
         text, color = match_line(message)
         d = self.dashboard
-        d.match.setText(text)
+        d.match.setText(text + match_summary(message))
         d.match.setStyleSheet(f"color: {color};")
         d.match_row.show()
         d.show_game(message, text, color)
@@ -2856,6 +2981,8 @@ class MainWindow(QMainWindow):
             for line in (self.dashboard.match, self.dashboard.game_status):
                 line.setText("No video right now")
                 line.setStyleSheet(f"color: {theme.MUTED};")
+            for tile in (self.dashboard.game_approx_rate, self.dashboard.game_certain_rate):
+                tile.set_value(None, "No video right now")      # the counts stay: they were real, but the rate is no longer current
 
     def update_game_idle(self):
         """What the Game view says while no match status is coming in."""
@@ -2882,12 +3009,12 @@ class MainWindow(QMainWindow):
             self.last_status = None                     # the last rate is no longer true
         if self.mode == "counting":
             self.dashboard.set_pill(pill, color)
-        preview = self.dashboard.preview
-        if overlay:
-            preview.clear(overlay)
-            preview.view.setStyleSheet(f"color: {color}; font-size: 16px; font-weight: 600;")
-        else:
-            preview.view.setStyleSheet("")
+        for preview in (self.dashboard.preview, self.dashboard.mini_preview):
+            if overlay:
+                preview.clear(overlay)
+                preview.view.setStyleSheet(f"color: {color}; font-size: 16px; font-weight: 600;")
+            else:
+                preview.view.setStyleSheet("")
 
     def set_counts(self, certain, approx, flash=False):
         changed = (certain, approx) != self.counts
@@ -2989,9 +3116,21 @@ class MainWindow(QMainWindow):
         open_path(folder)
 
     # ---- preview
+    def active_preview(self):
+        """The one preview on screen right now, or None. One reader and one timer feed it, so two can never run at once."""
+        d = self.dashboard
+        if not d.show_preview.isChecked() or self.isMinimized() or self.pages.currentWidget() is not d:
+            return None
+        return {OVERVIEW_VIEW: d.mini_preview, GAME_VIEW: d.preview}.get(d.views.currentIndex())
+
+    def remember_preview(self, on):
+        try:
+            C.update_config_file(config_file(), "app", {"show_preview": on})
+        except (C.UserError, OSError):
+            pass                                            # only a convenience: the preview itself has already changed
+
     def preview_visibility_changed(self):
-        wanted = (self.preview_reader is not None and self.dashboard.show_preview.isChecked()
-                  and self.dashboard.views.currentIndex() == GAME_VIEW and self.mode in ("connecting", "counting"))
+        wanted = self.preview_reader is not None and self.active_preview() is not None and self.mode in ("connecting", "counting")
         if self.preview_reader is not None:
             self.preview_reader.set_wanted(wanted)
         if wanted:
@@ -3002,10 +3141,11 @@ class MainWindow(QMainWindow):
     def _tick_preview(self):
         if self.stream_state in ("buffering", "ad", "reconnecting", "offline", "no_video"):
             return                                      # keep the status text instead of the last (stale) picture
-        frame = self.preview_reader.read()
+        panel = self.active_preview()
+        frame = self.preview_reader.read() if panel is not None else None
         if frame is not None:
             _, width, height, data = frame
-            self.dashboard.preview.show_frame(width, height, data)
+            panel.show_frame(width, height, data)
 
     # ---- counter actions
     def _cfg_for_actions(self):

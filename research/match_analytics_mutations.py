@@ -46,7 +46,7 @@ MUTATIONS = [
     ("A", "    for match in reversed(usable[-recent:]):", "    for match in usable[-recent:]:", "test_recent_matches_are_newest_first_with_their_evidence"),
     ("A", "    for match in reversed(usable[-recent:]):", "    for match in reversed(usable):", "test_recent_is_limited"),
     ("A", "full = match[\"completion\"] == COMPLETE and _number(match.get(\"complete_duration_seconds\")) is not None", "full = True", "test_recent_matches_are_newest_first_with_their_evidence"),
-    ("A", "ENDINGS.get(match.get(\"ended_by\"), \"Not seen\")", "ENDINGS.get(match.get(\"ended_by\"), \"Placed\")", "test_an_unknown_ending_says_not_seen"),
+    ("A", "return ENDINGS.get(ended_by, \"Not seen\")", "return ENDINGS.get(ended_by, \"Placed\")", "test_an_unknown_ending_says_not_seen"),
     ("A", "bool(match[\"history_incomplete\"]), match[\"completion\"]", "False, match[\"completion\"]", "test_a_match_with_lost_chests_is_flagged_and_left_out_of_rates"),
     ("A", "    usable = [match for match in history.matches if _usable(match)]", "    usable = list(history.matches)", "test_rows_with_impossible_values_are_counted_as_damaged"),
     ("A", "summary.missing_certain += max(_number(gap.get(\"missing_certain\")) or 0, 0)", "pass", "test_a_match_with_lost_chests_is_flagged_and_left_out_of_rates"),

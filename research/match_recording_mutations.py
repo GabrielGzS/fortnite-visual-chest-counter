@@ -17,8 +17,8 @@ import test_match_tracker as T
 
 MUTATIONS = [
     # settings
-    ("settings", "\"mode\": \"off\",                          # off | shadow (recognise", "\"mode\": \"on\",                           # off | shadow (recognise", "test_recording_is_off_by_default_and_the_interval_is_a_minute"),
-    ("settings", "\"heartbeat_seconds\": 60,", "\"heartbeat_seconds\": 300,", "test_recording_is_off_by_default_and_the_interval_is_a_minute"),
+    ("settings", "\"mode\": \"on\",                           # off | shadow (recognise", "\"mode\": \"off\",                          # off | shadow (recognise", "test_recording_is_on_by_default_and_the_interval_is_a_minute"),
+    ("settings", "\"heartbeat_seconds\": 60,", "\"heartbeat_seconds\": 300,", "test_recording_is_on_by_default_and_the_interval_is_a_minute"),
     ("settings", "MATCH_HEARTBEATS = (30, 60, 300, 600)", "MATCH_HEARTBEATS = (1, 30, 60, 300, 600)", "test_anything_else_falls_back_to_a_minute"),
     ("settings", "MATCH_HEARTBEATS = (30, 60, 300, 600)", "MATCH_HEARTBEATS = (30, 60, 300)", "test_every_offered_interval_is_accepted"),
     ("settings", "type(value) is int and value in MATCH_HEARTBEATS", "value in MATCH_HEARTBEATS", "test_anything_else_falls_back_to_a_minute"),

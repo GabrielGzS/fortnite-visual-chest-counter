@@ -50,8 +50,8 @@ def test_there_are_three_views_starting_on_overview():
 def test_every_control_is_on_its_view():
     with G.window() as w:
         d, A = w.win.dashboard, ui()
-        placed = {A.OVERVIEW_VIEW: ("profile", "profile_new", "profile_rename", "profile_delete", "certain", "approx", "plus", "minus", "correction_row", "types", "match_row", "viewers", "obs_line", "source", "refresh", "start", "url_row", "url", "stability", "stability_hint", "source_hint", "metrics", "analyse"),
-                  A.GAME_VIEW: ("game_status", "game_hint", "game_settings", "game_active", "game_seen", "game_unclear", "game_start", "game_language", "show_preview", "preview"),
+        placed = {A.OVERVIEW_VIEW: ("show_mini", "mini_preview", "profile", "profile_new", "profile_rename", "profile_delete", "certain", "approx", "plus", "minus", "correction_row", "types", "match_row", "viewers", "obs_line", "source", "refresh", "start", "url_row", "url", "stability", "stability_hint", "source_hint", "metrics", "analyse"),
+                  A.GAME_VIEW: ("game_approx", "game_certain", "game_approx_rate", "game_certain_rate", "game_last", "game_status", "game_hint", "game_settings", "game_active", "game_seen", "game_unclear", "game_start", "game_language", "show_preview", "preview"),
                   A.CONSOLE_VIEW: ("rec_mode", "mark", "rec_status", "detail", "clear", "open_logs", "log")}
         for view, names in placed.items():
             for name in names:
@@ -199,7 +199,7 @@ def test_the_preview_runs_only_while_its_view_is_open():
         preview_rig(w)
         d.show_view(A.GAME_VIEW)
         assert wanted(w) is True and w.win.preview_timer.isActive()
-        d.show_view(A.OVERVIEW_VIEW)
+        d.show_view(A.CONSOLE_VIEW)
         assert wanted(w) is False and not w.win.preview_timer.isActive()
         d.show_view(A.GAME_VIEW)
         assert wanted(w) is True
@@ -207,15 +207,15 @@ def test_the_preview_runs_only_while_its_view_is_open():
         w.win.preview_reader = None
 
 
-def test_the_preview_stays_off_until_asked_for():
+def test_the_preview_can_be_hidden():
     with G.window() as w:
         d, A = w.win.dashboard, ui()
         w.win.preview_reader = MagicMock()
         counting(w)
         d.show_view(A.GAME_VIEW)
+        assert wanted(w) is True and not d.preview.isHidden()
+        d.show_preview.setChecked(False)
         assert wanted(w) is False and d.preview.isHidden()
-        d.show_preview.setChecked(True)
-        assert not d.preview.isHidden()
         w.win.preview_timer.stop()
         w.win.preview_reader = None
 
@@ -230,7 +230,7 @@ def tiles(d):
 
 
 def test_tracking_off_explains_itself_and_offers_settings():
-    with G.window() as w:
+    with G.window(config='[match]\nmode = "off"\n') as w:
         d = w.win.dashboard
         w.win.update_game_idle()
         assert d.game_status.text() == "Match tracking is off" and not d.game_settings.isHidden() and tiles(d) == [DASH] * 5

@@ -285,8 +285,7 @@ this does not work while OBS is using the card. If the app says the device canno
 </table>
 
 <h2 id="activity">Dashboard views: Overview, Game and Console</h2>
-<p>The Dashboard has three views, switched at the top. <b>Overview</b> has your numbers, the video source and <b>Start counting</b>. <b>Game</b> shows what
-<a href="#matches">match tracking</a> sees and the <b>Live preview</b>. <b>Console</b> has the <b>Activity</b> log and <a href="#capture">diagnostic recording</a>; its button shows
+<p>The Dashboard has three views, switched at the top. <b>Overview</b> has your lifetime numbers, the video source, <b>Start counting</b> and a small <b>Live preview</b>. <b>Game</b> shows <b>this match only</b>: its chests, chests per minute and time played, from <a href="#matches">match tracking</a>, with a larger preview. <b>Console</b> has the <b>Activity</b> log and <a href="#capture">diagnostic recording</a>; its button shows
 a number when there are warnings you have not seen. Changing view, or minimising the app, never changes what is counted.</p>
 <p><b>Activity</b> lists what the counter sees and decides, live:
 <b style="color:#0f7a4a">green</b> = certain chest &middot; <b style="color:#9a5b00">yellow</b> = counted in APPROX only &middot;
@@ -294,7 +293,7 @@ a number when there are warnings you have not seen. Changing view, or minimising
 matched (0&ndash;1), not a percentage or probability. Switch <b>Normal detail</b> to <b>Debug detail</b> to also see every candidate, the
 full reason for each decision and a status line every few seconds.</p>
 <p><b>Live preview</b> shows the picture the counter is analysing (a few times per second), so you can check that it sees the game
-full screen with the HUD. It is off by default and costs nothing while hidden.</p>
+full screen with the HUD. It is on by default and can be hidden with its button. Only the one on screen updates, and neither changes what is counted.</p>
 <p>Everything is also written to the session log in <code>logs\</code>, whether the panels are open or not.</p>
 
 <h2 id="capture">Help improve accuracy: marks and diagnostic recording (optional)</h2>
@@ -348,18 +347,19 @@ counted before v0.2.2, or set with <b>Edit counts&hellip;</b>, are listed as <i>
 English pop-ups.</p>
 
 <h2 id="matches">Match tracking and Analytics (experimental)</h2>
-<p>New in v0.3.0 and <b>off by default</b>. Turn it on in <b>Settings &gt; Match tracking (experimental)</b>; it starts the next time you click <b>Start counting</b>. The app then follows your matches and keeps a
+<p>New in v0.3.0 and <b>on by default</b>; you can turn it off in <b>Settings &gt; Match tracking (experimental)</b>. While counting, the app follows your matches and keeps a
 history of them, per profile, in <code>state\history\</code> on your PC. It <b>never changes your counts or what OBS shows</b>.</p>
 <p><b>Save progress every</b> (30 seconds, 1 minute, 5 minutes or 10 minutes) sets how often running totals are written. Matches are followed once a second whatever you choose. A longer interval writes less to the disk, but after a crash more of the last moments count as uncertain.</p>
-<p>The <b>Analytics</b> page shows matches, match time and chests per match and per minute, with CERTAIN and APPROX kept apart. It reads the match history only, so your official totals stay the numbers on the Dashboard, and manual +1 / &minus;1 corrections are not part of it.</p>
+<p>The <b>Game</b> view counts only chests detected during the current match, starting from zero each match. Your lifetime totals and manual +1 / &minus;1 do not change it. It shows a dash, not a zero, until the app is sure it is watching a match.</p>
+<p>The <b>Analytics</b> page shows <b>Average detected chests / min</b>: chests the app detected by itself, divided by your time actively playing, across complete and partial matches. <b>Complete matches only</b> is the same sum over fully seen matches. <b>Recent matches</b> shows each match&rsquo;s own rate. Manual +1 / &minus;1 are never included, and your official totals stay the numbers on the Dashboard.</p>
 <table>
   <tr><th>Quality</th><th>Meaning</th></tr>
   <tr><td><b>Complete</b></td><td>Its start and its ending were both seen in English, with no break in the video. Only these enter complete-match averages.</td></tr>
-  <tr><td><b>Partial</b></td><td>Joined late, or part of it was not seen (counting stopped, video lost). Its observed time still shows.</td></tr>
+  <tr><td><b>Partial</b></td><td>Joined late, part of it was not seen, or play went back to the menus with no ending on screen (<i>Left the match</i>, <i>Returned to lobby</i>). Quitting and a disconnect look the same, so the app does not guess. Its time still shows.</td></tr>
   <tr><td><b>Unconfirmed</b></td><td>No English evidence that it was really a match. Left out of every statistic.</td></tr>
 </table>
 <p>If a recorded match was wrong, <b>Not a match</b> leaves it out of the statistics and <b>Restore</b> puts it back. Nothing is deleted, and the chests stay in your totals.</p>
-<p>Match recognition reads <b>English</b> screens only for now, and has not yet been confirmed on a full real match from start to finish. In another language the chests are still counted, but matches show as &ldquo;not sure&rdquo; and no statistics are made up.</p>
+<p>Match recognition reads <b>English</b> screens only for now, and has been tested on only a few real matches. In another language the chests are still counted, but matches show as &ldquo;not sure&rdquo; and no statistics are made up.</p>
 
 <h2 id="reset">Reset the counter (e.g. at the start of a stream)</h2>
 <p>On the Dashboard click <b>Reset&hellip;</b> and confirm. Both numbers (and the chest-type split) of the selected profile go to 0, also while counting. Closing and reopening the app does
@@ -428,7 +428,7 @@ If chests stop being counted after a Fortnite update, please report it on the pr
   <li><b>Livestream URL is a lower-confidence convenience option.</b> It sees what viewers get: compression, bursts, buffering, ad breaks and reconnects. It can miss chests, and how many has not been measured. <b>Screen</b>: the gameplay must fill the screen.</li>
   <li><b>Clean gameplay feed recommended:</b> overlays, webcam or alerts on top of the HUD can hide the clues.</li>
   <li><b>Audio is not used.</b> Only the picture is analysed.</li>
-  <li><b>Match tracking is experimental:</b> English screens only, tested on recordings but not yet on a full real match from start to finish. Other modes, reboots and squads are untested. Your counts never depend on it.</li>
+  <li><b>Match tracking is experimental:</b> English screens only, tested on recordings and a few real matches. Other modes, reboots and squads are untested. Your counts never depend on it.</li>
   <li>Tested on a limited number of recordings (PC English, PS5 Portuguese, streams with a larger and a smaller HUD, 11 labelled real-world cases) and live sessions up to several hours. Physical capture cards and real OBS projectors are not tested yet. Other platforms or settings may behave differently &mdash; that&rsquo;s why this is a <b>beta</b>.</li>
 </ul>
 

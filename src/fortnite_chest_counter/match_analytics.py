@@ -24,10 +24,14 @@ from fortnite_chest_counter import match_history as H
 COMPLETE, PARTIAL, UNCONFIRMED = "complete", "partial", "unconfirmed"
 QUALITIES = (COMPLETE, PARTIAL, UNCONFIRMED)
 MIN_OBSERVED_RATE_SECONDS = 300            # under five minutes of play, a chest more or less would swing the rate wildly
+MIN_MATCH_RATE_SECONDS = 60                # one match, live or in the list: under a minute of play the figure says nothing yet
 RECENT_MATCHES = 25
 READ_KINDS = H.MATCH_KINDS | H.CORRECTION_KINDS | {"transition", "counter_change", "chest", "chest_type"}      # everything but the heartbeats, which are most of the file
 ENDINGS = {"placed": "Placed", "victory": "Victory Royale", "left_or_unknown": "Left or not seen", "stopped": "Counting stopped", "lost": "Video lost",
            "discontinuity": "Video jumped", H.INTERRUPTED: "App closed unexpectedly"}
+# A match that ended with no YOU PLACED or Victory on screen, by what was seen next. It says where play went, never why: quitting, a disconnect and an
+# ending the app missed all look the same.
+LEFT_ENDINGS = {"menu_seen": "Returned to lobby", "connecting_seen": "Left the match", "next match countdown seen": "Next match began"}
 
 
 @dataclass
@@ -59,6 +63,7 @@ class RecentMatch:
     run_id: object = None
     match_number: object = None
     excluded: bool = False                 # marked "Not a match": shown so it can be restored, left out of every statistic
+    rate: object = None                    # a Rate for this match alone, or None when one is not defensible
 
 
 @dataclass
@@ -132,6 +137,23 @@ def _rate(matches, credited, enough_seconds=0):
     return Rate(sum(credited[key][0] for key in keys) / minutes, sum(credited[key][1] for key in keys) / minutes, len(matches), minutes)
 
 
+def match_rate(certain, approx, active_seconds):
+    """One match's chests per minute of active play, the denominator the summary rates use. None until there is enough play to mean anything."""
+    active = _number(active_seconds)
+    if active is None or active < MIN_MATCH_RATE_SECONDS:
+        return None
+    minutes = active / 60
+    return Rate(certain / minutes, approx / minutes, 1, minutes)
+
+
+def ending_text(match):
+    """How a match ended, as far as was seen."""
+    ended_by, reasons = match.get("ended_by"), match.get("reasons") or ()
+    if ended_by == "left_or_unknown" and reasons and reasons[-1] in LEFT_ENDINGS:
+        return LEFT_ENDINGS[reasons[-1]]
+    return ENDINGS.get(ended_by, "Not seen")
+
+
 def summarize(history, recent=RECENT_MATCHES):
     usable = [match for match in history.matches if _usable(match)]
     chests = [chest for chest in history.chests if _number(chest.get("t")) is not None]
@@ -201,9 +223,10 @@ def summarize(history, recent=RECENT_MATCHES):
         run = history.runs.get(match["run_id"]) or {"start": None}
         full = match["completion"] == COMPLETE and _number(match.get("complete_duration_seconds")) is not None
         totals = credited[match["run_id"], match["match_number"]]
+        fair = rate_ready(match) and match["completion"] != UNCONFIRMED and not match["not_a_match"]              # the same matches the summary rates accept
         summary.recent.append(RecentMatch(_started_at(run, match), _number(match.get("complete_duration_seconds" if full else "observed_seconds")), full, totals[0], totals[1],
-                                          bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ENDINGS.get(match.get("ended_by"), "Not seen"),
-                                          match["run_id"], match["match_number"], bool(match["not_a_match"])))
+                                          bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ending_text(match),
+                                          match["run_id"], match["match_number"], bool(match["not_a_match"]), match_rate(totals[0], totals[1], match.get("active_seconds")) if fair else None))
     return summary
 
 

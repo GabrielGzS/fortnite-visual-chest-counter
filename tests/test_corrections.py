@@ -674,7 +674,7 @@ def test_not_a_match_updates_the_statistics():
         page = page_with_matches(w)
         action(page, 3).click()
         MA.settle(w)
-        assert page.matches.value.text() == "3" and page.matches.sub.text() == "1 complete · 1 partial · 1 unconfirmed" and page.table.item(3, 4).text() == "Not a match" and action(page, 3).text() == "Restore"
+        assert page.matches.value.text() == "3" and page.matches.sub.text() == "1 complete · 1 partial · 1 unconfirmed" and page.table.item(3, 5).text() == "Not a match" and action(page, 3).text() == "Restore"
         assert "marked as not a match" in page.notes.text() and page.table.rowCount() == 4
 
 
@@ -686,7 +686,7 @@ def test_restore_puts_it_back_exactly():
         MA.settle(w)
         action(page, 3).click()
         MA.settle(w)
-        assert (page.matches.value.text(), page.observed.value.text(), page.complete_rate.value.text()) == before and page.table.item(3, 4).text() == "Complete"
+        assert (page.matches.value.text(), page.observed.value.text(), page.complete_rate.value.text()) == before and page.table.item(3, 5).text() == "Complete"
 
 
 def test_not_a_match_deletes_nothing():
@@ -785,7 +785,7 @@ def test_the_page_says_manual_corrections_are_not_included():
         page = w.win.analytics
         page.refresh()
         MA.settle(w)
-        assert "Manual chest corrections are not part of these statistics (+1, −0)" in page.notes.text()
+        assert "Manual corrections are not part of these numbers (+1, −0)" in page.notes.text()
 
 
 def test_statistics_ignore_manual_corrections():

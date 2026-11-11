@@ -63,7 +63,7 @@ DEFAULTS = {
         "dir": "captures",
     },
     "match": {
-        "mode": "off",                          # off | shadow (recognise matches for the session log only) | on (also keep match history)
+        "mode": "on",                           # off | shadow (recognise matches for the session log only) | on (also keep match history)
         "heartbeat_seconds": 60,                # how often match history saves running totals: 30 | 60 | 300 | 600
     },
     "live": {
@@ -85,6 +85,7 @@ DEFAULTS = {
     },
     "app": {
         "remember_window": True,                # the desktop app reopens with the size, position and maximised state it closed with
+        "show_preview": True,                   # the Dashboard's live preview; only what the counter already analyses
     },
     "update": {
         "check_automatically": True,            # look for a new version shortly after the app opens (nothing is downloaded by itself)
@@ -115,6 +116,7 @@ VERBOSITY_LEVELS = ("minimal", "normal", "debug")
 CAPTURE_MODES = ("off", "marks", "events", "session")
 CAPTURE_QUALITIES = ("standard", "lossless")
 MATCH_MODES = ("off", "shadow", "on")
+SAFE_FALLBACKS = {("match", "mode"): "off"}     # a mistyped "off" must never switch history on, whatever the default is
 MATCH_HEARTBEATS = (30, 60, 300, 600)       # a fixed list: an arbitrary small value could write to the disk constantly
 HEARTBEAT_CHOICES = ((30, "30 seconds"), (60, "1 minute   (recommended)"), (300, "5 minutes"), (600, "10 minutes"))     # the app's Settings page
 # The app's language choice -> [detector] languages. "Both" is not automatic detection: it checks both words all the time.
@@ -264,7 +266,8 @@ def load_config(path=None, overrides=None):
                 if ok:
                     cfg[section][key] = value
                 else:
-                    warnings.append(f"{path}: [{section}] {key} = {value!r} {problem}; using default {DEFAULTS[section][key]!r}")
+                    cfg[section][key] = SAFE_FALLBACKS.get((section, key), DEFAULTS[section][key])
+                    warnings.append(f"{path}: [{section}] {key} = {value!r} {problem}; using {cfg[section][key]!r}")
         # v0.1.0 configs: a custom certain_label / approximate_label still changes the overlay text.
         for label_key, text_key in (("certain_label", "certain_text"), ("approximate_label", "approx_text")):
             if (("display", label_key) in explicit_keys and ("display", text_key) not in explicit_keys
@@ -281,5 +284,6 @@ def load_config(path=None, overrides=None):
         if ok:
             cfg[section][key] = value
         else:
+            cfg[section][key] = SAFE_FALLBACKS.get((section, key), cfg[section][key])
             warnings.append(f"command line: {key} = {value!r} {problem}; keeping {cfg[section][key]!r}")
     return cfg, origin, warnings

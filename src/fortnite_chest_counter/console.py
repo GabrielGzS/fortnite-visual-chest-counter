@@ -90,6 +90,16 @@ def _evidence(ev):
     return f"prompt {ev.get('interaction_score', 0):.2f}"
 
 
+CHEST_LABELS = {"chest": "Regular chest", "rare": "Rare chest", "sprite": "Sprite chest"}
+
+
+def type_label(ev):
+    """The type the detector read for a counted chest. Never guessed: anything else is an unknown chest. Empty for what was not counted."""
+    if not (ev.get("certain_counted") or ev.get("approx_counted")):
+        return ""
+    return CHEST_LABELS.get(ev.get("chest_type"), "Unknown chest")
+
+
 def _jsonable(value):
     return value.item() if hasattr(value, "item") else str(value)
 
@@ -99,7 +109,7 @@ def event_message(ev, certain_text, approx_text, certain=None, approx=None):
     counted_certain, counted_approx = bool(ev.get("certain_counted")), bool(ev.get("approx_counted"))
     return {"verdict": "certain" if counted_certain else "approx" if counted_approx else "rejected",
             "generic": ev.get("source") == "interaction_object" and not (counted_certain or counted_approx),
-            "clock": time.strftime("%H:%M:%S"), "why": _why(ev), "evidence": _evidence(ev),
+            "clock": time.strftime("%H:%M:%S"), "why": _why(ev), "evidence": _evidence(ev), "chest_label": type_label(ev),
             "event_id": ev.get("event_id", ""), "stamp": ev.get("stamp", ""), "source": ev.get("source", ""),
             "tier": ev.get("adjusted_tier", ""), "latency_s": ev.get("latency_s"), "reason": ev.get("reason", ""),
             "certain_text": certain_text, "approx_text": approx_text, "certain": certain, "approx": approx}
@@ -187,7 +197,7 @@ class Console:
         why = _why(ev)
         # kept under ~118 characters so it never wraps in a standard 120-column console window
         text = (f"{time.strftime('%H:%M:%S')}  {self.paint(f'{tag} {verdict:11s}', style)} "
-                f"CERTAIN {certain_text:>4s} | APPROX {approx_text:>4s}  {_evidence(ev)}" + (f" - {why}" if why else ""))
+                f"CERTAIN {certain_text:>4s} | APPROX {approx_text:>4s}  " + (f"{type_label(ev)}, " if type_label(ev) else "") + _evidence(ev) + (f" - {why}" if why else ""))
         self.line(text)
         if self.verbosity == "debug":
             self.line(f"            {ev.get('event_id', '')} at {ev.get('stamp', '')} | {ev.get('source', '')} | "

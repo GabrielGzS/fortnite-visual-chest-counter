@@ -52,6 +52,9 @@ class MatchTracker:
         self._machine = machine if machine is not None else S.MatchStateMachine()
         self._picture = None               # a small copy of the last sample's picture, never the frame itself
         self._pending = []                 # languages of the chests counted since the last sample
+        self._counted = []                 # (time, certain, approx) of every chest counted in this run, for the live per-match numbers
+        self._out_at = None                # when the open match's player was first out
+        self._closed = None                # the match that closed last, for its final numbers
         self._last_sample_t = self._last_seen_t = self._break_t = None
         self._samples, self._sample_s, self._total_s, self._max_s, self._source_s = 0, 0.0, 0.0, 0.0, 0.0
         self._chests = {"delivered": 0, "no_picture": 0, "dropped_at_break": 0}
@@ -81,6 +84,7 @@ class MatchTracker:
         try:
             if not (ev.get("certain_counted") or ev.get("approx_counted")):
                 return
+            self._counted.append((ev["time"], bool(ev.get("certain_counted")), True))        # every counted chest, also one that is no evidence below
             if self._break_t is not None and ev["time"] < self._break_t:
                 self._chests["dropped_at_break"] += 1
                 return
@@ -141,9 +145,30 @@ class MatchTracker:
         if self._status is None:
             return
         try:
-            self._status(state=self._machine.state, t=round(t, 1), picture="black" if picture.black else "frozen" if picture.frozen else "live", match=self._machine.snapshot())
+            match = self._machine.snapshot()
+            self._status(state=self._machine.state, t=round(t, 1), picture="black" if picture.black else "frozen" if picture.frozen else "live", match=match,
+                         chests=self._credited(match["opened_t"], match["played_from_t"], None, self._out_at) if match else None, last_match=self._last_match())
         except Exception:
             self._status = None
+
+    def _credited(self, opened_t, played_from_t, closed_t, out_at):
+        """Chests belonging to one match, by each chest's own time: the rule of match_history.attribute, which a test holds this to. Reads only
+        detected chests, so a Reset, Edit counts or manual correction cannot change it."""
+        certain = approx = 0
+        for t, is_certain, is_approx in self._counted:
+            if opened_t <= t and played_from_t <= t and (closed_t is None or t < closed_t) and (out_at is None or t < out_at):
+                certain += is_certain
+                approx += is_approx
+        return {"certain": certain, "approx": approx}
+
+    def _last_match(self):
+        """The final numbers of the match that closed last. Recounted each time, because the detector finishes a chest a few seconds late."""
+        closed = self._closed
+        if closed is None:
+            return None
+        moments = [moment for moment in (closed["out_at"], closed["ended_t"]) if moment is not None]
+        return {**self._credited(closed["opened_t"], closed["played_from_t"], closed["closed_t"], min(moments) if moments else None),
+                **{key: closed[key] for key in ("match_number", "completion", "ended_by", "reasons", "active_seconds", "english_confirmed")}}
 
     def _report(self, events):
         """-> True if a match opened or closed."""
@@ -155,15 +180,19 @@ class MatchTracker:
                 self._log("record", **record)
                 if self._history is not None:
                     self._history.match_closed(record)
+                self._closed, self._out_at = {**record, "out_at": self._out_at}, None
                 boundary = True
             elif isinstance(event, S.Transition):
                 self._log("transition", **asdict(event))
                 if self._history is not None:
                     self._history.transition(asdict(event))
+                if event.state == S.ELIMINATED and event.match_number is not None and self._out_at is None:
+                    self._out_at = event.t
             else:
                 self._log("opened", **asdict(event))
                 if self._history is not None:
                     self._history.match_opened(asdict(event))
+                self._out_at = None
                 boundary = True
         return boundary
 

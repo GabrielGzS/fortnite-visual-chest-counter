@@ -73,10 +73,13 @@ class PreviewReader:
         self.last = None
 
     def set_wanted(self, on):
-        struct.pack_into("<I", self.mm, 12, 1 if on else 0)
+        if not self.mm.closed:                                              # the window can still get events while it closes
+            struct.pack_into("<I", self.mm, 12, 1 if on else 0)
 
     def read(self):
         """-> (t, width, height, RGB bytes) for a picture not returned before, else None."""
+        if self.mm.closed:
+            return None
         seq, width, height, _, t = _HEADER.unpack_from(self.mm, 0)
         if seq == 0 or seq % 2 or seq == self.last or (width, height) != (WIDTH, HEIGHT):
             return None

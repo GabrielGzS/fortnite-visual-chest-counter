@@ -503,14 +503,14 @@ def test_analytics_is_its_own_page_after_the_dashboard():
 
 
 def test_the_empty_page_shows_dashes_and_explains():
-    with G.window() as w:
+    with G.window(config='[match]\nmode = "off"\n') as w:
         page = w.win.analytics
         page.refresh()
         settle(w)
         assert not page.empty.isHidden() and not page.empty_settings.isHidden() and "Turn on match tracking" in page.empty_hint.text()
         for tile in (page.observed, page.confirmed, page.session, page.certain, page.approx, page.per_match, page.complete_rate, page.observed_rate):
             assert text_of(tile) == DASH, tile.sub.text()
-        assert page.table.rowCount() == 0 and page.table.isHidden() and page.recent_title.isHidden() and "Not enough complete match data" in page.complete_rate.sub.text()
+        assert page.table.rowCount() == 0 and page.table.isHidden() and page.recent_title.isHidden() and "No complete matches yet" in page.complete_rate.sub.text()
 
 
 def test_the_page_shows_the_worked_example():
@@ -521,12 +521,12 @@ def test_the_page_shows_the_worked_example():
         settle(w)
         assert page.empty.isHidden() and text_of(page.matches) == "4" and page.matches.sub.text() == "2 complete · 1 partial · 1 unconfirmed"
         assert text_of(page.observed) == "20m 20s" and text_of(page.confirmed) == "15m 00s" and text_of(page.session) == "1h 06m"
-        assert text_of(page.certain) == "6" and text_of(page.approx) == "9" and text_of(page.per_match) == "1.5 / 2.0"
-        assert text_of(page.complete_rate) == "0.20 / 0.27" and text_of(page.observed_rate) == "0.21 / 0.32"
-        assert "2 complete matches" in page.complete_rate.sub.text() and "Not comparable" in page.observed_rate.sub.text()
+        assert text_of(page.certain) == "6" and text_of(page.approx) == "9" and text_of(page.per_match) == "2.0" and "1.5 CERTAIN" in page.per_match.sub.text()
+        assert text_of(page.complete_rate) == "0.27" and text_of(page.observed_rate) == "0.32"
+        assert "0.20 CERTAIN" in page.complete_rate.sub.text() and "2 matches" in page.complete_rate.sub.text() and "0.21 CERTAIN" in page.observed_rate.sub.text() and "partial" in page.observed_rate.sub.text()
         assert page.table.rowCount() == 4
-        assert [page.table.item(3, c).text() for c in (1, 2, 3, 4, 5)] == ["10m 00s", "2", "3", "Complete", "Placed"]
-        assert [page.table.item(1, c).text() for c in (1, 4, 5)] == ["4m 00s seen", "Partial", "Counting stopped"]
+        assert [page.table.item(3, c).text() for c in (1, 2, 3, 4, 5, 6)] == ["10m 00s", "2", "3", "0.30", "Complete", "Placed"]
+        assert [page.table.item(1, c).text() for c in (1, 4, 5, 6)] == ["4m 00s seen", "0.50 seen", "Partial", "Counting stopped"]
 
 
 def test_partial_only_shows_dashes_for_complete_figures():
@@ -536,7 +536,7 @@ def test_partial_only_shows_dashes_for_complete_figures():
         page.refresh()
         settle(w)
         assert text_of(page.observed) == "10m 00s" and text_of(page.confirmed) == DASH and text_of(page.per_match) == DASH and text_of(page.complete_rate) == DASH
-        assert page.per_match.sub.text() == "Not enough complete match data" and text_of(page.observed_rate) != DASH
+        assert page.per_match.sub.text() == "No complete matches yet" and text_of(page.observed_rate) != DASH
 
 
 def test_the_page_tells_the_reader_what_to_be_careful_about():
@@ -550,7 +550,7 @@ def test_the_page_tells_the_reader_what_to_be_careful_about():
         page.refresh()
         settle(w)
         notes = page.notes.text()
-        assert "left out of the chest rates" in notes and "missing 2 chests" in notes and "1 damaged row skipped" in notes, notes
+        assert "left out of chests per minute" in notes and "missing 2 chests" in notes and "1 damaged row skipped" in notes, notes
         assert page.table.item(0, 2).text() == "1+"
 
 

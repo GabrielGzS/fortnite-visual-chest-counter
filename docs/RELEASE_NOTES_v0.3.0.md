@@ -4,26 +4,29 @@
 
 Windows 10 / 11 · nothing to install · extract the zip and open **`Fortnite Visual Chest Counter.exe`**
 
-**Match tracking, a first Analytics page and quick count corrections.** v0.3.0 can follow your matches while it counts, keep a
-history of them and show what that history says. It is experimental and off by default. Chest detection has not changed.
+**Match tracking, live match stats, a first Analytics page and quick count corrections.** v0.3.0 follows your matches while it
+counts, shows each match's chests as you play, and keeps a history. Match tracking is experimental and on by default, and you can
+turn it off in Settings. Chest detection has not changed.
 
 ### What's new at a glance
 
 | New in v0.3.0 | Why it matters |
 |---|---|
-| **Match tracking (experimental)** | Follows lobby, loading, match and ending while counting. Turn it on in **Settings**. It never changes your counts or what OBS shows |
-| **Analytics** | A new page with matches, match time and chests per match and per minute, CERTAIN and APPROX kept apart |
+| **Match tracking (experimental)** | Follows lobby, loading, match and ending while counting. On by default. It never changes your counts or what OBS shows |
+| **Live match stats** | The Game view shows this match's chests and chests per minute as you play, apart from your lifetime totals |
+| **Analytics** | A new page with matches, match time and chests per minute, overall and for each match |
 | **Honest match quality** | A match only counts as **Complete** if its start and ending were both seen. **Partial** matches never enter complete-match averages |
-| **Dashboard views** | **Overview**, **Game** and **Console** replace one long page. The Live preview is in Game; Activity and Diagnostic recording are in Console |
+| **Dashboard views** | **Overview**, **Game** and **Console** replace one long page. A Live preview is on by default and can be hidden; Activity and Diagnostic recording are in Console |
+| **Chest types in the log** | Activity now names each chest: Regular, Rare, Sprite, or Unknown when it could not be read |
 | **+1 / −1** | Fix APPROX by one chest with a click, also while counting, with an optional reason and Undo |
 | **Not a match / Restore** | Leave a wrong match out of the statistics, and put it back any time. Nothing is deleted |
 | **Save progress every** | Choose how often match tracking writes running totals: 30 seconds to 10 minutes |
 | **No video warning** | If a live input stays open but stops delivering pictures for 10 seconds, the Dashboard says so, and tells you when video returns that some footage may be missing |
 
-### Turning on match tracking
+### Match tracking
 
-**Settings > Match tracking (experimental)**, tick **Track matches and keep a match history**, click **Save**. It starts the next
-time you click **Start counting**. Full guide: [docs/MATCH_TRACKING.md](https://github.com/GabrielGzS/fortnite-visual-chest-counter/blob/main/docs/MATCH_TRACKING.md).
+It is on by default. To turn it off: **Settings > Match tracking (experimental)**, untick **Track matches and keep a match history**,
+click **Save**. Full guide: [docs/MATCH_TRACKING.md](https://github.com/GabrielGzS/fortnite-visual-chest-counter/blob/main/docs/MATCH_TRACKING.md).
 
 ### Detection and counting
 
@@ -33,8 +36,8 @@ Unchanged from v0.2.3. With match tracking on or off, the chests counted, CERTAI
 
 - **Match tracking reads English screens only.** In another language your chests are still counted, but matches show as *Not
   sure yet* and no statistics are made up.
-- Match tracking has been tested on recordings, and has not yet been confirmed on a full real match from start to finish.
-  Other game modes, reboots and squads are untested.
+- Match tracking has been tested on recordings and a few real matches, which is still little evidence. Other game modes, reboots
+  and squads are untested.
 - Analytics only covers chests recorded with match tracking on, and leaves out manual corrections. The Dashboard stays the
   official total.
 - The built-in updater is experimental. v0.3.0 is the first release it can install, so this is its first real update. If it

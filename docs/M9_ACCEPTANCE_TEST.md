@@ -7,10 +7,10 @@ Write down the time of anything odd, then keep going. Send `logs\`, `state\histo
 
 ## Setup
 
-1. Extract `build_out\v0.3.0-rc2\Fortnite-Visual-Chest-Counter-v0.3.0.zip` to a **new, short folder**, for example `C:\fcc-rc\`. Leave your normal
+1. Extract `build_out\v0.3.0-rc3\Fortnite-Visual-Chest-Counter-v0.3.0.zip` to a **new, short folder**, for example `C:\fcc-rc\`. Leave your normal
    install alone, and close it first: only one counter can run at a time.
 2. Open **Fortnite Visual Chest Counter.exe**. Create a profile called `RC test` and select it.
-3. **Settings > Match tracking (experimental)**: tick it, keep **1 minute**, click **Save**.
+3. **Settings > Match tracking (experimental)**: it should already be ticked. Keep **1 minute**.
 4. OBS: **ChestDetectorFeed** showing clean gameplay, **Start Virtual Camera**. In the app choose **OBS Virtual Camera**.
 5. Add an OBS **Text (GDI+)** source reading this copy's `obs_output\chest_counter.txt` (the **Overlay** page has the path).
 
@@ -34,6 +34,12 @@ Write down the time of anything odd, then keep going. Send `logs\`, `state\histo
 | 14 | **OBS Windowed Projector, with the capture card and Virtual Camera already in use.** Keep OBS holding the card and another program using the Virtual Camera. Right-click the gameplay source > **Windowed Projector (Source)**, at least 1280x720. In the app **Refresh**, pick the projector, **Start counting**, play a match | OBS and the other program carry on undisturbed; Live preview shows only the gameplay; chests count |
 | 15 | During 14: put another window over the projector, then minimize it for 20 s, then restore it | Covered: keeps counting. Minimized: the app warns and counts again once restored |
 | 16 | During 14: close the projector | Counting stops with a clear message; counts kept |
+| 17 | During a match, look at **Game** | **Match APPROX** and **Match CERTAIN** count only this match and match the chests you opened; Overview still shows lifetime totals; chests per minute appear after a minute |
+| 18 | Start a new match | Game's counts start again from zero, Overview's do not; **Last match** shows the finished one |
+| 19 | Press **+1** during a match | Overview changes; Game does not |
+| 20 | Switch Overview, Game, Console, Analytics while counting; click **Live preview** to hide it | Only the visible preview moves; hiding it changes nothing about counting |
+| 21 | Quit a match on purpose from the menu | It closes as Partial, ending *Left the match* or *Returned to lobby* |
+| 22 | Look at the Console view | Each counted chest names its type: Regular, Rare, Sprite or Unknown |
 
 ## Pass or fail
 

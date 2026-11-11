@@ -100,8 +100,8 @@ def history_of(tmp):
 
 # ------------------------------------------------------------------ settings
 
-def test_recording_is_off_by_default_and_the_interval_is_a_minute():
-    assert settings.DEFAULTS["match"] == {"mode": "off", "heartbeat_seconds": 60}
+def test_recording_is_on_by_default_and_the_interval_is_a_minute():
+    assert settings.DEFAULTS["match"] == {"mode": "on", "heartbeat_seconds": 60}
 
 
 def test_every_offered_interval_is_accepted():
