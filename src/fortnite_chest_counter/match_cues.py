@@ -23,8 +23,9 @@ victory_royale is a template of the word ROYALE at the two banner sizes seen so 
 to 0.86) only after being resized by about 1.27 times, so a third size may score low. ROYALE is the same word in Portuguese, so this
 signal alone must not be taken as evidence of an English game.
 
-Supporting evidence, never a match ending on its own: `picture_evidence` (black or frozen picture) and `health_bar_pixels` (loading
-artwork can imitate a health bar).
+Supporting evidence, never a match ending on its own: `picture_evidence` (black or frozen picture), `health_bar_pixels` (loading
+artwork can imitate a health bar), and `CueReader.hud_in_view` (the fixed parts of the HUD: is the game still on screen at all?). The HUD is
+also there on the waiting island, so it says nothing about whether a match has started or ended.
 """
 
 from dataclasses import dataclass
@@ -46,6 +47,9 @@ BLACK_LUMA = 12.0                          # mean brightness below this is "no p
 FROZEN_CHANGE = 0.05                       # mean change per channel between samples, on a 0-255 scale, below this is "frozen"
 HEALTH_BAR_MIN_PIXELS = 30                 # a solid bar: the fourth longest row of bar-coloured pixels is at least this long
 _SAMPLE_STEP = 16                          # every 16th pixel each way: 80 x 45 is enough to tell a picture changed
+HUD_TEMPLATE_DIR = paths.TEMPLATES_DIR / "match" / "hud"
+HUD_EDGE = 28.0                            # a brightness step this big between neighbouring pixels is an edge
+HUD_SEARCH = 6                             # how far a HUD shape may sit from where it was measured
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,21 @@ CUES = (Cue("you_placed_screen", (514, 86, 707, 140)), Cue("you_placed_bar", (53
         # The same two sentences on a HUD drawn about 0.78x: at that size the normal templates score under 0.3, so the game's start is missed.
         Cue("waiting_for_players_small", (570, 78, 735, 104)), Cue("bus_launching_small", (600, 58, 800, 84)))
 _CUE = {cue.name: cue for cue in CUES}
+
+
+
+@dataclass(frozen=True)
+class HudCue:
+    name: str
+    box: tuple                             # x0, y0, x1, y1: where the shape was measured, in the 1280x720 frame
+    line: float                            # at or above this the shape is there. research/hud_view_eval.py: play was above and browser pages below at 0.8x to 1.25x of it
+
+
+# The stat icons beside the minimap and the compass arrow, at the two HUD sizes seen. These never change shape, unlike what is drawn inside the minimap,
+# the compass numbers or the hotbar's items. Measured and left out: the minimap's frame (browser pages came too close) and the hotbar (it moves with the selected slot).
+HUD_CUES = (HudCue("stats", (1095, 20, 1119, 60), 0.40), HudCue("stats_small", (1135, 20, 1154, 52), 0.40),
+            HudCue("compass", (630, 16, 650, 28), 0.35), HudCue("compass_small", (630, 16, 650, 28), 0.35))
+_HUD_CUE = {cue.name: cue for cue in HUD_CUES}
 
 _MENU = ("menu_locker", "menu_quests", "menu_career")
 # signal -> the templates behind it. The highest score wins, except the menu bar, where two of the three words must agree.
@@ -90,6 +109,7 @@ class CueReader:
         folder = Path(folder) if folder is not None else TEMPLATE_DIR
         self._templates = {cue.name: np.load(folder / f"{cue.name}.npy").astype(np.float32) for cue in CUES}
         self._ink = {name: float(template.sum()) for name, template in self._templates.items()}
+        self._hud = {cue.name: np.load(HUD_TEMPLATE_DIR / f"{cue.name}.npy").astype(np.float32) for cue in HUD_CUES}
 
     def _score(self, frame, name):
         """One template's best score in its box. A window holding k of the n ink pixels correlates at most sqrt(k/n), so when the
@@ -117,6 +137,18 @@ class CueReader:
             out[signal] = sorted(scores)[-2] if signal == "lobby_menu" else max(scores)
         return out
 
+    def hud_score(self, name, mask):
+        """How well a box of edges (see `hud_edges`) matches one HUD shape, 0 to 1."""
+        if not mask.any():
+            return 0.0
+        score = float(best_template_correlation(mask.astype(np.float32), self._hud[name])[0])
+        return float(np.clip(score, 0.0, 1.0)) if np.isfinite(score) else 0.0
+
+    def hud_in_view(self, frame):
+        """Is any fixed part of the HUD on screen? Evidence that the game is being shown, never that a match started or ended. Never writes to `frame`."""
+        _check_frame(frame)
+        return any(self.hud_score(cue.name, hud_edges(frame, cue.box, HUD_SEARCH)) >= cue.line for cue in HUD_CUES)
+
 
 @dataclass(frozen=True)
 class PictureEvidence:
@@ -134,6 +166,13 @@ def picture_evidence(frame, previous=None):
     luma = float(sample.mean())
     change = None if previous is None else float(np.abs(sample.astype(np.int16) - previous.astype(np.int16)).mean())
     return PictureEvidence(luma, change, luma < BLACK_LUMA, change is not None and change < FROZEN_CHANGE, sample)
+
+
+def hud_edges(frame, box, pad):
+    """Where brightness jumps inside `box`, widened by `pad` on every side, as True/False. Edges survive any background, which colours do not."""
+    x0, y0, x1, y1 = box
+    gray = frame[y0 - pad:y1 + pad + 1, x0 - pad:x1 + pad + 1].astype(np.float32).mean(axis=2)
+    return np.abs(gray[:-1, 1:] - gray[:-1, :-1]) + np.abs(gray[1:, :-1] - gray[:-1, :-1]) >= HUD_EDGE
 
 
 def health_bar_pixels(frame):

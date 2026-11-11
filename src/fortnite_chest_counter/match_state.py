@@ -41,6 +41,9 @@ What it will not claim:
   * A rewind that keeps the clock running cannot be seen directly. A long black or frozen picture marks the match as broken, and gameplay
     reached without a loading screen counts as joined late, so a rewound match stays partial rather than complete.
   * The number after YOU PLACED is not read, so no placement is reported.
+  * Time with nothing of the game in view is not counted as play: no health bar, no fixed HUD, no text and no chest for 10 s or more, for example a
+    browser page. It is uncertain, not an ending, and it does not by itself make a match partial: the footage has no full-screen map or inventory
+    screen to prove those would be told apart. The HUD only answers "is the game on screen?". It never opens or closes a match.
 
 M1's signal names are repeated here on purpose, so this module needs no image code; tests check that both lists agree.
 """
@@ -66,6 +69,8 @@ COUNTDOWN_GONE_ON_BUS, COUNTDOWN_GONE_ANYWAY = 3.0, 15.0
 NO_EVIDENCE_LIMIT = 60.0
 MAX_SAMPLE_GAP = 5.0                       # samples further apart than this mean part of the video was not seen
 NO_PICTURE_BREAK = 3.0                     # a black or frozen picture this long may hide a jump in the video
+GAME_OUT_OF_VIEW = 10.0                    # nothing of the game on screen this long is not play. Over about 1,340 s of real play the longest was 3 s; browser pages ran 18 s and 20 s
+OUT_OF_VIEW_REASON = "game not in view"
 
 
 def chest_language(popup_template):
@@ -82,6 +87,7 @@ class Observation:
     black: bool = False
     frozen: bool = False
     chests: tuple = ()                     # the language of each chest counted since the last observation
+    hud_in_view: object = None             # the fixed HUD seen (True) or not (False); None when it was not measured, as in a recorded timeline
 
 
 @dataclass(frozen=True)
@@ -183,6 +189,8 @@ class MatchStateMachine:
         self._last_evidence_t = None
         self._last_closed_t = float("-inf")
         self._loading_english_continuous = False
+        self._unseen_since = None
+        self._out_of_view = False
 
     @property
     def open_match_number(self):
@@ -221,6 +229,7 @@ class MatchStateMachine:
         self._no_picture_since = None
         self._count_time(elapsed)
         hit = self._remember(observation)
+        self._watch_view(observation, hit)
         self._decide(observation, hit, events)
         self._note_chests(observation)
         return events
@@ -271,6 +280,7 @@ class MatchStateMachine:
 
     def _no_picture(self, t, elapsed, events):
         """Black or frozen: the frame says nothing, so no decision is made and the time counts as uncertain."""
+        self._unseen_since, self._out_of_view = None, False
         if self._match is not None:
             self._match.uncertain += elapsed
         if self._countdown is not None:
@@ -294,6 +304,9 @@ class MatchStateMachine:
         match = self._match
         if match is None:
             return
+        if self._out_of_view:
+            match.uncertain += elapsed
+            return
         match.observed += elapsed
         if self.state == IN_MATCH:
             match.active += elapsed
@@ -305,6 +318,7 @@ class MatchStateMachine:
             recent.clear()
         self._hud.clear()
         self._after.clear()
+        self._unseen_since, self._out_of_view = None, False
         self._loading_english_continuous = False
         if self._countdown is not None:
             self._countdown.signals.clear()               # pending language evidence, not a match already observed
@@ -319,9 +333,28 @@ class MatchStateMachine:
         hud = observation.health_bar_pixels >= HEALTH_BAR_MIN_PIXELS and not screen_text
         self._hud.append((t, hud))
         self._after.append((hud, hit["you_placed"] or hit["eliminated_by"] or hit["spectating"]))
-        if hud or observation.chests or any(hit.values()):
+        if hud or observation.hud_in_view or observation.chests or any(hit.values()):
             self._last_evidence_t = t
         return hit
+
+    def _watch_view(self, observation, hit):
+        """During play, is anything of the game on screen? Time without it stops counting as play, reaching back to when it went."""
+        match = self._match
+        unseen = (self.state == IN_MATCH and match is not None and observation.hud_in_view is False and observation.health_bar_pixels < HEALTH_BAR_MIN_PIXELS
+                  and not observation.chests and not any(hit.values()))
+        if not unseen:
+            self._unseen_since, self._out_of_view = None, False
+            return
+        if self._unseen_since is None:
+            self._unseen_since = observation.t
+        lost_for = observation.t - self._unseen_since
+        if lost_for >= GAME_OUT_OF_VIEW and not self._out_of_view:
+            self._out_of_view = True
+            moved = min(lost_for, match.active)
+            match.active -= moved
+            match.observed -= moved
+            match.uncertain += moved
+            match.reasons.append(OUT_OF_VIEW_REASON)
 
     def _confirmed(self, signal):
         return sum(1 for _, hit, _ in self._recent[signal] if hit) >= CONFIRM_HITS

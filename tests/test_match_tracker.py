@@ -60,6 +60,9 @@ class Cues:
             raise RuntimeError("injected reader failure")
         return frame["scores"]
 
+    def hud_in_view(self, frame):
+        return frame.get("hud")
+
     def health_bar_pixels(self, frame):
         return frame["health"]
 
@@ -861,6 +864,24 @@ def test_a_gap_in_the_live_loop_invents_nothing():
     assert plain == watched and records and not [r for r in records if r["completion"] == S.COMPLETE], records
     assert records[0]["ended_by"] == S.LOST
     assert_sound(records)
+
+
+def test_what_the_hud_shows_reaches_the_state_machine():
+    class Machine:
+        state = "UNKNOWN"
+        seen = []
+
+        def update(self, observation):
+            self.seen.append(observation.hud_in_view)
+            return []
+
+        def snapshot(self):
+            return None
+
+    tracker = MT.MatchTracker(lambda row: None, lambda text: None, cues=Cues(), machine=Machine())
+    tracker.offer(0.0, {**fake_frame(), "hud": True})
+    tracker.offer(1.0, {**fake_frame(), "hud": False})
+    assert Machine.seen == [True, False]
 
 
 if __name__ == "__main__":

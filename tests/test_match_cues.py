@@ -128,7 +128,7 @@ def test_the_reader_keeps_nothing_about_a_frame():
     reader = M.CueReader()
     before = set(vars(reader))
     reader.read(FRAMES[0])
-    assert set(vars(reader)) == before == {"_templates", "_ink"}
+    assert set(vars(reader)) == before == {"_templates", "_ink", "_hud"}
 
 
 def test_a_frame_of_the_wrong_shape_is_refused():
@@ -256,6 +256,76 @@ def test_the_combined_checks_are_within_budget():
         if np.percentile(times, 99) < 10.0:
             return
     raise AssertionError(f"99th percentile {np.percentile(times, 99):.1f} ms is over the 10 ms budget")
+
+
+HUD = np.load(HERE / "fixtures" / "match" / "hud_masks.npz")
+HUD_KINDS = [str(k) for k in HUD["kinds"]]
+
+
+def hud_seen(row):
+    """The real edges of one sample, from footage the templates were not built from."""
+    for cue in M.HUD_CUES:
+        x0, y0, x1, y1 = cue.box
+        shape = (y1 - y0 + 2 * M.HUD_SEARCH, x1 - x0 + 2 * M.HUD_SEARCH)
+        mask = np.unpackbits(HUD[cue.name][row])[:shape[0] * shape[1]].reshape(shape).astype(bool)
+        if READER.hud_score(cue.name, mask) >= cue.line:
+            return True
+    return False
+
+
+def rows_of(kind):
+    return [i for i, k in enumerate(HUD_KINDS) if k == kind]
+
+
+def test_the_hud_is_seen_during_play_on_footage_it_was_not_built_from():
+    rows = rows_of("playing")
+    assert len(rows) >= 30 and all(hud_seen(i) for i in rows)
+
+
+def test_browser_pages_show_no_hud():
+    rows = rows_of("browser page")
+    assert len(rows) >= 30 and not any(hud_seen(i) for i in rows)
+
+
+def test_the_hud_is_on_the_waiting_island_too_so_it_cannot_start_a_match():
+    rows = rows_of("waiting island")
+    assert len(rows) >= 30 and sum(hud_seen(i) for i in rows) >= 0.8 * len(rows)
+
+
+def test_a_plain_picture_shows_no_hud():
+    assert READER.hud_in_view(np.full((720, 1280, 3), 90, np.uint8)) is False
+
+
+def test_the_hud_shape_is_found_near_where_it_was_measured():
+    frame = np.random.default_rng(3).integers(0, 255, (720, 1280, 3), dtype=np.uint8)
+    reader = M.CueReader()
+    cue = M.HUD_CUES[0]
+    for name in reader._hud:
+        reader._hud[name] = np.zeros_like(reader._hud[name])
+    reader._hud[cue.name] = M.hud_edges(frame, cue.box, 0).astype(np.float32)
+    assert reader.hud_in_view(frame) is True
+
+
+def test_checking_the_hud_never_writes_to_the_frame():
+    frame = np.full((720, 1280, 3), 90, np.uint8)
+    frame.flags.writeable = False
+    READER.hud_in_view(frame)
+
+
+def test_the_hud_check_refuses_a_wrong_frame_size():
+    try:
+        READER.hud_in_view(np.zeros((360, 640, 3), np.uint8))
+    except ValueError:
+        return
+    raise AssertionError("a frame of the wrong size was accepted")
+
+
+def test_the_hud_check_is_cheap():
+    frame = np.random.default_rng(4).integers(0, 255, (720, 1280, 3), dtype=np.uint8)
+    begin = time.perf_counter()
+    for _ in range(50):
+        READER.hud_in_view(frame)
+    assert (time.perf_counter() - begin) / 50 < 0.010
 
 
 def test_this_module_depends_only_on_what_it_needs():

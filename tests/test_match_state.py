@@ -34,9 +34,9 @@ class Script:
         self.machine = S.MatchStateMachine()
         self.events = []
 
-    def show(self, seconds, *signals, health=0, black=False, frozen=False, chests=()):
+    def show(self, seconds, *signals, health=0, black=False, frozen=False, chests=(), hud=None):
         for i in range(seconds):
-            self.events += self.machine.update(S.Observation(self.t, {s: 0.95 for s in signals}, health, black, frozen, tuple(chests) if i == 0 else ()))
+            self.events += self.machine.update(S.Observation(self.t, {s: 0.95 for s in signals}, health, black, frozen, tuple(chests) if i == 0 else (), hud))
             self.t += 1
         return self
 
@@ -373,6 +373,73 @@ def test_the_real_small_hud_clip_finds_the_island_and_the_bus():
     assert not first.observed_from_start and first.completion != S.COMPLETE
     assert second.observed_from_start and second.ended_by == S.STOPPED and second.completion != S.COMPLETE          # the recording stops mid-match
     assert abs(second.played_from_t - 66) <= 2 and abs(second.active_seconds - 34) <= 2                            # dated from the last countdown, however the bus was sampled
+
+
+# ---- is the game on screen at all?
+
+def test_time_with_the_game_out_of_view_is_not_play():
+    before = played_match()
+    active = before.machine.snapshot()["active_seconds"]
+    r = before.show(20, hud=False).show(30, health=HP, hud=True).show(4, "connecting").finish().records[0]
+    assert abs(r.active_seconds - (active + 30)) <= 2 and abs(r.uncertain_seconds - 20) <= 2 and S.OUT_OF_VIEW_REASON in r.reasons
+    assert abs(r.observed_seconds + r.uncertain_seconds - (r.closed_t - r.opened_t)) < 0.01
+
+
+def test_the_game_out_of_view_is_not_an_ending_and_does_not_decide_quality():
+    s = played_match().show(20, hud=False)
+    assert s.state == S.IN_MATCH and s.records == []
+    assert s.show(30, health=HP, hud=True).show(4, "connecting").finish().records[0].completion == S.COMPLETE
+
+
+def test_a_short_loss_of_the_hud_changes_nothing():
+    r = played_match().show(9, hud=False).show(10, health=HP, hud=True).finish().records[0]
+    assert r.uncertain_seconds == 0 and S.OUT_OF_VIEW_REASON not in r.reasons
+
+
+def test_the_hud_without_a_health_bar_is_still_the_game():
+    r = played_match().show(30, hud=True).finish().records[0]
+    assert r.uncertain_seconds == 0 and S.OUT_OF_VIEW_REASON not in r.reasons
+
+
+def test_the_health_bar_alone_is_still_the_game():
+    r = played_match().show(30, health=HP, hud=False).finish().records[0]
+    assert r.uncertain_seconds == 0
+
+
+def test_text_or_a_chest_is_still_the_game():
+    s = played_match()
+    for _ in range(4):
+        s.show(8, hud=False).show(1, hud=False, chests=("en",))
+    assert s.finish().records[0].uncertain_seconds == 0
+
+
+def test_a_recording_without_hud_evidence_is_never_called_out_of_view():
+    r = played_match().show(30).finish().records[0]
+    assert r.uncertain_seconds == 0 and S.OUT_OF_VIEW_REASON not in r.reasons
+
+
+def test_the_hud_keeps_a_match_alive_without_a_health_bar():
+    assert played_match().show(90, hud=True).state == S.IN_MATCH
+
+
+def test_a_long_time_out_of_view_still_loses_the_match():
+    s = played_match().show(90, hud=False)
+    assert s.records[0].ended_by == S.LOST and s.records[0].completion == S.PARTIAL
+
+
+def test_the_hud_cannot_start_a_match():
+    s = Script().show(40, hud=True)
+    assert s.state == S.UNKNOWN and s.machine.open_match_number is None
+
+
+def test_the_hud_on_the_island_is_not_play():
+    s = Script().show(5, "lobby_menu").show(8, "connecting").show(20, "waiting_for_players", hud=True)
+    assert s.state == S.PRE_GAME and s.machine.open_match_number is None
+
+
+def test_no_picture_is_not_also_counted_as_out_of_view():
+    r = played_match().show(6, hud=False).show(2, black=True).show(6, hud=False).show(10, health=HP, hud=True).finish().records[0]
+    assert S.OUT_OF_VIEW_REASON not in r.reasons
 
 
 def test_a_counted_chest_means_it_was_not_the_island():

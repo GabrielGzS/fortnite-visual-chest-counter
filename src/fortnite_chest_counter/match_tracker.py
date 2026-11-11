@@ -136,7 +136,7 @@ class MatchTracker:
         scores, health = self._reader.read(frame), self._cues.health_bar_pixels(frame)
         chests, self._pending = tuple(self._pending), []
         self._chests["no_picture" if picture.black or picture.frozen else "delivered"] += len(chests)
-        self._checkpoint(t, self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests))))
+        self._checkpoint(t, self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests, self._reader.hud_in_view(frame)))))
         self._tell(t, picture)
         return True
 
