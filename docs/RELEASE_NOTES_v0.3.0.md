@@ -42,7 +42,8 @@ Unchanged from v0.2.3. With match tracking on or off, the chests counted, CERTAI
 - HUD sizes other than normal, about 1.3x larger and about 0.8x smaller are untested; Portuguese pop-ups are recognised on a
   normal HUD only, and Portuguese stacked pop-ups are untested.
 - Chest types: English only; the rare / sprite split is based on a small number of streams.
-- Livestream URL counts what viewers get - video the platform never delivered (outages, ad breaks) cannot be counted.
+- Livestream URL is a lower-confidence convenience option: it counts what viewers get, and can miss chests through compression, ad
+  breaks, buffering or reconnects. How many has not been measured.
 - **Fair play:** the app only analyses video pixels and never touches Fortnite. In one developer session it analysed a
   livestream on the same PC while Fortnite was being played without a BattlEye interruption - one observation, not a
   guarantee; anti-cheat compatibility has not been officially verified. See the README's *Fair play and compatibility*.

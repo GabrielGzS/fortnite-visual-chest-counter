@@ -50,7 +50,9 @@ automatically; a deleted one is reported.
   **Forget password** removes it.
 - **What the app may do in OBS:** it only lists inputs, reads one source's settings and sets that source's text. It
   cannot start or stop your stream, change scenes or anything else.
-- **OBS on another PC:** enter that PC's IPv4 address instead of `127.0.0.1` and allow TCP port 4455 in its firewall.
+- **OBS on another PC:** enter that PC's IPv4 address instead of `127.0.0.1` and allow TCP port 4455 in its firewall, on a
+  **Private** network. This connection is not encrypted, so keep it on your own local network and never forward the port
+  to the internet. Tested against a simulated OBS server, not yet with OBS on a second PC.
 - **Do not let two tools update the same Text source** (for example an older counter script and this app): the last one
   wins and the text flickers. Give each tool its own source.
 

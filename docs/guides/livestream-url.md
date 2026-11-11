@@ -12,6 +12,9 @@ it is; the counter can even run on another PC.
 >
 > Good to know: the counter sees what viewers get - bursts, buffering, ad breaks and stream restarts included. It reconnects
 > by itself and keeps your counts; video the platform never delivered cannot be counted (the app tells you when).
+>
+> **This is the convenient option, not the most accurate one.** Treat its number as a lower-confidence estimate. To count
+> your own play as reliably as possible, use [OBS Virtual Camera](obs-single-pc.md) or a [capture card](capture-card.md).
 
 ## Use it
 
@@ -25,8 +28,10 @@ it is; the counter can even run on another PC.
 
 ## What to expect
 
-- **A delay of a few seconds to ~15 s.** Twitch and YouTube send video in bursts of several seconds; the counter analyses
-  every picture in order, so nothing in a burst is skipped. Counting is complete, just not instant.
+- **A delay of a few seconds to ~15 s.** Twitch and YouTube send video in bursts of several seconds. The counter analyses
+  every picture that reaches it, in order, but it can only count what arrives.
+- **Chests can be missed.** Compression can make a pop-up unreadable, sometimes with nothing to tell you so. Video lost to
+  ad breaks, buffering, reconnects or the counter falling behind is never seen. How many this costs has not been measured.
 - **The stream's picture quality is what counts.** The counter reads 720p (about 20 % of one CPU core to receive and
   decode it). Facecams, overlays or a small gameplay area covering the chest pop-up can make it miss chests.
 - **The app always says when the stream is not delivering video:** the status pill and the Live preview switch to

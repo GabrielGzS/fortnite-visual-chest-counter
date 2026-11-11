@@ -75,7 +75,9 @@ number closely, but computer vision is never 100%. See <a href="#limits">Known l
   <li><a href="#inputs">Other video inputs</a></li>
   <li><a href="#profiles">Profiles</a></li>
   <li><a href="#types">Chest types</a></li>
+  <li><a href="#projector">OBS projector window</a></li>
   <li><a href="#overlay">Show it on stream</a></li>
+  <li><a href="#websocket">OBS WebSocket</a></li>
   <li><a href="#custom">Customize text</a></li>
   <li><a href="#activity">Dashboard views</a></li>
   <li><a href="#matches">Match tracking &amp; Analytics</a></li>
@@ -95,7 +97,7 @@ number closely, but computer vision is never 100%. See <a href="#limits">Known l
 first two &mdash; no OBS needed:</p>
 <table>
   <tr><th>You want to count</th><th>Video source</th></tr>
-  <tr><td><b>A Twitch or YouTube livestream</b> (anyone&rsquo;s)</td><td><b>Livestream URL</b> &mdash; paste the link, <a href="#stream">details</a></td></tr>
+  <tr><td><b>A Twitch or YouTube livestream</b> (anyone&rsquo;s)</td><td><b>Livestream URL</b> &mdash; paste the link. Convenient, but it can miss chests, <a href="#stream">details</a></td></tr>
   <tr><td><b>Anything on a screen</b>: a stream or video playing fullscreen, or your own game</td><td><b>Screen 1 / Screen 2</b> &mdash; <a href="#screen">details</a></td></tr>
   <tr><td><b>Your own stream</b>, from your OBS scene (one PC, or a second PC over the network)</td><td><b>OBS Virtual Camera</b> &mdash; <a href="#single">one PC</a>, <a href="#dual">two PCs</a></td></tr>
   <tr><td>A capture card read directly, or an OBS projector window</td><td><b>Capture device</b> / <b>OBS projector</b> &mdash; marked <i>less tested</i>, <a href="#inputs">details</a></td></tr>
@@ -106,10 +108,10 @@ first two &mdash; no OBS needed:</p>
 <p>No OBS, capture card or browser needed. In the app: <b>Video source</b> &rarr; <b>Livestream URL (Twitch / YouTube)</b>,
 paste the link (<code>https://www.twitch.tv/CHANNEL</code> or a YouTube <code>watch?v=</code> /
 <code>@CHANNEL/live</code> link), keep <b>Stream stability: Maximum stability (recommended)</b>, click <b>Start
-counting</b>. The stream must be live and public. Tested for hours at a time (a 3-hour session counted about 500 chests).</p>
+counting</b>. The stream must be live and public. Tested for hours at a time (a 3-hour session counted about 500 chests; that count was not checked chest by chest).</p>
+<div class="note warn"><b>This is the convenient option, not the most accurate one.</b> Treat its number as a lower-confidence estimate: chests can be missed, sometimes with nothing on screen to tell you so. How many has not been measured. To count your own play as reliably as possible, use <a href="#single">OBS Virtual Camera</a> or a capture card.</div>
 <ul>
-<li>The counter reads the stream as viewers get it, a few seconds to about a minute behind, and checks every picture in
-order. Delay does not matter for the count.</li>
+<li>The counter reads the stream as viewers get it, a few seconds to about a minute behind. It checks every picture that reaches it, in order, but it can only count what arrives: stream compression can make a pop-up unreadable, and video lost to ad breaks, buffering, reconnects or the counter falling behind is never seen.</li>
 <li><b>Stream stability:</b> <i>Maximum stability</i> = lowest buffering risk, most delay (best for long sessions);
 <i>Balanced</i> = moderate buffering risk; <i>Low latency</i> = higher buffering risk, not recommended when complete counts
 matter. No setting can bring back video the platform never delivered.</li>
@@ -205,7 +207,26 @@ this does not work while OBS is using the card. If the app says the device canno
 
 <h2 id="inputs">Other video inputs (Virtual Camera already in use?)</h2>
 <p>For OBS users whose Virtual Camera is already taken, or who want to read a capture card directly. These are marked
-<i>less tested</i> in the <b>Video source</b> list (click <b>Refresh</b> if you just plugged something in):</p>
+<i>less tested</i> in the <b>Video source</b> list (click <b>Refresh</b> if you just plugged something in).</p>
+
+<h3 id="projector">OBS Windowed Projector (capture card and Virtual Camera already in use)</h3>
+<p>If <b>OBS owns the capture card</b> and <b>the Virtual Camera is used by another program</b>, the counter can read your gameplay from an OBS projector window instead. The card is not opened a second time, no Virtual Camera or plugin is needed, and your stream stays exactly as it is.</p>
+<ol>
+  <li>In OBS, right-click your <b>gameplay source</b> (for example the capture card&rsquo;s Video Capture Device), in the Sources list or in the preview, and choose <b>Windowed Projector (Source)</b>. A window opens showing only that source.</li>
+  <li>Make that window <b>at least 1280&times;720</b>. Bigger is fine, and any shape works: black bars are cut off automatically.</li>
+  <li>Recommended: OBS &rarr; <b>Settings &gt; General &gt; Projectors</b> &rarr; tick <b>Save projectors on exit</b>, so the projector reopens every time OBS starts.</li>
+  <li>In the app click <b>Refresh</b>, then pick <b>OBS projector: Windowed Projector (Source) - <i>your source</i></b> in the <b>Video source</b> list.</li>
+  <li>Click <b>Start counting</b>. On the Dashboard&rsquo;s <b>Game</b> view, turn on <b>Live preview</b> once to check that the whole picture is your gameplay with the HUD.</li>
+</ol>
+<ul>
+  <li>The projector <b>may stay behind other windows</b>, but it must <b>not be minimized</b>: a minimized window has no picture to count.</li>
+  <li><b>Closing the projector</b> or OBS stops counting, with a message. Open it again and click <b>Start counting</b>.</li>
+  <li>The projector shows the source itself, not your live scene, so switching scenes or overlays on your stream does not change what the counter sees.</li>
+  <li>If you rename the gameplay source, its projector gets a new title: pick it again in the list.</li>
+</ul>
+<div class="note warn"><b>Less tested:</b> this has been tested with a stand-in window, and not yet with a real OBS projector and a physical capture card.</div>
+
+<h3>Other options</h3>
 <table>
   <tr><th>In the list</th><th>Good to know</th></tr>
   <tr><td><b>Screen 2</b> (etc.) with an <b>OBS projector</b>: in OBS right-click your gameplay source &rarr; <b>Fullscreen Projector (Source)</b> &rarr; your second monitor</td>
@@ -224,6 +245,25 @@ this does not work while OBS is using the card. If the app says the device canno
   <li>Choose a font, size and colour. Click OK and place it on screen.</li>
 </ol>
 <div class="note">Put the text source only in the scene your <b>viewers</b> see, never in ChestDetectorFeed.</div>
+<p><b>This needs the app and OBS on the same PC</b>, because OBS reads the file from the counter&rsquo;s folder. The file is rewritten the moment a chest is counted, and OBS re-reads it about once a second, so the text changes within one to two seconds. If OBS runs on another PC, use <a href="#websocket">OBS WebSocket</a>.</p>
+
+<h3 id="websocket">OBS on another PC, or instant updates: OBS WebSocket (optional)</h3>
+<p>The app can put the same text straight into a Text source through OBS&rsquo;s built-in WebSocket server (OBS 28 or newer). Updates show at once, the source needs no file path, and <b>OBS can be on a different PC</b>. The text file is still written either way.</p>
+<ol>
+  <li>In OBS: <b>Tools &gt; WebSocket Server Settings</b> &rarr; tick <b>Enable WebSocket server</b> (port <b>4455</b>). Leave <b>Enable Authentication</b> on and click <b>Show Connect Info</b> to see the password.</li>
+  <li>In the app: <b>Overlay</b> page &rarr; <b>OBS WebSocket</b> &rarr; tick <b>Update a Text source in OBS directly</b>.</li>
+  <li><b>OBS on this PC:</b> leave the address as <code>127.0.0.1</code>. <b>OBS on another PC:</b> enter that PC&rsquo;s IPv4 address (run <code>ipconfig</code> there) and allow <b>TCP port 4455</b> in its Windows Firewall, on a <b>Private</b> network.</li>
+  <li>Paste the password and click <b>Connect</b>.</li>
+  <li>Pick your <b>Text source</b> in the list. Use one <b>without</b> &ldquo;Read from file&rdquo;, or click <b>Use direct updates</b> if it reads the file (the app never changes that setting by itself).</li>
+</ol>
+<ul>
+  <li>The status line says what is happening: <i>Connected</i>, <i>Waiting for OBS</i> (the app keeps trying and catches up when OBS is back), <i>Password problem</i>, and so on.</li>
+  <li>The password is kept in Windows Credential Manager, never in <code>config.toml</code>, a log or the diagnostics report.</li>
+  <li>The app only lists sources, reads one source&rsquo;s settings and sets that source&rsquo;s text. It cannot start or stop your stream or change scenes.</li>
+  <li><b>Keep this on your own local network.</b> OBS&rsquo;s WebSocket connection is not encrypted, so never forward port 4455 to the internet.</li>
+  <li>Do not let two tools update the same Text source, or the text will flicker. Give each tool its own source.</li>
+</ul>
+<div class="note warn"><b>Less tested:</b> this has been tested against a simulated OBS server, and not yet with OBS on a second PC.</div>
 
 <h2 id="custom">Customize what viewers see</h2>
 <p>Open the <b>Overlay</b> page in the app:</p>
@@ -384,7 +424,7 @@ If chests stop being counted after a Fortnite update, please report it on the pr
   <li><b>Language:</b> chest detection uses the word in the pop-up. Supported: <b>English</b> (CHEST, incl. RARE CHEST and SPRITE CHEST) and <b>Brazilian Portuguese</b> (BA&Uacute;). Other languages are not supported yet. Chest types are read for English only.</li>
   <li><b>HUD layout:</b> it expects the HUD in its usual place at a 16:9 picture. For <b>English</b> pop-ups a HUD drawn larger (up to about 1.3&times;) or smaller (about 0.8&times;, tested on one stream) is recognised; those chests count in <b>APPROX only</b>, never CERTAIN. Other HUD sizes, a moved or hidden HUD, Portuguese pop-ups on a non-standard HUD, or a 4:3 / vertical picture will not work well.</li>
   <li><b>Chests opened in quick succession</b> are added to the pop-up on screen (&ldquo;RARE CHEST X2&rdquo;, &ldquo;X3&rdquo;, another chest line). They are counted (multiplier steps in APPROX only); two chests within a fraction of a second can count as one &mdash; never as two for one chest.</li>
-  <li><b>Livestream URL</b> sees what viewers get: bursts, buffering, ad breaks and reconnects. Video the platform never delivered cannot be counted. <b>Screen</b>: the gameplay must fill the screen.</li>
+  <li><b>Livestream URL is a lower-confidence convenience option.</b> It sees what viewers get: compression, bursts, buffering, ad breaks and reconnects. It can miss chests, and how many has not been measured. <b>Screen</b>: the gameplay must fill the screen.</li>
   <li><b>Clean gameplay feed recommended:</b> overlays, webcam or alerts on top of the HUD can hide the clues.</li>
   <li><b>Audio is not used.</b> Only the picture is analysed.</li>
   <li><b>Match tracking is experimental:</b> English screens only, tested on recordings but not yet on a full real match from start to finish. Other modes, reboots and squads are untested. Your counts never depend on it.</li>

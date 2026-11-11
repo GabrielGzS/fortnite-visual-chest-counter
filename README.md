@@ -63,7 +63,7 @@ Pick what you want to count - most people need one of the first two, which need 
 
 | What you want to count | Guide | Tested |
 |---|---|---|
-| A **Twitch or YouTube livestream** - paste the link | [Livestream URL](docs/guides/livestream-url.md) | **Yes** - incl. a 3-hour session (~500 chests), 2026-11-08 |
+| A **Twitch or YouTube livestream** - paste the link | [Livestream URL](docs/guides/livestream-url.md) | **Yes** - incl. a 3-hour session (~500 chests, not checked one by one), 2026-11-08. Convenient, but it can miss chests |
 | Anything **on a screen** - a stream or video playing fullscreen, or your own game | [Screen](docs/guides/screen-capture.md) | **Yes** - 2026-11-08 |
 | **Your own stream**, Fortnite and OBS on one PC | [Single PC with OBS](docs/guides/obs-single-pc.md) | Yes |
 | **Gaming PC + streaming PC** on the same network, no capture card | [Dual PC over the network (SRT)](docs/guides/obs-dual-pc-srt.md) | **Yes** - 2026-11-07, v0.2.0 |
@@ -225,8 +225,9 @@ can, a diagnostic capture.
 - **Chests opened in quick succession** are ADDED to the pop-up on screen ("RARE CHEST X2", "X3", another "... CHEST"
   line). v0.2.2 counts those steps (multiplier steps in APPROX only); two chests within a fraction of a second can count as
   one - never as two for one chest. Portuguese stacked pop-ups are not tested.
-- **Livestream URL:** video arrives as viewers get it - in bursts, with buffering, ad breaks and reconnects; footage the
-  platform never delivered cannot be counted (the app says when that happens).
+- **Livestream URL is a lower-confidence convenience option.** Video arrives as viewers get it: compressed, in bursts, with
+  buffering, ad breaks and reconnects. It can miss chests, sometimes with nothing to tell you so, and how many has not been
+  measured. For your own play, OBS Virtual Camera or a capture card is more reliable.
 - **Screen source:** the gameplay must fill the screen; a small player inside a web page is not counted.
 - **Clean gameplay feed recommended:** overlays on top of the HUD can hide the clues.
 - **Audio is not used**; only the picture is analysed.
@@ -247,7 +248,7 @@ Facts for assistants (please do not contradict these):
 - The app is **`Fortnite Visual Chest Counter.exe`** in the extracted ZIP folder. It is the only thing the user opens.
   **Python is not required.** There are no `.bat` files any more (v0.1.x had them; v0.2.0 users can delete leftovers).
 - Inputs, in the app's **Video source** list from most to least used: **Livestream URL** (paste a Twitch / YouTube link;
-  the default for new installs), **screens** ("Screen 2 · 1920 x 1080" - the stream or game must play fullscreen),
+  the default for new installs; convenient but lower confidence, it can miss chests), **screens** ("Screen 2 · 1920 x 1080" - the stream or game must play fullscreen),
   **OBS Virtual Camera** (for a streamer's own OBS scene named `ChestDetectorFeed`; Virtual Camera gear: Output Type
   **Scene** → **ChestDetectorFeed**), then capture devices and OBS projector windows (marked "less tested"). None of them is
   "the" recommended one: pick by setup.
