@@ -1,11 +1,11 @@
 # M9 validation record
 
-Date: 2026-11-11. Branch `dev/v0.3.0`. The full run and rc1 are from `e44a7e4`, rc2 from `a77847b`, and rc3, the current
-candidate, from `116e5a9`. Nothing was pushed, merged, tagged or published, and the production keys were not used.
+Date: 2026-11-11. Branch `dev/v0.3.0`. The full run and rc1 are from `e44a7e4`, rc2 from `a77847b`, rc3 from `116e5a9`, and rc4,
+the current candidate, from `20447a6`. Nothing was pushed, merged, tagged or published, and the production keys were not used.
 
 ## Not verified
 
-- **rc3 has not been used by hand yet.** rc2 was, in a real session; see "M9F" below and
+- **rc4 has not been used by hand yet.** rc2 was, in a real session; see "M9F" below and
   [M9_ACCEPTANCE_TEST.md](M9_ACCEPTANCE_TEST.md).
 - **A real in-app update from v0.2.3 has not been run**, and neither has a real rollback or retry. It is blocked: see "The
   blue screen" below. Extract-over upgrades were tested instead.
@@ -221,6 +221,52 @@ the replay scorecard and one full-video pass. Existing records would not change;
 
 **The 12-minute Complete match is genuine.** Countdown from 445.2, bus at 460.9, YOU PLACED read at 1186.5 (score 0.978), then
 ELIMINATED BY and CONNECTING. Duration 725.6 s, 53 English chests, no break.
+
+## Packaging hotfix: extraction in Windows Explorer
+
+**rc4:** `build_out\v0.3.0-rc4\Fortnite-Visual-Chest-Counter-v0.3.0.zip`, 155.8 MB, unsigned, SHA-256
+`0d9d557d115d35989e065b5ddb83498a4b087ede7198475ebc54c3ebbb147e0b`.
+
+**Cause.** Explorer's Extract All puts a folder named after the zip in front of each entry. Extracted in place from
+`build_out\v0.3.0-rc3`, the longest entry reached exactly 260 characters. Measured with Explorer's own zip engine: a file at 259
+characters extracts and one at 260 does not. A folder over 247 also fails.
+
+| | rc3 | rc4 |
+|---|---:|---:|
+| Longest entry in the zip | 140 | 130 |
+| Deepest folder | 120 | 120 |
+| Files | 5,044 | 5,030 |
+| Zip size, bytes | 155,903,551 | 155,826,641 |
+
+**Removed, 15 files.** `lxml/isoschematron` (XML schema validation, 11 files): Streamlink and the program never import it, shown by
+importing every program module and all Streamlink plugins. 4 compiled caches over the budget: 3 from SciPy, 1 from a Trio test.
+Their sources stay, and Python compiles them in a few milliseconds. The version folder, `runtime\lib` and the official Python
+stay as they are: v0.2.3's updater requires that layout.
+
+**Prevention.** The build and the publish gate refuse any file over 130 characters or folder over 120, which leaves room for a zip
+in a folder of up to 90 characters.
+
+**Verified.** The whole zip went through Explorer's engine at the very edge of that budget (longest path 257). All 5,030 files
+arrived intact, and the program started and counted from that folder. An earlier run at a tighter edge lost one file, which is how
+the folder limit was found.
+
+| Check on rc4 | Result |
+|---|---:|
+| Actual zip from a clean folder | 24 of 25, see below |
+| Each of 46 live statuses against the chests finished before it, real worker | All agree |
+| Release gate, unsigned, with the final budget | Pass |
+| v0.2.3's own code reading rc4's layout | Accepted |
+| Release tests / sabotage of the new protections | 68 of 68 / 11 of 11 |
+
+The one failed check compared the last live number (5) with the final history (6). The sixth chest appears to have finished after the
+last status, which goes out once a second. That run's order was not kept, so the 46-status check above replaced it.
+
+**`START_HERE.md` is in `runtime\`, not the root.** Verified against v0.2.3's shipped code: a package with an unknown root file is
+refused as a whole ("Unexpected package contents: START_HERE.md"). The same text opens `README.html`, which is in the root.
+
+**Corrected.** The docs said to extract a new version "into the same folder". Each version unpacks into its own folder, so that could
+never replace anything. They now say to copy `state` and `config.toml` across. The earlier upgrade test copied files over directly,
+so it does prove the data carries over, but it was not that documented step.
 
 ## Known issues
 
