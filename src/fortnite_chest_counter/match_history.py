@@ -1,5 +1,5 @@
 """
-Match history (v0.3.0, M5): the durable evidence later statistics are calculated from. Nothing in the program uses it yet.
+Match history (v0.3.0, M5, M6): the durable evidence later statistics are calculated from. Written only when [match] mode = "on".
 
     state/history/<profile id>/matches.jsonl    runs, heartbeats, state changes, matches, counter changes, gaps, corrections
     state/history/<profile id>/chests.jsonl     counted chests and later chest-type changes
@@ -108,26 +108,30 @@ class HistoryWriter:
         self._lost = {"rows": 0, "certain": 0, "approximate": 0}
         self._warned = self._ended = False
         self._epoch = self._restart_epoch = self._last_event = 0
-        self._seen = {}                    # (event_id, t) -> the epoch it was recorded in
-        self._open_match = None
+        self._seen = {}                    # (event_id, t to the millisecond) -> the epoch it was recorded in
+        self._opened = self._beat = None   # the open match's row and the last checkpoint, for closing it if the tracker cannot
 
     # ------------------------------------------------------------------ a run
     @_contained
-    def start_run(self, source_type, app_version, configured_analysis_fps, languages, certain, approximate, events_logged):
+    def start_run(self, source_type, app_version, configured_analysis_fps, languages, certain, approximate, events_logged, heartbeat_seconds=None):
         """Recovers any run that never finished, then opens this one. `configured_analysis_fps` is the setting, not the rate achieved:
         run_end and heartbeats carry the frames really processed."""
         self._recover(certain, approximate)
         self._add(MATCHES, "run_start", source_type=source_type, app_version=app_version, configured_analysis_fps=configured_analysis_fps,
-                  languages=list(languages), certain_total=certain, approximate_total=approximate, events_logged=events_logged)
+                  languages=list(languages), certain_total=certain, approximate_total=approximate, events_logged=events_logged, heartbeat_seconds=heartbeat_seconds)
 
     @_contained
     def heartbeat(self, t, frames_processed, frames_dropped, match=None):
         """`match` is the open match's running totals, the only time a crash can later claim was observed."""
         snapshot = {key: match[key] for key in SNAPSHOT_FIELDS} if match is not None else None
         self._add(MATCHES, "heartbeat", t=t, frames_processed=frames_processed, frames_dropped=frames_dropped, match=snapshot)
+        self._beat = {"t": t, "match": snapshot}
 
     @_contained
     def end_run(self, t, stop_reason, frames_processed, frames_dropped, elapsed_seconds, certain, approximate, events_logged):
+        if self._opened is not None:                   # the tracker stopped early, so nothing closed this match
+            self._close_interrupted(self.run_id, self._opened, self._beat, False)
+            self._opened = None
         self._add(MATCHES, "run_end", t=t, stop_reason=stop_reason, frames_processed=frames_processed, frames_dropped=frames_dropped,
                   elapsed_seconds=elapsed_seconds, certain_total=certain, approximate_total=approximate, events_logged=events_logged)
         self._ended = True
@@ -139,8 +143,9 @@ class HistoryWriter:
 
     @_contained
     def match_opened(self, event):
-        self._add(MATCHES, "match_opened", **{key: event[key] for key in ("t", "match_number", "observed_from_start", "start_confidence")})
-        self._open_match = event["match_number"]
+        row = {key: event[key] for key in ("t", "match_number", "observed_from_start", "start_confidence")}
+        self._add(MATCHES, "match_opened", **row)
+        self._opened = row
 
     @_contained
     def match_closed(self, record):
@@ -148,8 +153,8 @@ class HistoryWriter:
         row = {key: record[key] for key in MATCH_FIELDS}
         row["evidence"] = sorted(row["evidence"], key=lambda item: (item[0], item[1]))            # M2 gathers these from a set
         self._add(MATCHES, "match_closed", **row)
-        if self._open_match == record["match_number"]:
-            self._open_match = None
+        if self._opened is not None and self._opened["match_number"] == record["match_number"]:
+            self._opened = None
 
     @_contained
     def chest(self, ev, certain_total, approximate_total):
@@ -157,13 +162,14 @@ class HistoryWriter:
         if not (ev.get("certain_counted") or ev.get("approx_counted")):
             return False
         event_id, t = ev["event_id"], ev["time"]
-        if self._seen.get((event_id, t), -1) >= self._restart_epoch:
+        key = event_id, round(t, 3)
+        if self._seen.get(key, -1) >= self._restart_epoch:
             return False
         number = int(event_id[1:])
         if number <= self._last_event:                 # the counter restarted without anyone saying so
             self._epoch += 1
         self._last_event = number
-        self._seen[(event_id, t)] = self._epoch
+        self._seen[key] = self._epoch
         self._add(CHESTS, "chest", counter_epoch=self._epoch, event_id=event_id, t=t, certain_counted=bool(ev.get("certain_counted")),
                   approx_counted=bool(ev.get("approx_counted")), chest_type=ev.get("chest_type"), language=chest_language(ev.get("popup_template")),
                   popup_template=ev.get("popup_template"), adjusted_tier=ev.get("adjusted_tier"), detector_source=ev.get("source"),
@@ -173,7 +179,7 @@ class HistoryWriter:
     @_contained
     def chest_type(self, event_id, t, chest_type):
         """The detector read a counted chest's type better afterwards. A new row; the chest row is never rewritten."""
-        epoch = self._seen.get((event_id, t))
+        epoch = self._seen.get((event_id, round(t, 3)))
         if epoch is not None:
             self._add(CHESTS, "chest_type", counter_epoch=epoch, event_id=event_id, chest_type=chest_type)
 
@@ -209,7 +215,7 @@ class HistoryWriter:
             self._waiting.popleft()
         if self._lost["rows"]:
             lost, self._lost = self._lost, {"rows": 0, "certain": 0, "approximate": 0}
-            self._add(MATCHES, "gap", reason=WRITE_FAILED, match_number=self._open_match, lost_rows=lost["rows"],
+            self._add(MATCHES, "gap", reason=WRITE_FAILED, match_number=self._opened["match_number"] if self._opened else None, lost_rows=lost["rows"],
                       missing_certain=lost["certain"], missing_approximate=lost["approximate"])
 
     def _append(self, name, line):
@@ -265,6 +271,29 @@ class HistoryWriter:
                   uncertain_seconds=round(span - observed, 3), complete_duration_seconds=None, start_confidence=opened["start_confidence"], end_confidence="low",
                   discontinuity=True, english_chests=None, portuguese_chests=None, reasons=["interrupted: no close was written"], evidence=[], interrupted=True,
                   history_incomplete=history_incomplete)
+
+
+def attribute(history):
+    """Each chest with the match it belongs to, worked out from its own time, so correcting a match never rewrites a chest. -> new dicts with
+    match_number (None outside every match), spectating (after the player was out), and credited (during this player's active play)."""
+    by_run, out_at = {}, {}
+    for match in history.matches:
+        by_run.setdefault(match["run_id"], []).append(match)
+    for row in history.transitions:
+        if row["state"] == "ELIMINATED" and row["match_number"] is not None:
+            out_at.setdefault((row["run_id"], row["match_number"]), row["t"])
+    result = []
+    for chest in history.chests:
+        t = chest["t"]
+        match = next((m for m in by_run.get(chest["run_id"], ()) if m["opened_t"] <= t < m["closed_t"]), None)
+        if match is None:
+            result.append({**chest, "match_number": None, "spectating": False, "credited": False})
+            continue
+        moments = [m for m in (out_at.get((chest["run_id"], match["match_number"])), match.get("ended_t")) if m is not None]
+        spectating = bool(moments) and t >= min(moments)
+        result.append({**chest, "match_number": match["match_number"], "spectating": spectating,
+                       "credited": match["played_from_t"] <= t and not spectating and not match["not_a_match"]})
+    return result
 
 
 def correct_match(folder, run_id, match_number, not_a_match=True):

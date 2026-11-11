@@ -116,8 +116,12 @@ dir = "captures"
 #   "off"    = nothing runs (the default)
 #   "shadow" = follow the match and write what it sees to the session log in logs/, for testing. It needs [logging] enabled.
 #              It never changes your counts, your profiles, the OBS text or the app.
-# "on" is not available yet.
+#   "on"     = also keep a history of your matches and chests in state/history/, for testing. It needs saving turned on in [state].
+#              Your counts and the OBS text stay exactly as they would be with this off.
 mode = "off"
+# Only for mode = "on": how often running totals are saved, in seconds: 30, 60 (recommended), 300 or 600. Matches are still followed
+# once a second whatever this is. A longer interval writes less, but after a crash more of the last moments count as uncertain.
+heartbeat_seconds = 60
 
 [live]
 # Where the video comes from (the app's Video source list sets this for you; most used first):

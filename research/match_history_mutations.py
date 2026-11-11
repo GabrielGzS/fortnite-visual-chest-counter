@@ -16,14 +16,14 @@ import test_match_history as T
 
 MUTATIONS = [
     # identity
-    ("H", "if self._seen.get((event_id, t), -1) >= self._restart_epoch:", "if False:", "test_the_same_event_given_twice_is_recorded_once"),
+    ("H", "if self._seen.get(key, -1) >= self._restart_epoch:", "if False:", "test_the_same_event_given_twice_is_recorded_once"),
     ("H", "if number <= self._last_event:", "if False:", "test_a_real_reset_during_a_run_keeps_both_chests"),
     ("H", "self._restart_epoch, self._last_event = self._epoch, 0", "self._last_event = 0", "test_an_announced_reset_separates_even_identical_ids_and_times"),
     ("H", "key = row[\"run_id\"], row[\"counter_epoch\"], row[\"event_id\"]", "key = row[\"run_id\"], row[\"event_id\"]", "test_a_real_reset_during_a_run_keeps_both_chests"),
     ("H", "key = row[\"run_id\"], row[\"counter_epoch\"], row[\"event_id\"]", "key = row[\"counter_epoch\"], row[\"event_id\"]", "test_event_ids_may_repeat_in_another_run"),
     ("H", "key = row[\"run_id\"], row[\"counter_epoch\"], row[\"event_id\"]", "key = row[\"id\"]", "test_the_same_chest_under_a_new_row_id_counts_once"),
     ("H", "elif row[\"id\"] not in seen:", "else:", "test_a_repeated_row_of_any_kind_counts_once"),
-    ("H", "epoch = self._seen.get((event_id, t))", "epoch = self._epoch", "test_a_type_change_reaches_the_right_chest_after_a_reset"),
+    ("H", "epoch = self._seen.get((event_id, round(t, 3)))", "epoch = self._epoch", "test_a_type_change_reaches_the_right_chest_after_a_reset"),
     ("H", "if epoch is not None:", "if True:", "test_a_type_change_for_an_unknown_chest_writes_nothing"),
     ("H", "\"id\": f\"{self.run_id}:{self._n}\", \"run_id\": self.run_id, \"at\": self._now(), **fields})\n        self._flush()", "\"id\": f\"{self.run_id}:{self._n}\", \"run_id\": self.run_id, \"at\": \"later\", **fields})\n        self._flush()", "test_a_retried_row_keeps_its_original_wall_clock"),
     # what is stored
@@ -51,7 +51,8 @@ MUTATIONS = [
     ("H", "\"id\": f\"{self.run_id}:{self._n}\", \"run_id\": self.run_id, \"at\": self._now(), **fields})\n        self._flush()", "\"id\": f\"{fields.get('run_id', self.run_id)}:{self._n}\", \"run_id\": self.run_id, \"at\": self._now(), **fields})\n        self._flush()", "test_recovery_rows_cannot_collide_with_the_crashed_runs_rows"),
     ("H", "return f\"{datetime.now():%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}\"", "return f\"{datetime.now():%Y%m%dT%H%M%S}\"", "test_run_ids_do_not_repeat_within_the_same_second"),
     ("H", "self.folder, self.run_id = Path(folder), run_id or new_run_id()", "self.folder, self.run_id = Path(folder), run_id or \"same-every-time\"", "test_a_restarted_session_cannot_reuse_an_identity"),
-    ("H", "if self._seen.get((event_id, t), -1) >= self._restart_epoch:", "if self._seen.get((event_id, t), -1) > self._restart_epoch:", "test_repeated_delivery_is_still_ignored_after_a_reset"),
+    ("H", "if self._seen.get(key, -1) >= self._restart_epoch:", "if self._seen.get(key, -1) > self._restart_epoch:", "test_repeated_delivery_is_still_ignored_after_a_reset"),
+    ("H", "        if self._opened is not None:                   # the tracker stopped early, so nothing closed this match\n            self._close_interrupted(self.run_id, self._opened, self._beat, False)\n            self._opened = None\n", "", "test_a_run_never_ends_with_a_match_left_open"),
     ("H", "if run_id == started[-1] else (0, 0)", "", "test_only_the_newest_unfinished_run_is_compared_with_the_totals"),
     ("H", "started = [run_id for run_id, run in history.runs.items() if run[\"start\"] is not None]\n        for run_id in started:", "started = list(history.runs)\n        for run_id in [r for r in started if history.runs[r][\"start\"] is not None]:", "test_a_run_with_no_start_row_cannot_hide_the_newest_run"),
     ("H", "lost = any(value > 0 for value in missing)", "lost = any(missing)", "test_totals_lowered_after_a_crash_are_recorded_but_lose_no_chests"),

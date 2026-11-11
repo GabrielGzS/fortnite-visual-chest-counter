@@ -296,6 +296,7 @@ class CounterSession:
         self.log = SessionLog(cfg["logging"])
         self.latencies = []
         self.recent = {}                      # event time -> (event id, chest type, certain, approx): for type updates
+        self.history = None                   # a match history writer, only with [match] mode = "on"
         self._warned = set()
         self._mtime = self._state_mtime()
 
@@ -337,6 +338,8 @@ class CounterSession:
         self.state.clear()
         self.state.update(new)
         self._mtime = self._state_mtime()
+        if self.history is not None:                     # even with the counts unchanged, a Reset has restarted the event ids
+            self.history.counter_changed("external", self.state["certain"], self.state["approximate"])
         self.write_obs()
         self.log.write({"event": "external_change", "previous": {"certain": before[0], "approximate": before[1]},
                         "counts_after": {"certain": self.state["certain"], "approximate": self.state["approximate"]},
@@ -394,6 +397,8 @@ class CounterSession:
                             "counts_after": {"certain": st["certain"], "approximate": st["approximate"]},
                             "obs_write_s": round(write_s, 4), "logged_at": now_iso()},
                            counted=bool(certain_inc or approx_inc))
+            if self.history is not None and (certain_inc or approx_inc):      # after the totals are saved; contains its own errors
+                self.history.chest(ev, st["certain"], st["approximate"])
             if not quiet:
                 CONSOLE.event(ev, self.fmt(st["certain"]), self.fmt(st["approximate"]), st["certain"], st["approximate"])
             applied.append(ev)
@@ -422,6 +427,8 @@ class CounterSession:
             dst["certain"] += certain_inc
             dst["approx"] += approx_inc
             self.recent[round(u["time"], 3)] = (event_id, new, certain_inc, approx_inc)
+            if self.history is not None:
+                self.history.chest_type(event_id, u["time"], new)
             self.log.write({"event": "type_update", "event_id": event_id, "from": old, "to": new,
                             "confidence": u.get("type_confidence"), "evidence": u.get("type_evidence"),
                             "logged_at": now_iso()})
@@ -529,6 +536,7 @@ class Mp4FrameSource:
 
     def __init__(self, path, fps, start=0.0, until=None):
         self.path, self.fps, self.start, self.until = Path(path), fps, start, until
+        self.frames_processed = self.frames_dropped = 0
 
     def frames(self):
         cmd = ["ffmpeg", "-v", "error"]
@@ -546,6 +554,7 @@ class Mp4FrameSource:
             raw = process.stdout.read(size)
             if len(raw) < size:
                 break
+            self.frames_processed += 1
             yield self.start + i / self.fps, np.frombuffer(raw, np.uint8).reshape(V.NORMALIZED_HEIGHT, V.NORMALIZED_WIDTH, 3)
             i += 1
 
@@ -649,8 +658,9 @@ def cmd_simulate(args):
           f"OBS files {session.obs_dir}; log {session.log.path}")
 
     est = estimator.ChestEstimator()
-    tracker = _open_tracker(cfg, session)
     source = Mp4FrameSource(video, fps, start, args.until)
+    history = _open_history(cfg, session, "simulate")
+    tracker = _open_tracker(cfg, session, history, source)
     wall0, events, last_t = time.time(), [], start
     for t, frame in source.frames():
         last_t = t
@@ -674,6 +684,8 @@ def cmd_simulate(args):
         for ev in flushed:
             tracker.chest(ev)
         tracker.close("stream ended")
+    if history is not None:
+        history.end_run(last_t, "stream ended", source.frames_processed, source.frames_dropped, round(time.time() - wall0, 1), state["certain"], state["approximate"], state["events_logged"])
     print(f"\nFinished at {mmss(last_t)} in {time.time() - wall0:.0f}s wall time. CERTAIN {session.fmt(state['certain'])}, "
           f"APPROX {session.fmt(state['approximate'])}, {len(events)} events logged")
     if args.evaluate and args.name and not args.until and not args.start:
@@ -1122,16 +1134,45 @@ def _open_capture(cfg, kind, label, res, in_fps, fps, mode=None):
     return capture
 
 
-def _open_tracker(cfg, session):
-    """[match] mode = shadow: follow the match beside counting. Never fatal. Imported here so that "off" loads none of it."""
+def _history_folder(cfg):
+    """The active profile's history, or, for an explicit --state file, one named after that file so two counters side by side stay apart."""
+    profile = cfg.get("profile")
+    if profile:
+        return profiles.history_folder(profile["state_base"], profile["id"])
+    state = Path(cfg["state"]["path"])
+    return state.parent / "history" / state.stem
+
+
+def _open_history(cfg, session, source_type):
+    """[match] mode = on: keep this run's match history. Never fatal, and imported here so that other modes load none of it."""
+    if cfg["match"]["mode"] != "on":
+        return None
+    if not session.persist:
+        CONSOLE.warn("match history needs saving turned on ([state] persist); none is kept for this run")
+        return None
+    try:
+        from fortnite_chest_counter.match_history import HistoryWriter
+        history = HistoryWriter(_history_folder(cfg), CONSOLE.warn)
+        history.start_run(source_type, __version__, cfg["detector"]["process_fps"], cfg["detector"]["languages"], session.state["certain"],
+                          session.state["approximate"], session.state["events_logged"], cfg["match"]["heartbeat_seconds"])
+    except Exception as error:
+        CONSOLE.warn(f"match history could not start ({error}); counting is not affected")
+        return None
+    session.history = history
+    return history
+
+
+def _open_tracker(cfg, session, history=None, source=None):
+    """[match] mode = shadow or on: follow the match beside counting. Never fatal. Imported here so that "off" loads none of it."""
     if cfg["match"]["mode"] == "off":
         return None
-    if not cfg["logging"]["enabled"]:
+    if history is None and not cfg["logging"]["enabled"]:
         CONSOLE.warn("match tracking needs [logging] enabled, because the session log is all it writes to; it is off for this run")
         return None
     try:
         from fortnite_chest_counter.match_tracker import MatchTracker
-        return MatchTracker(lambda record: session.log.write({**record, "logged_at": now_iso()}), CONSOLE.warn)
+        return MatchTracker(lambda record: session.log.write({**record, "logged_at": now_iso()}), CONSOLE.warn, history=history,
+                            heartbeat_seconds=cfg["match"].get("heartbeat_seconds"), frames=(lambda: (source.frames_processed, source.frames_dropped)) if source is not None else None)
     except Exception as error:
         CONSOLE.warn(f"match tracking could not start ({error}); counting is not affected")
         return None
@@ -1235,7 +1276,9 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                        "input_resolution": res, "input_fps": in_fps, "normalized": [sources.WIDTH, sources.HEIGHT],
                        "process_fps": fps, "session_started": now_iso(), "config": origin,
                        "ui": "app" if control is not None else "console", "profile": profile_label(cfg)})
-    tracker = _open_tracker(cfg, session)
+    history = _open_history(cfg, session, kind)
+    tracker = _open_tracker(cfg, session, history, source)
+    last_t = None
     interval = live["status_interval_seconds"]
     recent = deque(maxlen=300)                              # bounded: a 12-hour stream must not grow memory
     n_frames, total_s, max_s = 0, 0.0, 0.0
@@ -1272,6 +1315,7 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                 if capture.stopped_reason and not capture_warned:
                     capture_warned = True
                     CONSOLE.warn(f"diagnostic recording stopped: {capture.stopped_reason}. Counting continues.")
+            last_t = t
             if tracker is not None:                         # after counting and outside dt; it contains its own errors
                 for ev in applied:
                     tracker.chest(ev)
@@ -1372,6 +1416,8 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                  "counted_event_latency_s": {"avg": round(float(np.mean(session.latencies)), 2) if session.latencies else None,
                                              "max": round(float(np.max(session.latencies)), 2) if session.latencies else None},
                  "certain": state["certain"], "approximate": state["approximate"]}
+        if history is not None:
+            history.end_run(last_t, stop_reason, stats["frames_processed"], stats["frames_dropped"], stats["seconds"], state["certain"], state["approximate"], state["events_logged"])
         session.log.write({**stats, **tracker.stats()} if tracker is not None else stats)      # the log only: the app's "stopped" message stays as it is
         if preview is not None:
             preview.close()
@@ -1975,7 +2021,7 @@ def build_parser():
     p.add_argument("--realtime", action="store_true", help="pace processing to video time (default: as fast as possible)")
     p.add_argument("--reset", action="store_true")
     p.add_argument("--no-evaluate", dest="evaluate", action="store_false")
-    p.add_argument("--match-mode", help="override [match] mode: off or shadow")
+    p.add_argument("--match-mode", help="override [match] mode: off, shadow or on")
     p.set_defaults(func=cmd_simulate)
 
     p = sub.add_parser("live", parents=[common], help="count chests from a live video source (the default)")
@@ -1989,7 +2035,7 @@ def build_parser():
     p.add_argument("--start", type=float, help="start offset in seconds for --source file")
     p.add_argument("--duration", type=float, help="stop after this many seconds (default: run until Ctrl+C)")
     p.add_argument("--reset", action="store_true", help="zero the counts first (counts are otherwise kept)")
-    p.add_argument("--match-mode", help="override [match] mode: off or shadow")
+    p.add_argument("--match-mode", help="override [match] mode: off, shadow or on")
     p.add_argument("--gui", action="store_true", help=argparse.SUPPRESS)        # desktop-app worker: JSON lines, stdin stop
     p.add_argument("--preview", help=argparse.SUPPRESS)                         # desktop-app preview block name
     p.set_defaults(func=cmd_live)

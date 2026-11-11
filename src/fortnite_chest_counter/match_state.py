@@ -181,6 +181,15 @@ class MatchStateMachine:
     def open_match_number(self):
         return self._match.number if self._match else None
 
+    def snapshot(self):
+        """The open match's running totals, for a checkpoint, or None when no match is open. Reads only: it changes no decision."""
+        match = self._match
+        if match is None:
+            return None
+        return {"match_number": match.number, "opened_t": match.opened_t, "played_from_t": match.played_from_t, "observed_seconds": round(match.observed, 3),
+                "active_seconds": round(match.active, 3), "spectating_seconds": round(match.spectating, 3), "uncertain_seconds": round(match.uncertain, 3),
+                "english_confirmed": bool(match.english)}
+
     # ------------------------------------------------------------------ the two calls
     def update(self, observation):
         """Take the next observation. -> the events it caused, in order: Transition, MatchOpened and MatchRecord."""

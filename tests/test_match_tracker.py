@@ -133,7 +133,7 @@ def toml(tmp, text):
 # ------------------------------------------------------------------ the [match] setting
 
 def test_tracking_is_off_by_default():
-    assert settings.DEFAULTS["match"] == {"mode": "off"}
+    assert settings.DEFAULTS["match"]["mode"] == "off"
 
 
 def test_shadow_can_be_chosen_in_the_config_and_on_the_command_line():
@@ -144,12 +144,12 @@ def test_shadow_can_be_chosen_in_the_config_and_on_the_command_line():
         assert cfg["match"]["mode"] == "shadow" and warnings == []
 
 
-def test_on_is_refused_until_it_exists():
+def test_on_can_be_chosen_explicitly():
     with tempfile.TemporaryDirectory() as tmp:
         cfg, _, warnings = settings.load_config(toml(tmp, '[match]\nmode = "on"\n'))
-        assert cfg["match"]["mode"] == "off" and len(warnings) == 1 and "not available yet" in warnings[0], warnings
+        assert cfg["match"]["mode"] == "on" and warnings == [], warnings
         cfg, _, warnings = settings.load_config(toml(tmp, ""), {("match", "mode"): "on"})
-        assert cfg["match"]["mode"] == "off" and len(warnings) == 1 and "not available yet" in warnings[0], warnings
+        assert cfg["match"]["mode"] == "on" and warnings == [], warnings
 
 
 def test_a_nonsense_mode_falls_back_to_off():
@@ -828,9 +828,9 @@ def test_a_tracker_that_cannot_start_cannot_touch_the_session():
     assert plain == watched and match_lines(log) == []
 
 
-def test_on_requested_on_the_command_line_runs_nothing():
+def test_a_mode_that_does_not_exist_runs_nothing():
     with tempfile.TemporaryDirectory() as tmp:
-        _, log = run_command(tmp, "live", "on")
+        _, log = run_command(tmp, "live", "maybe")
     assert match_lines(log) == []
 
 

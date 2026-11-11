@@ -63,7 +63,8 @@ DEFAULTS = {
         "dir": "captures",
     },
     "match": {
-        "mode": "off",                          # off | shadow (recognise matches for the session log only); "on" is not available yet
+        "mode": "off",                          # off | shadow (recognise matches for the session log only) | on (also keep match history)
+        "heartbeat_seconds": 60,                # how often match history saves running totals: 30 | 60 | 300 | 600
     },
     "live": {
         "source": "stream",                     # stream | desktop | obs-camera | device | window | file
@@ -113,7 +114,8 @@ BOTH_LAYOUTS = ("stacked", "inline")
 VERBOSITY_LEVELS = ("minimal", "normal", "debug")
 CAPTURE_MODES = ("off", "marks", "events", "session")
 CAPTURE_QUALITIES = ("standard", "lossless")
-MATCH_MODES = ("off", "shadow")             # "on" arrives with match history; until then it is refused like any invalid value
+MATCH_MODES = ("off", "shadow", "on")
+MATCH_HEARTBEATS = (30, 60, 300, 600)       # a fixed list: an arbitrary small value could write to the disk constantly
 # The app's language choice -> [detector] languages. "Both" is not automatic detection: it checks both words all the time.
 # (Real "Auto" - identify the language per match - needs match recognition first; see docs/ROADMAP.md.)
 LANGUAGE_CHOICES = (("English", ["en"]), ("Portuguese (Brazil)", ["pt"]), ("Both (English + Portuguese (Brazil))", ["en", "pt"]))
@@ -203,7 +205,9 @@ def _check(section, key, value):
     if section == "capture" and key == "quality":
         return (value in CAPTURE_QUALITIES, f"must be one of {list(CAPTURE_QUALITIES)}")
     if section == "match" and key == "mode":
-        return (value in MATCH_MODES, f'must be one of {list(MATCH_MODES)} ("on" is not available yet)')
+        return (value in MATCH_MODES, f"must be one of {list(MATCH_MODES)}")
+    if section == "match" and key == "heartbeat_seconds":
+        return (type(value) is int and value in MATCH_HEARTBEATS, f"must be one of {list(MATCH_HEARTBEATS)}")
     if key in ("monitor", "status_interval_seconds"):
         return (isinstance(value, int) and not isinstance(value, bool) and value >= 1, "must be a whole number >= 1")
     if isinstance(default, list):

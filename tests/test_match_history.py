@@ -746,14 +746,19 @@ def test_a_finished_run_is_left_alone_when_another_one_crashed():
         assert not history.runs["clean"]["end"].get("interrupted") and history.runs["crashed"]["end"]["interrupted"]
 
 
-def test_a_finished_run_with_an_unclosed_match_is_not_reopened_by_recovery():
+def test_a_run_never_ends_with_a_match_left_open():
+    """If the tracker stopped early, nothing closed the match. Ending the run closes it as interrupted, and recovery adds nothing later."""
     with folder() as f:
         clean = Rig(f, run_id="clean").start()
         clean.writer.match_opened(opened(t=10.0))
+        clean.writer.heartbeat(60.0, 900, 0, match=snapshot(opened_t=8.0, observed=50.0, active=40.0, spectating=5.0))
         clean.end()
         crashed(f, 0, 0, run_id="crashed")
         Rig(f).start(0, 0, 0)
-        assert not [m for m in H.read(f).matches if m["run_id"] == "clean"]
+        history = H.read(f)
+        (row,) = [m for m in history.matches if m["run_id"] == "clean"]
+        assert row["interrupted"] is True and row["completion"] != "complete" and row["active_seconds"] == 40.0 and history.open_matches == []
+        assert_sound([row])
 
 
 def test_a_restarted_session_cannot_reuse_an_identity():
@@ -1123,10 +1128,17 @@ def test_history_depends_only_on_the_standard_library():
     assert imported == {"functools", "json", "os", "uuid", "collections", "dataclasses", "datetime", "pathlib"}, imported
 
 
-def test_nothing_in_the_program_uses_history_yet():
-    for file in (ROOT / "src/fortnite_chest_counter").rglob("*.py"):
-        if file.name != "match_history.py":
+def test_only_the_counter_opens_history_and_only_lazily():
+    src = ROOT / "src/fortnite_chest_counter"
+    for file in src.rglob("*.py"):
+        if file.name not in ("match_history.py", "counter.py", "match_tracker.py"):
             assert "match_history" not in file.read_text(encoding="utf-8"), file.name
+    tree = ast.parse((src / "counter.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            assert "match" not in " ".join([alias.name for alias in node.names] + [getattr(node, "module", None) or ""]), ast.dump(node)
+    tracker = ast.parse((src / "match_tracker.py").read_text(encoding="utf-8"))
+    assert not [n for n in ast.walk(tracker) if isinstance(n, ast.ImportFrom) and "match_history" in " ".join(a.name for a in n.names)]
 
 
 def test_reading_creates_nothing():

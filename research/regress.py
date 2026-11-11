@@ -102,7 +102,7 @@ def main():
     ap.add_argument("--clips", nargs="*", default=DEFAULT_CLIPS, help=f"any of {list(CLIPS)}")
     ap.add_argument("--set", dest="sets", action="append", default=[], help="NAME=VALUE estimator constant override (experiments)")
     ap.add_argument("--jobs", type=int, default=2, help="clips to run in parallel")
-    ap.add_argument("--match-mode", help="run with [match] mode set to this (off or shadow)")
+    ap.add_argument("--match-mode", help="run with [match] mode set to this (off, shadow or on)")
     a = ap.parse_args()
     override = dict(v.split("=", 1) for v in a.video)
     bad = 0

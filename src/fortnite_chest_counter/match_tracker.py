@@ -1,5 +1,6 @@
 """
-Follows the match beside the chest counter (v0.3.0, M4). Shadow mode only: it watches, writes diagnostics, and changes nothing else.
+Follows the match beside the chest counter (v0.3.0, M4, M6). It watches and writes diagnostics, and in "on" mode also passes what it saw to
+the match history. It changes nothing else.
 
 The live loop calls these after each frame has been counted:
 
@@ -7,8 +8,12 @@ The live loop calls these after each frame has been counted:
     offer(t, frame)   an analysed frame; about one per second of source time is actually read
     close(reason)     counting stopped: closes whatever is open
 
-It reuses the frames the detector already decoded and only reads them. Its one output is "match_state" lines in the session log, which
-never carry a "time" key: research/regress.py and research/match_replay.py read any line with one as a chest event.
+It reuses the frames the detector already decoded and only reads them. It writes "match_state" lines in the session log, which never carry
+a "time" key: research/regress.py and research/match_replay.py read any line with one as a chest event.
+
+With a history, a checkpoint saves the open match's running totals every `heartbeat_seconds` of source time, and at every match boundary.
+That setting decides only how often totals reach the disk. Sampling stays at one per second and time is accumulated continuously, so a
+longer interval can only mean more time counted as uncertain after a crash.
 
 No failure here may reach the counter. Every call contains its own errors: the first one gives one warning and tracking stops for the rest
 of the run, leaving any open match unrecorded. KeyboardInterrupt is left alone, because that is the user stopping the counter.
@@ -36,9 +41,12 @@ SOURCE_LOST_REASONS = frozenset({"video source stopped"})
 
 
 class MatchTracker:
-    def __init__(self, write, warn, cues=M, machine=None):
-        """`write` takes one dict for the session log, `warn` one message for the user. Raises if the templates cannot be loaded."""
+    def __init__(self, write, warn, cues=M, machine=None, history=None, heartbeat_seconds=60, frames=None):
+        """`write` takes one dict for the session log, `warn` one message for the user. Raises if the templates cannot be loaded.
+        `history` is a HistoryWriter in "on" mode; `frames` returns (frames processed, frames dropped) for its checkpoints."""
         self._write, self._warn, self._cues = write, warn, cues
+        self._history, self._beat_every, self._frames, self._last_beat_t = history, heartbeat_seconds, frames, None
+        self._mode = MODE if history is None else "on"
         self._reader = cues.CueReader()
         self._machine = machine if machine is not None else S.MatchStateMachine()
         self._picture = None               # a small copy of the last sample's picture, never the frame itself
@@ -47,7 +55,7 @@ class MatchTracker:
         self._samples, self._sample_s, self._total_s, self._max_s, self._source_s = 0, 0.0, 0.0, 0.0, 0.0
         self._chests = {"delivered": 0, "no_picture": 0, "dropped_at_break": 0}
         self.failed = self.closed = False
-        self._log("started", mode=MODE, schema=LOG_SCHEMA, sample_seconds=SAMPLE_SECONDS)
+        self._log("started", mode=self._mode, schema=LOG_SCHEMA, sample_seconds=SAMPLE_SECONDS)
 
     # ------------------------------------------------------------------ the three calls
     def offer(self, t, frame):
@@ -87,6 +95,7 @@ class MatchTracker:
             if self._last_seen_t is not None:
                 ended_by = S.LOST if reason in SOURCE_LOST_REASONS else S.STOPPED
                 self._report(self._machine.finish(self._last_seen_t, ended_by))
+                self._checkpoint(self._last_seen_t, True)
             self._log("summary", stop_reason=reason, chests_undelivered=len(self._pending), **{f"chests_{k}": v for k, v in self._chests.items()},
                       **self.stats())
         except Exception as error:
@@ -95,7 +104,7 @@ class MatchTracker:
     def stats(self):
         """Time spent here, apart from chest detection. Measured on the wall clock in the counting thread, so at worst an overestimate of
         its CPU. The share of one core is per second of source time, which also holds when a recording runs faster than real time."""
-        return {"match_mode": MODE, "match_failed": self.failed, "match_samples": self._samples,
+        return {"match_mode": self._mode, "match_failed": self.failed, "match_samples": self._samples,
                 "match_ms_avg": round(1000 * self._sample_s / self._samples, 3) if self._samples else None,
                 "match_ms_max": round(1000 * self._max_s, 3) if self._samples else None,
                 "match_total_s": round(self._total_s, 4), "match_source_seconds": round(self._source_s, 1),
@@ -122,17 +131,39 @@ class MatchTracker:
         scores, health = self._reader.read(frame), self._cues.health_bar_pixels(frame)
         chests, self._pending = tuple(self._pending), []
         self._chests["no_picture" if picture.black or picture.frozen else "delivered"] += len(chests)
-        self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests)))
+        self._checkpoint(t, self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests))))
         return True
 
     def _report(self, events):
+        """-> True if a match opened or closed."""
+        boundary = False
         for event in events:
             if isinstance(event, S.MatchRecord):
                 record = event.to_dict()
                 record["evidence"] = sorted(record["evidence"], key=lambda item: (item[0], item[1]))      # M2 gathers these from a set
                 self._log("record", **record)
+                if self._history is not None:
+                    self._history.match_closed(record)
+                boundary = True
+            elif isinstance(event, S.Transition):
+                self._log("transition", **asdict(event))
+                if self._history is not None:
+                    self._history.transition(asdict(event))
             else:
-                self._log("transition" if isinstance(event, S.Transition) else "opened", **asdict(event))
+                self._log("opened", **asdict(event))
+                if self._history is not None:
+                    self._history.match_opened(asdict(event))
+                boundary = True
+        return boundary
+
+    def _checkpoint(self, t, boundary):
+        if self._history is None:
+            return
+        last = self._last_beat_t
+        if boundary or last is None or t < last or t - last >= self._beat_every - SAMPLE_TOLERANCE:
+            self._last_beat_t = t
+            processed, dropped = self._frames() if self._frames is not None else (None, None)
+            self._history.heartbeat(t, processed, dropped, self._machine.snapshot())
 
     def _log(self, kind, **fields):
         self._write({"event": LOG_EVENT, "kind": kind, **fields})
