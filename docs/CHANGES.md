@@ -5,6 +5,23 @@ changes; the pull request links here. Versioned release notes describe published
 
 ## Changes
 
+- Local screen and window capture read Fortnite's HUD scale at the start of each session and try the nearest
+  calibrated text size first. Image matching still chooses the winning size. The session log records both scales
+  when available. Recorded video, streams and capture devices use the image alone.
+
+- Try one extra reduction for larger XP notification text, with the usual sizes tried first. The French
+  qualified-line reader also uses it and keeps deduplication coordinates in the original capture.
+  Brazilian Portuguese enlarged readings require a sharp glyph and a chest-object prompt.
+  Detection uses the captured text so the same logic works on local recordings and capture cards.
+  Weak matches at the widest scale leave the usual French XP reading in place.
+
+- Recover faint French chest popups from three aligned `COFFRE` and XP readings, as estimated openings.
+  Read the actual digit on qualified rare rows through X4 so a temporary unreadable multiplier does not recount the stack.
+
+- Label the Group leaderboard as each player’s chests from matches shared to Discord. Distinguish it from the Match history + live overlay total.
+- Recover French chest types from three consistent readings around a counted popup, including weaker frames and
+  neighbouring HUD scales. These readings affect the type only. The opening threshold and confidence rules stay the same.
+
 - Start each overlay section with its chest total, followed by details and Pirate Token odds. The Team section
   includes each member’s count through `{member_totals}`. Section templates support inline `**bold**` in the
   graphical overlay and blank lines in both the graphical and OBS outputs. Previous default templates upgrade automatically.
@@ -72,13 +89,18 @@ and end-to-end drop counters are preserved. Preview-only capture does not start 
 existing path. A bounded 45-frame synthetic 720p benchmark with the real estimator measured about 16–22 FPS
 sequentially and 25–28 FPS pipelined; this is processing capacity, not a live-capture rate guarantee.
 
-On Windows the counting worker starts at Above Normal priority. The GUI is unchanged; diagnostic encoding stays
-below normal. This is a small scheduler preference, not a CPU reservation or a guarantee of 15 fresh frames per second.
+The Windows counting worker uses the default process priority to limit contention with the game. Diagnostic encoding
+runs below normal priority.
 
 The updater now waits for a short stable ready state before accepting a new version, closing a race where an app
 could report readiness and immediately exit before rollback was armed.
 
 ## Validation
+
+- Replayed all 13,248 recorded frames of a local French HDR session with original frame timings. The earlier
+  detector found 31 openings (18 normal, 7 unknown, 5 rare, 1 Sprite). The corrected detector found 32
+  (26 normal, 5 rare, 1 Sprite). Visual inspection verified the added normal opening and the X1–X4 burst
+  followed by one Sprite chest. These replay results do not establish the live detection rate.
 
 - Detector development replayed 11 diagnostic recordings comprising 20,455 analysed frames. A rare-chest replay
   recovered four Rare openings and one Sprite opening. A separate replay counted a normal opening once after

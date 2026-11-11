@@ -75,3 +75,59 @@ def test_french_recovery_votes_cannot_mix_glyph_scales():
                                         80 + th // 2, 120 + tw // 2, scale=scale)
                 for i, scale in enumerate((.9, .85, 1.0))]
     assert readings == [None, None, None]
+
+
+@pytest.mark.parametrize(('scores', 'expected_type'), [((.86, .76), CT.UNKNOWN),
+                                                      ((.86, .76, .74), CT.NORMAL),
+                                                      ((.76, .74, .86), CT.NORMAL)])
+def test_aligned_blurred_frames_label_an_estimate_without_a_settled_tracker(monkeypatch, scores, expected_type):
+    est = E.ChestEstimator(stacked=False)
+    frame = picture(est)
+    roi = frame[V.ROI_Y:V.ROI_Y + V.ROI_H, V.ROI_X:V.ROI_X + V.ROI_W]
+    mask = V.lavender_mask(roi)
+    height, width = est.french_template.shape
+
+    readings = iter(scores)
+
+    def blurred_match(rgb, lavender):
+        est.french_plane = (1.0, rgb, lavender)
+        return next(readings), 80 + height // 2, 120 + width // 2, 1.0, 'fr:COFFRE', False
+
+    monkeypatch.setattr(est, '_scaled_best', blurred_match)
+    monkeypatch.setattr(est, '_recover_french_line', lambda *args, **kwargs: None)
+    for index in range(len(scores)):
+        est._scaled_popup(index / 15, roi, mask, exact_fired=False)
+    counted = [event for event in est.flush() if event['approx_counted']]
+    assert len(counted) == 1
+    assert counted[0]['chest_type'] == expected_type
+    assert not counted[0]['certain_counted']
+
+
+@pytest.mark.parametrize('aligned', [False, True])
+def test_faint_french_pair_requires_three_aligned_xp_reads(monkeypatch, aligned):
+    est = E.ChestEstimator(stacked=False)
+    frame = picture(est)
+    roi = frame[V.ROI_Y:V.ROI_Y + V.ROI_H, V.ROI_X:V.ROI_X + V.ROI_W]
+    mask = V.lavender_mask(roi)
+    height, width = est.french_template.shape
+    cy, cx = 80 + height // 2, 120 + width // 2
+    xp = (.55, 80 - 46, 120 - 108 - est.french_xp_templates[CT.NORMAL][1] + (0 if aligned else 12))
+
+    def match(rgb, lavender):
+        est.french_plane = (1.0, rgb, lavender)
+        return .77, cy, cx, 1.0, 'fr:COFFRE', False
+
+    def faint(t, rgb, lavender, score, y, x):
+        return est._recover_faint_french(t, lavender, score, y, x, 1.0, xp)
+
+    monkeypatch.setattr(est, '_scaled_best', match)
+    monkeypatch.setattr(est, '_recover_french_line', faint)
+    for i in range(2):
+        est._scaled_popup(i / 15, roi, mask, exact_fired=False)
+    assert not est.pending_scaled
+    est._scaled_popup(2 / 15, roi, mask, exact_fired=False)
+    counted = [event for event in est.flush() if event['approx_counted']]
+    assert len(counted) == int(aligned)
+    if aligned:
+        assert counted[0]['chest_type'] == CT.NORMAL
+        assert not counted[0]['certain_counted']

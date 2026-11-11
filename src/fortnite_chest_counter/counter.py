@@ -1131,7 +1131,6 @@ def cmd_live(args):
     cfg, origin = make_config(args)
     live = cfg["live"]
     kind, fps = live["source"], cfg["detector"]["process_fps"]
-    paths.prefer_detector_cpu()
     preflight(cfg)
     if getattr(args, "gui", False):
         # desktop-app worker: no console; the app's Stop button / closing the app arrives through stdin
@@ -1275,7 +1274,11 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
         print("To stop: press Q in this window (or Ctrl+C, or just close the window). Nothing is lost.")
         CONSOLE.line(f"Window: {CONSOLE.verbosity} detail, colours {'on' if CONSOLE.colors else 'off'} ([console] in config.toml)\n", "dim")
 
-    est = estimator.ChestEstimator()
+    local_hud_scale = paths.local_fortnite_hud_scale() if kind in ("desktop", "desktop-hdr", "window") else None
+    est = estimator.ChestEstimator(hud_scale=local_hud_scale)
+    if local_hud_scale is not None:
+        CONSOLE.info(f"Fortnite HUD: {local_hud_scale:.0%} (local settings); "
+                     f"first popup search at {est.preferred_hud_scale:.0%} of captured size.")
     preview = _open_preview(args)
     preview_from_capture = preview is not None and isinstance(source, sources.LiveSource)
     if preview_from_capture:
@@ -1287,6 +1290,7 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
     session.log.write({"event": "session_start", "app_version": __version__, "source_type": kind, "source": source.label,
                        "input_resolution": res, "input_fps": in_fps, "normalized": [sources.WIDTH, sources.HEIGHT],
                        "process_fps": fps, "session_started": now_iso(), "config": origin,
+                       "fortnite_hud_scale": local_hud_scale, "preferred_popup_scale": est.preferred_hud_scale,
                        "ui": "app" if control is not None else "console", "profile": profile_label(cfg)})
     interval = live["status_interval_seconds"]
     recent = deque(maxlen=300)                              # bounded: a 12-hour stream must not grow memory

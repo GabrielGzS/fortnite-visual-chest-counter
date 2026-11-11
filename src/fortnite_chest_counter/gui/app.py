@@ -609,7 +609,7 @@ class ScreenOverlayCard(QFrame):
         content = QVBoxLayout()
         content.setSpacing(8)
         self.sections = []
-        for index, title in enumerate(("PERSONAL · CURRENT MATCH", "TEAM · CURRENT MATCH", "ALL MATCHES")):
+        for index, title in enumerate(("PERSONAL · CURRENT MATCH", "TEAM · CURRENT MATCH", "MATCH HISTORY + LIVE")):
             group = QFrame()
             group.setObjectName("overlaySection")
             column = QVBoxLayout(group)
@@ -1162,7 +1162,7 @@ class Dashboard(QWidget):
         board.setSpacing(14)
         stage, stage_layout = card()
         stage.setObjectName("chestStage")
-        recent_card, recent_layout = card("Leaderboard")
+        recent_card, recent_layout = card("Group leaderboard", "Chests per player from matches shared to Discord.")
         self.leaders = label("Share a match to appear here.", "hint", wrap=True)
         self.leaders.setTextFormat(Qt.PlainText)
         recent_layout.addWidget(self.leaders)
@@ -2369,7 +2369,8 @@ class GroupPage(QWidget):
         history_layout.addWidget(self.feedback)
         layout.addWidget(history)
 
-        ranks, ranks_layout = card("Shared leaderboard", "Choose where the bot publishes the live board. Share the data message ID with Guests to sync their apps.")
+        ranks, ranks_layout = card("Shared leaderboard", "Chests per player from matches shared to Discord. The overlay uses your local match history and live counter. "
+                                      "Choose where the bot publishes the board and share its data message ID with Guests.")
         controls = QHBoxLayout()
         self.leaderboard_channel = MaterialComboBox()
         self.leaderboard_channel.setMinimumWidth(180)

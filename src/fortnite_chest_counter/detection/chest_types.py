@@ -144,7 +144,10 @@ class FrenchQualifiedPopups:
         folder = paths.TEMPLATES_DIR / "chest/fr"
         self.templates = [(kind, quantity, V.blur_template(np.load(folder / f"stack_{name}.npy"), SIGMA))
                           for kind, quantity, name in ((RARE, 1, "rare"), (RARE, 2, "x2"),
+                                                      (RARE, 3, "x3"), (RARE, 4, "x4"),
                                                       (SPRITE, 1, "sprite"))]
+        self.digits = {quantity: [np.load(folder / f"stack_x{quantity}.npy")[:, 56:63]] for quantity in (2, 3, 4)}
+        self.digits[2].append(np.load(folder / "stack_digit2_alt.npy"))
         self.exp = np.load(folder / "stack_exp.npy")
         self.exp_blurred = V.blur_template(self.exp, SIGMA)
         self.missing_since = None
@@ -154,7 +157,16 @@ class FrenchQualifiedPopups:
         self.candidate = None
         self.frames = 0
 
-    def observe(self, t, roi):
+    def _quantity(self, mask, y, x):
+        # The common COFFRE RARE prefix dominates a whole-line score. Require
+        # independent evidence from the digit before using that line's quantity.
+        region = mask[max(0, y - 1):y + 8, x + 55:x + 64]
+        scores = sorted((max(V.best_template_correlation(region, digit)[0] for digit in templates), quantity)
+                        for quantity, templates in self.digits.items())
+        score, quantity = scores[-1]
+        return quantity if score >= 0.58 and score - scores[-2][0] >= 0.08 else None
+
+    def _read_rows(self, roi):
         # XP groups shift horizontally as their longest line changes; keep the full
         # qualified word, including a sprite suffix at the right edge of the group.
         y0, x0 = 25, 75
@@ -166,11 +178,34 @@ class FrenchQualifiedPopups:
                 continue
             for kind, quantity, template in self.templates:
                 for score, y, x in popup_lines.correlation_peaks(mask, template, 0.76):
-                    peaks.append((score, y + y0 + 3, x + x0 + 14, kind, quantity))
+                    decoded = self._quantity(mask, y, x) if quantity > 1 else quantity
+                    if decoded is not None:
+                        peaks.append((score, y + y0 + 3, x + x0 + 14, kind, decoded))
         rows = []
         for row in sorted(peaks, reverse=True):
             if all(abs(row[1] - other[1]) >= 6 for other in rows):
                 rows.append(row)
+        if rows and not self.totals:
+            top = min(row[1] for row in rows) - 3
+            # Ammo/upgrade notifications can sit between the XP heading and the
+            # first chest. Anchor the heading search to the detected text group,
+            # rather than assuming it immediately precedes a chest at a fixed x.
+            left = max(0, min(row[2] for row in rows) - 29)
+            right = min(roi.shape[1], max(row[2] for row in rows) + 70)
+            exp = roi[max(0, top - 90):top - 1, left:right]
+            if exp.shape[0] < self.exp.shape[0] or max(
+                    max(V.best_template_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp)[0],
+                        V.robust_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp_blurred, SIGMA))
+                    for level in (135, 155)) < 0.60:
+                return []
+        return rows
+
+    def observe(self, t, roi, enlarged=None):
+        rows = self._read_rows(roi)
+        if not rows and enlarged is not None:
+            scale, normalized = enlarged
+            rows = [(score, round(y / scale), round(x / scale), kind, quantity)
+                    for score, y, x, kind, quantity in self._read_rows(normalized)]
         if not rows:
             self.candidate, self.frames = None, 0
             self.missing_frames += 1
@@ -184,19 +219,6 @@ class FrenchQualifiedPopups:
             return []
         self.missing_since = None
         self.missing_frames = 0
-        if not self.totals:
-            top = min(row[1] for row in rows) - 3
-            # Ammo/upgrade notifications can sit between the XP heading and the
-            # first chest. Anchor the heading search to the detected text group,
-            # rather than assuming it immediately precedes a chest at a fixed x.
-            left = max(0, min(row[2] for row in rows) - 29)
-            right = min(roi.shape[1], max(row[2] for row in rows) + 70)
-            exp = roi[max(0, top - 90):top - 1, left:right]
-            if exp.shape[0] < self.exp.shape[0] or max(
-                    max(V.best_template_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp)[0],
-                        V.robust_correlation((exp.min(axis=2) > level).astype(np.float32), self.exp_blurred, SIGMA))
-                    for level in (135, 155)) < 0.60:
-                return []
         counts = Counter()
         for _, _, _, kind, quantity in rows:
             counts[kind] += quantity

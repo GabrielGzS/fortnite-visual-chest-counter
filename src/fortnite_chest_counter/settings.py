@@ -54,7 +54,7 @@ DEFAULTS = {
         "screen_cumulative_enabled": True,
         "screen_personal_title": "PERSONAL · CURRENT MATCH",
         "screen_team_title": "TEAM · CURRENT MATCH",
-        "screen_cumulative_title": "ALL MATCHES",
+        "screen_cumulative_title": "MATCH HISTORY + LIVE",
         "screen_personal_template": "**Chests · {total}**\nConfirmed · {certain}    Estimated · {approx}\n{types}\nPirate Token · {chance}",
         "screen_team_template": "**Chests · {total}**\n{member_totals}\nPirate Token · {chance}",
         "screen_cumulative_template": "**Chests · {total}**\nMatches · {matches}\nPirate Token · {chance}",
@@ -358,6 +358,8 @@ def load_config(path=None, overrides=None):
             cfg[section][key] = value
         else:
             warnings.append(f"command line: {key} = {value!r} {problem}; keeping {cfg[section][key]!r}")
+    if cfg["display"]["screen_cumulative_title"] == "ALL MATCHES":
+        cfg["display"]["screen_cumulative_title"] = DEFAULTS["display"]["screen_cumulative_title"]
     for scope, previous in LEGACY_SECTION_TEMPLATES.items():
         key = f"screen_{scope}_template"
         if cfg["display"][key].replace("\\n", "\n") in previous:

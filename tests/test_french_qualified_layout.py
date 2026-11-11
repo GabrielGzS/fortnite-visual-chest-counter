@@ -20,7 +20,7 @@ def notification(rare_x=110, sprite_x=162, quantity=2, heading=True):
 
     if heading:
         paste("exp", 20, 165)
-    paste("x2" if quantity == 2 else "rare", 75, rare_x)
+    paste(f"x{quantity}" if quantity > 1 else "rare", 75, rare_x)
     paste("sprite", 100, sprite_x)
     # Other notifications may occupy space between the heading and the chests.
     roi[45:48, 112:195] = 190
@@ -127,3 +127,23 @@ def test_qualified_type_cannot_be_replaced_by_another_generic_stack_row(monkeypa
     finally:
         for name, value in before.items():
             setattr(estimator, name, value)
+
+
+def test_rare_multiplier_counts_each_increment_through_x4():
+    reader = FrenchQualifiedPopups()
+    for quantity in range(1, 5):
+        roi = notification(quantity=quantity)
+        added = sum((reader.observe((quantity * 5 + frame) / 15, roi) for frame in range(5)), [])
+        assert Counter(row[3] for row in added) == ({"rare": 1, "sprite": 1} if quantity == 1 else {"rare": 1})
+    assert reader.totals == {"rare": 4, "sprite": 1}
+
+
+def test_enlarged_qualified_popup_is_owned_in_capture_coordinates():
+    reader = FrenchQualifiedPopups()
+    raw = np.zeros((202, 360, 3), dtype=np.uint8)
+    normalized = notification(quantity=1)
+    added = sum((reader.observe(t, raw, (.70, normalized)) for t in (0, .1, .2)), [])
+    sprite = next(row for row in added if row[3] == "sprite")
+    assert reader.owns(round(103 / .70), round(176 / .70))
+    assert sprite[1] > 140 and sprite[2] > 235
+    assert reader.observe(.3, normalized) == []

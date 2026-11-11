@@ -53,7 +53,8 @@ DEEPEST_PACKAGE_PATH = 110                                      # characters bel
 MAX_WINDOWS_PATH = 259
 TEMPLATE_FILES = ["chest/en/chest.npy", "chest/en/chest_small.npy", "chest/en/rare.npy", "chest/en/rare_small.npy",
                   "chest/en/sprite.npy", "chest/en/sprite_small.npy", "chest/pt/bau.npy", "chest/fr/coffre.npy", "chest/fr/esprit.npy", "chest/fr/normal_xp.npy", "chest/fr/rare_xp.npy",
-                  "chest/fr/stack_exp.npy", "chest/fr/stack_rare.npy", "chest/fr/stack_x2.npy", "chest/fr/stack_sprite.npy",
+                  "chest/fr/stack_exp.npy", "chest/fr/stack_rare.npy", "chest/fr/stack_x2.npy", "chest/fr/stack_x3.npy",
+                  "chest/fr/stack_x4.npy", "chest/fr/stack_digit2_alt.npy", "chest/fr/stack_sprite.npy",
                   "container_opened.npy",
                   "ui/interaction_disc.npy", "ui/interaction_ring.npy"]                    # audio_fingerprint.npy is development-only
 THIRD_PARTY = ["numpy", "scipy"]

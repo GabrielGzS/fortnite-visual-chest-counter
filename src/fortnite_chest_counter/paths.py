@@ -14,6 +14,7 @@ replace the program without touching the user's counts or settings.
 import hashlib
 import os
 import shutil
+import struct
 import sys
 from pathlib import Path
 
@@ -143,18 +144,24 @@ def worker_python():
     return sys.executable
 
 
-def prefer_detector_cpu():
-    """Give only the live detector a modest Windows scheduler preference.
-
-    No affinity restriction, busy waiting, or High/Realtime priority. Applying
-    this inside the worker also covers Windows venv launcher redirection.
-    """
-    if os.name != "nt":
-        return False
-    import ctypes
-    from ctypes import wintypes
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-    kernel32.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-    kernel32.SetPriorityClass.restype = wintypes.BOOL
-    return bool(kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), 0x00008000))  # ABOVE_NORMAL_PRIORITY_CLASS
+def local_fortnite_hud_scale():
+    """Read the HUDScale float from Fortnite's local Windows settings cache, if available."""
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return None
+    settings_file = Path(local) / "FortniteGame" / "Saved" / "Config" / "ClientSettings.Sav"
+    limit = 4 * 1024 * 1024
+    try:
+        with settings_file.open("rb") as stream:
+            data = stream.read(limit + 1)
+    except OSError:
+        return None
+    # Match the full serialized name and float tag, excluding InitialHUDScale.
+    tag = b"\x09\x00\x00\x00HUDScale\x00\x0e\x00\x00\x00FloatProperty\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00"
+    if len(data) > limit or data.count(tag) != 1:
+        return None
+    offset = data.index(tag) + len(tag)
+    if offset + 4 > len(data):
+        return None
+    value = struct.unpack_from("<f", data, offset)[0]
+    return round(value, 4) if 0.1 <= value <= 3.0 else None

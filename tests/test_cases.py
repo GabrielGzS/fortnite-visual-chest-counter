@@ -258,7 +258,7 @@ def test_french_recovery_and_late_blurred_match_share_an_opening():
         roi = np.zeros((V.ROI_H, V.ROI_W, 3), dtype=np.uint8)
         mask = np.ones(roi.shape[:2], dtype=np.float32)
         with (patch.object(est, "_recover_french_line", side_effect=[
-                  (73, 187, chest_types.NORMAL), None, None, None]),
+                  (73, 187, chest_types.NORMAL, True), None, None, None]),
               patch.object(est, "_scaled_best", side_effect=[
                   (0.70, 73, 187, 1.0, "fr:COFFRE", False),
                   (0.0, 0, 0, 1.0, None, False),
