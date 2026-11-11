@@ -2,7 +2,7 @@
 
 ## Your local match
 
-Choose one source in **Dashboard → Capture settings**. To track manually, reset before the match, start counting and use **Finish match** to save it. **Group → Match history** lets you edit saved counts and delete checked rows. **Select all matches** checks every row. Local edits and deletions affect the history on your PC. Already shared results stay in the shared standings.
+Choose one source in **Dashboard → Capture settings**. To track manually, reset before the match, start counting and use **Finish match** to save it. **Group → Match history** opens match details when you click a data cell. You can also edit saved counts and delete checked rows. **Select all matches** checks every row. Local edits and deletions affect the history on your PC. Already shared results stay in the shared standings.
 
 **Settings → Match automation** is enabled by default. It reads new entries in `%LOCALAPPDATA%\FortniteGame\Saved\Logs\FortniteGame.log`. Battle Royale warmup resets and starts the count. A return to the lobby stops counting, saves the result to match history and resets the current match counter. For a match already underway when the app opened, use the manual controls.
 
@@ -15,7 +15,7 @@ The Dashboard mode selector defaults to **Auto**. It reads the Battle Royale pla
 3. The Host starts the bot, chooses a **Leaderboard channel** and clicks **Publish leaderboard**. The dropdown lists text channels where the bot can view the channel, send messages and embed links.
 4. The Host uses **Copy sync ID**. Guests save that value under **Shared data message**. This feed message lets Guests read the same group data without receiving the bot token.
 
-The leaderboard ranks each player by the chests in their published results. The public board and `/chests` show a cumulative Pirate Token estimate from each player’s shared chests, using the saved boosts. The team estimate in the board header describes the latest received team match. **Match history + live** in the overlay uses your local match history, linked teammate counts and the current counter.
+The leaderboard ranks each player by the chests in their published results. Click a player name to open their stats. The public board and `/chests` show a cumulative Pirate Token estimate from each player’s shared chests, using the saved boosts. The team estimate in the board header describes the latest received team match. **Match history + live** in the overlay uses your local match history, linked teammate counts and the current counter.
 
 The collection webhook and the public leaderboard have separate jobs. Submissions go to the webhook's feed channel. The bot can publish the visible board in a different channel. Publishing again in another channel moves the tracked board there. A channel permission failure leaves the previous publication available for retry.
 

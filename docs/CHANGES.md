@@ -18,6 +18,7 @@ changes; the pull request links here. Versioned release notes describe published
   Weak matches at the widest scale leave the usual French XP reading in place.
 
 - Recover faint French chest popups from three aligned `COFFRE` and XP readings, as estimated openings.
+  Also read a bare `COFFRE` below another reward such as `MUNITIONS AU MAX` when the XP header and chest line align across three frames. Reuse the existing overlap check before adding it as an estimated opening.
   Read the actual digit on qualified rare rows through X4 so a temporary unreadable multiplier does not recount the stack.
 
 - Display each player’s cumulative Pirate Token estimate and compact chest breakdown on the public Discord board and in `/chests`. The Group leaderboard ranks chests from matches shared to Discord. Distinguish it from the Match history + live overlay total.

@@ -249,6 +249,7 @@ class ChestEstimator:
         self.french_saturated_reads = deque()
         self.french_bright_reads = deque()
         self.french_exp_reads = deque()
+        self.french_stacked_exp_reads = deque()
         self.french_exp_candidates = deque()
         self.recent_counted_popups = deque()
         self.last_french_exp = -float("inf")
@@ -597,6 +598,10 @@ class ChestEstimator:
                 ry, rx, kind, confirmed = recovered
                 recovered = (round(ry / bright_scale), round(rx / bright_scale), kind, confirmed)
                 s = bright_scale
+        if recovered is None and plane is not None and score >= 0.62 and 1.0 in self._scaled_scales():
+            stacked_line = self._recover_french_stacked_exp_line(t, roi, mask)
+            if stacked_line is not None:
+                self._queue_french_exp(t, stacked_line, score, roi, scale=1.0)
         saturated_french = False
         if recovered is None and score < 0.50 and "fr:COFFRE" in self.scaled_templates:
             recovered = self._recover_saturated_french(t, roi, mask)
@@ -838,12 +843,46 @@ class ChestEstimator:
             return None
         return y0 + y + h // 2, x0 + x + w // 2, chest_types.NORMAL, False
 
-    def _queue_french_exp(self, t, line, score, roi):
+    def _recover_french_stacked_exp_line(self, t, roi, mask):
+        """Read a bare COFFRE under another XP reward at native HUD scale."""
+        y0, x0 = 60, 105
+        word_mask = mask[y0:100, x0:176]
+        template = self.robust_templates["fr:COFFRE"]
+        score, y, x = V.robust_correlation_at(word_mask, template, ROBUST_SIGMA)
+        if score < 0.66:
+            return None
+        y, x = y0 + y, x0 + x
+        h, w = self.french_template.shape
+        if chest_types.classify_french_line(mask, y, x, h, w, self.french_suffixes) != chest_types.NORMAL:
+            return None
+        # A reward occupies the middle row. The EXP glyph is one row higher
+        # than in a standalone chest notification and sits right of COFFRE.
+        if mask[y - 14:y - 3, x:x + 2 * w].sum() < 24:
+            return None
+        xp, _, _ = V.robust_correlation_at(mask[y - 28:y - 8, x + 24:x + 54],
+                                           self.french_exp_blurred, ROBUST_SIGMA)
+        if xp < 0.55:
+            return None
+        crop = roi[y - 4:y + h + 4, x - 4:x + w + 4]
+        light = crop.min(axis=2).astype(np.float32)
+        contrast = ((light - gaussian_filter(light, 2.0) > 24) & (crop[:, :, 1] > 125)).astype(np.float32)
+        sharp, sy, sx = V.robust_correlation_at(contrast, template, ROBUST_SIGMA)
+        if sharp < 0.78 or abs(sy - 4) > 2 or abs(sx - 4) > 2:
+            return None
+        reads = self.french_stacked_exp_reads
+        while reads and t - reads[0][0] > 0.75:
+            reads.popleft()
+        reads.append((t, y, x))
+        if sum(abs(ry - y) <= 2 and abs(rx - x) <= 3 for _, ry, rx in reads) < FRENCH_SCALED_CONFIRM_FRAMES:
+            return None
+        return y + h // 2, x + w // 2, chest_types.NORMAL, False
+
+    def _queue_french_exp(self, t, line, score, roi, scale=0.9):
         if t - self.last_french_exp > 0.75:
             y, x, kind, _ = line
-            candidate = {"onset": t, "score": score, "y": round(y / 0.9), "x": round(x / 0.9),
+            candidate = {"onset": t, "score": score, "y": round(y / scale), "x": round(x / scale),
                          "template": "fr:COFFRE", "french_type": kind, "bright_exp": True,
-                         "scaled": {"blur": score, "scale": 0.9}}
+                         "scaled": {"blur": score, "scale": scale}}
             if SAVE_SNAPSHOTS:
                 candidate["roi"] = roi.copy()
             self.french_exp_candidates.append(candidate)

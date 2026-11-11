@@ -2359,7 +2359,7 @@ class GroupPage(QWidget):
         setup_layout.addWidget(self.player_status)
         layout.addWidget(setup)
         history, history_layout = card("Match history", "Finish the match from Dashboard to save your totals. "
-                                      "Use Reset on the Dashboard before starting the next match.")
+                                      "Use Reset on the Dashboard before starting the next match. Click a match to see its details.")
         row = QHBoxLayout()
         self.edit = button("Edit...", on_click=self.edit_match)
         self.delete = button("Delete selected...", on_click=self.delete_match)
@@ -2376,6 +2376,7 @@ class GroupPage(QWidget):
         history_layout.addWidget(self.stats)
         self.history = self._table(("Finished", "Player", "Mode", "Certain", "Approx", "Total", "Token chance",
                                     "Team players", "Team total", "Team chance"))
+        self.history.itemClicked.connect(self._open_match_details)
         self.history.currentItemChanged.connect(self._selection_changed)
         self.history.itemChanged.connect(lambda *_: self.update_checked_actions())
         self.select_matches.clicked.connect(lambda checked: self.check_all(self.history, checked))
@@ -2385,7 +2386,7 @@ class GroupPage(QWidget):
         layout.addWidget(history)
 
         ranks, ranks_layout = card("Shared leaderboard", "Chests per player from matches shared to Discord. The overlay uses your local match history and live counter. "
-                                      "Choose where the bot publishes the board and share its data message ID with Guests.")
+                                      "Choose where the bot publishes the board and share its data message ID with Guests. Click a player to see their stats.")
         controls = QHBoxLayout()
         self.leaderboard_channel = MaterialComboBox()
         self.leaderboard_channel.setMinimumWidth(180)
@@ -2410,6 +2411,7 @@ class GroupPage(QWidget):
         rank_controls.addStretch(1)
         ranks_layout.addWidget(self.rank_actions)
         self.ranks = self._table(("Rank", "Player", "Total", "Matches", "Certain", "Approx", "Chest types"))
+        self.ranks.itemClicked.connect(self._open_player_details)
         self.ranks.itemChanged.connect(lambda *_: self.update_checked_actions())
         self.select_players.clicked.connect(lambda checked: self.check_all(self.ranks, checked))
         ranks_layout.addWidget(self.ranks)
@@ -2922,6 +2924,27 @@ class GroupPage(QWidget):
         self.player_status.setText(error or "Selected players reset.")
         self._next_scoreboard_refresh = 0
         self.sync_scoreboard()
+
+    def _open_match_details(self, item, column):
+        if column == 0:
+            return  # The first column contains the checkbox for bulk actions.
+        match = self.matches[item.data(0, Qt.UserRole)]
+        lines = self._detail_lines(self.history, item, (0, 1, 2, 3, 4, 5, 6, 7, 8, 9))
+        if match.replay:
+            lines.append("Replay verified. Use Compare replay to see the differences.")
+        show_notice_dialog(self, "Match details", "\n".join(lines))
+
+    def _open_player_details(self, item, column):
+        if column == 0 and self.win.group_role == "host":
+            return  # Keep the checkbox available for bulk actions.
+        lines = self._detail_lines(self.ranks, item, (0, 2, 3, 4, 5, 6))
+        show_notice_dialog(self, item.text(1), "\n".join(lines))
+
+    @staticmethod
+    def _detail_lines(table, item, columns):
+        header = table.headerItem()
+        return [f"{header.text(column)} · {item.text(column)}"
+                for column in columns if item.text(column)]
 
     def compare_saved_replay(self):
         current = self.history.currentItem()
