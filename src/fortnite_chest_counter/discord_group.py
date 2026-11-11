@@ -258,6 +258,11 @@ class Player:
         return recorded + (self.total - self.recorded) * base
 
 
+    @property
+    def token_chance(self):
+        return f"{-math.expm1(self.log_no_drop) * 100:.6f}%" if self.total else "0.000000%"
+
+
 def _combine(name, players, adjustment=0):
     kinds = Counter()
     recorded = confirmed_total = certain = matches = 0

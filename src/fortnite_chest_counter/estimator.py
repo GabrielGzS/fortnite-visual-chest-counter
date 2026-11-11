@@ -248,6 +248,9 @@ class ChestEstimator:
         self.french_saturated_reads = deque()
         self.french_bright_reads = deque()
         self.french_exp_reads = deque()
+        self.french_exp_candidates = deque()
+        self.recent_counted_popups = deque()
+        self.last_french_exp = -float("inf")
         self.french_type_history = deque()
         self.french_scaled_reads = {}       # no votes shared between different glyph scales
         self.french_plane = None           # this frame's winning (scale, RGB ROI, mask)
@@ -585,7 +588,9 @@ class ChestEstimator:
                                        round(roi.shape[0] * bright_scale)))
             recovered = self._recover_bright_french(t, bright_roi)
             if recovered is None:
-                recovered = self._recover_bright_exp_line(t, bright_roi)
+                exp_line = self._recover_bright_exp_line(t, bright_roi)
+                if exp_line is not None:
+                    self._queue_french_exp(t, exp_line, score, roi)
             if recovered is not None:
                 ry, rx, kind, confirmed = recovered
                 recovered = (round(ry / bright_scale), round(rx / bright_scale), kind, confirmed)
@@ -780,6 +785,17 @@ class ChestEstimator:
         if len(aligned) < FRENCH_SCALED_CONFIRM_FRAMES or chest_types.NORMAL not in aligned:
             return None
         return y0 + y + h // 2, x0 + x + w // 2, chest_types.NORMAL, False
+
+    def _queue_french_exp(self, t, line, score, roi):
+        if t - self.last_french_exp > 0.75:
+            y, x, kind, _ = line
+            candidate = {"onset": t, "score": score, "y": round(y / 0.9), "x": round(x / 0.9),
+                         "template": "fr:COFFRE", "french_type": kind, "bright_exp": True,
+                         "scaled": {"blur": score, "scale": 0.9}}
+            if SAVE_SNAPSHOTS:
+                candidate["roi"] = roi.copy()
+            self.french_exp_candidates.append(candidate)
+        self.last_french_exp = t
 
     def _recover_saturated_french(self, t, roi, mask):
         """Recover a bare French XP notification when the lavender mask is saturated."""
@@ -992,12 +1008,31 @@ class ChestEstimator:
         for p in list(self.pending_popups):
             if final or p.get("until", p["onset"] + POPUP_FINISH_DELAY) <= t:
                 self.pending_popups.remove(p)
+                if p.get("template") == "fr:COFFRE" and p.get("french_type", chest_types.UNKNOWN) == chest_types.UNKNOWN:
+                    matches = [line for line in self.french_exp_candidates
+                               if abs(line["onset"] - p["onset"]) <= 1.0
+                               and abs(line["y"] - p["y"]) <= 6 and abs(line["x"] - p["x"]) <= 12]
+                    if len(matches) == 1:
+                        p["french_type"] = matches[0]["french_type"]
                 out.append(self._popup_event(p))
         for i in list(self.pending_interactions):
             if final or i["t"] + INTERACTION_FINISH_DELAY <= t:
                 self.pending_interactions.remove(i)
                 if not i["merged"]:
                     out.append(self._interaction_event(i))
+        if self.french_template is not None:
+            self.recent_counted_popups.extend(e["time"] for e in out if e["approx_counted"])
+            while self.recent_counted_popups and t - self.recent_counted_popups[0] > 7.0:
+                self.recent_counted_popups.popleft()
+            while self.french_exp_candidates and (final or t - self.french_exp_candidates[0]["onset"] >= 3.25):
+                candidate = self.french_exp_candidates.popleft()
+                onset = candidate["onset"]
+                if any(abs(stamp - onset) <= 1.35 for stamp in self.recent_counted_popups):
+                    continue
+                event = self._popup_event(candidate)
+                out.append(event)
+                if event["approx_counted"]:
+                    self.recent_counted_popups.append(onset)
         return sorted(out, key=lambda e: e["time"])
 
     def _object_support(self, a, b):
@@ -1081,6 +1116,8 @@ class ChestEstimator:
             adjusted, certain, approx = "MEDIUM", False, True
             reason = (f"scale-aware pop-up: blurred {p['template']} match {scaled['blur']:.2f} at x{scaled['scale']} "
                       f"(unscaled exact match {p['score']:.2f}) -> MEDIUM, counted approx only")
+            if p.get("bright_exp"):
+                reason = "French COFFRE and EXP glyph aligned across three frames -> MEDIUM"
             if p.get("saturated_french"):
                 reason = "French COFFRE and EXP header aligned across three frames on saturated background -> MEDIUM"
             if scaled.get("confirmed"):
@@ -1100,7 +1137,8 @@ class ChestEstimator:
                 reason = f"stacked pop-up: {step} -> MEDIUM, counted approx only"
             else:
                 reason = f"stacked pop-up: {step}; " + reason
-        if (self.scaled_templates or self.small is not None) and inc is None and not p.get("qualified_french") and (approx or p["template"] != PORTUGUESE_POPUP):
+        if (self.scaled_templates or self.small is not None) and inc is None and not (
+                p.get("qualified_french") or p.get("bright_exp")) and (approx or p["template"] != PORTUGUESE_POPUP):
             self._vote_scale(p)
         if not approx:
             reason += "; NOT counted"

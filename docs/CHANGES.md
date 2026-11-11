@@ -20,7 +20,7 @@ changes; the pull request links here. Versioned release notes describe published
 - Recover faint French chest popups from three aligned `COFFRE` and XP readings, as estimated openings.
   Read the actual digit on qualified rare rows through X4 so a temporary unreadable multiplier does not recount the stack.
 
-- Label the Group leaderboard as each player’s chests from matches shared to Discord. Distinguish it from the Match history + live overlay total.
+- Display each player’s cumulative Pirate Token estimate and compact chest breakdown on the public Discord board and in `/chests`. The Group leaderboard ranks chests from matches shared to Discord. Distinguish it from the Match history + live overlay total.
 - Recover French chest types from three consistent readings around a counted popup, including weaker frames and
   neighbouring HUD scales. These readings affect the type only. The opening threshold and confidence rules stay the same.
 

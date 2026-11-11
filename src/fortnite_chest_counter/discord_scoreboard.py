@@ -353,6 +353,30 @@ def make_embed(ranking, team=None, *, settings=None):
     return embed
 
 
+def type_breakdown(chest_types):
+    return " · ".join(f"{label} {chest_types[key]:,}"
+                      for key, label in discord_group.GROUP_TYPE_LABELS.items() if chest_types.get(key))
+
+
+def make_public_embed(players, team=None, *, settings=None):
+    """Readable bot output, separate from the webhook payload read by clients."""
+    players = players[:_MAX_RANKS]
+    embed = make_embed((), team, settings=settings)
+    if players:
+        embed["description"] = embed["description"].replace("No matches shared yet.", f"Top {len(players)}", 1)
+    for index, player in enumerate(players, 1):
+        submissions = "submission" if player.matches == 1 else "submissions"
+        lines = [f"**{player.total:,}** chests · {player.matches:,} {submissions}",
+                 f"Pirate Token chance · **{player.token_chance}**"]
+        if player.certain is not None:
+            lines.append(f"{player.certain:,} confirmed · {player.confirmed_total - player.certain:,} estimated")
+        types = type_breakdown(player.chest_types)
+        if types:
+            lines.append(types)
+        embed["fields"].append({"name": f"{index}. {player.name}", "value": "\n".join(lines), "inline": False})
+    return embed
+
+
 def publish(webhook, ident, ranking, team=None, *, settings=None, sessions=None, data_only=False):
     if ident:
         _decode(webhook, _request(webhook, f"/messages/{ident}", "GET"))

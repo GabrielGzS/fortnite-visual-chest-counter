@@ -178,3 +178,26 @@ def test_bright_stacked_word_needs_its_exp_header():
     assert est._recover_bright_exp_line(.3, roi) is None
     assert est._recover_bright_exp_line(.4, roi) is None
     assert est._recover_bright_exp_line(.5, roi)[2:] == (CT.NORMAL, False)
+
+def test_bright_exp_fallback_waits_for_existing_popup_and_counts_only_unmatched(monkeypatch):
+    est = E.ChestEstimator()
+    calls = []
+
+    def popup(candidate):
+        calls.append(candidate)
+        return {"time": candidate["onset"], "approx_counted": True}
+
+    monkeypatch.setattr(est, "_popup_event", popup)
+    roi = np.zeros((182, 324, 3), dtype=np.uint8)
+    line = (70, 116, CT.NORMAL, False)
+    est._queue_french_exp(2.0, line, .7, roi)
+    est._queue_french_exp(2.2, line, .7, roi)
+    assert est._finish(3.0, False) == []
+    est.pending_popups.append({"onset": 1.9, "until": 4.0, "template": "fr:COFFRE", "y": 78, "x": 129})
+    assert est._finish(5.3, False) == [{"time": 1.9, "approx_counted": True}]
+    assert len(calls) == 1 and not calls[0].get("bright_exp")
+    assert calls[0]["french_type"] == CT.NORMAL
+    est._queue_french_exp(8.0, line, .7, roi)
+    assert est._finish(9.0, False) == []
+    assert est._finish(11.3, False) == [{"time": 8.0, "approx_counted": True}]
+    assert calls[-1]["bright_exp"]

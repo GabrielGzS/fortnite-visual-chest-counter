@@ -14,7 +14,7 @@ from discord.ext import tasks
 
 from fortnite_chest_counter import discord_scoreboard, paths, settings
 
-from fortnite_chest_counter.discord_group import GROUP_TYPE_LABELS, GroupStore
+from fortnite_chest_counter.discord_group import GroupStore
 
 
 def register_commands(tree, guild, totals, ready, publish_board=None, board_settings=None):
@@ -69,11 +69,12 @@ def register_commands(tree, guild, totals, ready, publish_board=None, board_sett
         if player is None:
             team = await asyncio.to_thread(totals.team_summary)
             details.append(f"Team matches: {team.matches:,}")
+        details.append(f"Pirate Token chance · **{row.token_chance}**")
         if row.certain is not None:
-            details.append(f"Recorded breakdown: {row.certain:,} certain · {row.confirmed_total - row.certain:,} estimated")
-        if row.chest_types:
-            details.append(" · ".join(f"{label}: {row.chest_types[key]:,}" for key, label in GROUP_TYPE_LABELS.items()
-                                      if key in row.chest_types))
+            details.append(f"{row.certain:,} confirmed · {row.confirmed_total - row.certain:,} estimated")
+        types = discord_scoreboard.type_breakdown(row.chest_types)
+        if types:
+            details.append(types)
         if row.adjustment:
             details.append(f"Manual adjustment: {row.adjustment:+,}")
         await reply(interaction, "Chests opened", "\n".join(details))
@@ -93,7 +94,7 @@ def register_commands(tree, guild, totals, ready, publish_board=None, board_sett
             return
         players, team = await asyncio.to_thread(totals.board)
         settings = board_settings() if board_settings is not None else None
-        embed = discord_scoreboard.make_embed(discord_scoreboard.rows(players), team, settings=settings)
+        embed = discord_scoreboard.make_public_embed(players, team, settings=settings)
         if interaction.app_permissions.embed_links:
             await interaction.followup.send(embed=discord.Embed.from_dict(embed),
                                             allowed_mentions=discord.AllowedMentions.none())
@@ -262,7 +263,7 @@ class GuildBot(discord.Client):
             if settings is not None:
                 self.board_settings = settings
             players, team = await asyncio.to_thread(self.totals.board)
-            data = discord_scoreboard.make_embed(discord_scoreboard.rows(players), team, settings=self.board_settings)
+            data = discord_scoreboard.make_public_embed(players, team, settings=self.board_settings)
             same_channel = prior is not None and prior[0] == target
             if channel_id is None and self._last_board == (prior, data):
                 return f"https://discord.com/channels/{guild_id}/{target}/{prior[1]}"

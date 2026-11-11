@@ -30,7 +30,7 @@ These are captures of the application using sample data. Click an image to view 
 
 ## Discord simulations
 
-These are local renderings of sample data. The leaderboard uses the app's embed payload.
+These are local renderings with sample data. The leaderboard uses the bot’s public embed payload and shows each player’s cumulative Pirate Token estimate.
 
 ![Simulated Discord leaderboard](discord-leaderboard.png)
 

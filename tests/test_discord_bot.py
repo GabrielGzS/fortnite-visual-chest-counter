@@ -412,10 +412,14 @@ def test_leaderboard_command_reuses_rich_embed_and_checks_publish_permission(tmp
             followup=SimpleNamespace(send=send),
         )
         await command.callback(interaction)
-        expected = discord_scoreboard.make_embed(discord_scoreboard.rows(players), team)
+        expected = discord_scoreboard.make_public_embed(players, team)
         actual = calls[-1][1]["embed"].to_dict()
         assert actual["title"] == expected["title"]
         assert actual["fields"] == expected["fields"]
+        assert "Pirate Token chance · **0.005818%**" in actual["fields"][0]["value"]
+        monkeypatch.setattr(store, "stats", lambda player: players[0])
+        await tree.get_command("chests", guild=guild).callback(interaction, player="Rin")
+        assert "Pirate Token chance · **0.005818%**" in calls[-1][1]["embed"].description
         assert actual["description"] == expected["description"]
         assert calls[0] == ("defer", {"thinking": True, "ephemeral": False})
 
@@ -514,7 +518,7 @@ def test_published_board_moves_updates_resumes_and_deletes(tmp_path, monkeypatch
         bot._feed_ready = True
         await bot.refresh_board.coro(bot)
         assert edits == [1000, 1000]
-        assert messages[1000]["fields"][0]["value"].startswith("Total: 12")
+        assert messages[1000]["fields"][0]["value"].startswith("**12** chests")
         await bot.publish_board(second.id)
         assert sent[-1] == (345, 1001)
         assert deleted == [1000]

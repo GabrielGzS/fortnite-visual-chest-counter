@@ -84,7 +84,7 @@ One person runs the **Host** bot. Other players use **Guest**, their own name an
 
 | Command | Action |
 |---|---|
-| `/chests` | Show shared totals, or a player's stats. |
+| `/chests` | Show shared totals or a player's counts and cumulative Pirate Token estimate. |
 | `/leaderboard` | Show the full current ranking. |
 | `/leaderboard publish:true` | Publish or move the auto-updating board to the current channel. Requires Manage Server. |
 | `/add` | Correct a player's total. Requires Manage Server. |
