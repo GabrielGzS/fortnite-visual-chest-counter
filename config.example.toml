@@ -167,6 +167,9 @@ source_uuid = ""
 remember_window = true
 # The live preview on the Dashboard. It only shows what the counter already analyses, and never changes what is counted.
 show_preview = true
+# Analytics: count the +1s you made for a match (Dashboard > Game) in chests per minute and per match. A -1 always counts there, because it
+# takes off a chest that should not have been counted. false = rates stay what the detector measured. Your totals include both either way.
+analytics_include_manual = false
 
 [update]
 # Look for a new version shortly after the app opens. Nothing is downloaded or installed unless you choose to.

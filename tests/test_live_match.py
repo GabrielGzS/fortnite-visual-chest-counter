@@ -321,7 +321,7 @@ def test_the_rate_wording_is_plain():
         titles = page.complete_rate.findChildren(ui().QLabel)[0].text(), page.observed_rate.findChildren(ui().QLabel)[0].text()
         assert titles == ("AVERAGE DETECTED CHESTS / MIN", "INCLUDING PARTIAL MATCHES"), titles
         hint = page.rate_hint.text()
-        assert "detected by itself" in hint and "time actively playing" in hint and "complete matches only" in hint and "Manual" in hint and "not your Fortnite total" in hint
+        assert "detected by itself" in hint and "time actively playing" in hint and "complete matches only" in hint and "+1s" in hint and "not your Fortnite total" in hint
 
 
 def test_the_headline_is_complete_matches_only_with_approx_first():

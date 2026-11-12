@@ -438,6 +438,9 @@ class CounterSession:
         known = H.read_chest_corrections(folder) if folder else []
         token = counter_token(st)
         undoes, reason = request.get("undoes"), request.get("reason", H.MANUAL)
+        match_number = request.get("match_number")                 # the Game view's buttons: the match of this run it is for
+        if match_number is not None and (type(match_number) is not int or match_number < 1):
+            return refused("That match is not known.")
         if correction_id in self._corrections_done or any(c["id"] == correction_id for c in known):
             return {"status": "already", "message": "", "id": correction_id, "certain": st["certain"], "approx": st["approximate"]}
         if undoes is not None:
@@ -448,7 +451,7 @@ class CounterSession:
                 return {"status": "already", "message": "", "id": correction_id, "certain": st["certain"], "approx": st["approximate"]}
             if target.get("counter_token") != token:
                 return refused("The counter was reset or edited since that correction, so it can no longer be undone.")
-            delta = -target["delta"]
+            delta, match_number = -target["delta"], target.get("match_number")
         else:
             delta = request.get("delta")
             if type(delta) is not int or delta not in CORRECTION_REASONS:
@@ -465,7 +468,7 @@ class CounterSession:
         self.save()
         self.write_obs()
         self.log.write({"event": "chest_correction", "correction_id": correction_id, "undoes": undoes, "delta": delta, "reason": None if undoes else reason, "source": "manual",
-                        "counts_after": {"certain": st["certain"], "approximate": st["approximate"]}, "logged_at": now_iso()})
+                        "match_number": match_number, "counts_after": {"certain": st["certain"], "approximate": st["approximate"]}, "logged_at": now_iso()})
         if self.history is not None:                 # so a crash later does not read the new total as chests missing from history
             self.history.counter_changed("correction", st["certain"], st["approximate"])
         recorded = folder is not None
@@ -475,11 +478,12 @@ class CounterSession:
                 if undoes is not None:
                     H.append_correction_undone(folder, correction_id, run_id, undoes, st["certain"], st["approximate"])
                 else:
-                    H.append_chest_correction(folder, correction_id, run_id, delta, reason, token, st["certain"], st["approximate"], st["approximate"] - net)
+                    H.append_chest_correction(folder, correction_id, run_id, delta, reason, token, st["certain"], st["approximate"], st["approximate"] - net, match_number)
             except OSError as error:
                 recorded = False
                 self._warn_once("correction-history", f"a chest correction was applied to your counts but could not be added to the match history ({error})")
-        return {"status": "applied", "message": "", "id": correction_id, "delta": delta, "undoes": undoes, "recorded": recorded, "certain": st["certain"], "approx": st["approximate"]}
+        return {"status": "applied", "message": "", "id": correction_id, "delta": delta, "undoes": undoes, "recorded": recorded, "certain": st["certain"], "approx": st["approximate"],
+                "match_number": match_number, "reason": target.get("reason") if undoes is not None else reason}
 
     def apply_type_updates(self, updates):
         """The detector read a counted chest's type better after counting it (estimator.take_type_updates): move that
@@ -1794,7 +1798,7 @@ def cmd_configure(args):
 
 
 MAX_STARTING_COUNT = 1_000_000
-CORRECTION_REASONS = {1: ("manual", "not_visible", "missed"), -1: ("manual", "false_positive")}
+CORRECTION_REASONS = {1: ("manual", "not_visible", "missed", "broken_chest"), -1: ("manual", "false_positive")}
 
 
 def parse_count(text):

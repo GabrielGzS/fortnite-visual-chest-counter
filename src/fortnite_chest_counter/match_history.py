@@ -52,8 +52,9 @@ RUN_KINDS = frozenset({"run_start", "run_end"})
 MATCH_KINDS = RUN_KINDS | {"match_opened", "match_closed", "correction", "gap"}     # enough to list matches, without the bulk
 CORRECTION_KINDS = frozenset({"chest_correction", "chest_correction_undone", "chest_correction_reason"})
 # Why a chest count was corrected. Only "missed" and "false_positive" are claims about the detector: Fortnite can count a chest with nothing
-# on screen to detect (a broken chest, say), so "not_visible" is no failure, and "manual" means the reason is not known.
-MISSED, NOT_VISIBLE, FALSE_POSITIVE, MANUAL = "missed", "not_visible", "false_positive", "manual"
+# on screen to detect, so "not_visible" is no failure, and "manual" means the reason is not known. "broken_chest" (M9H) is a chest Fortnite
+# counted when a chest was broken rather than opened: no failure either, and kept apart so broken chests can be counted. Stored as these ids.
+MISSED, NOT_VISIBLE, FALSE_POSITIVE, MANUAL, BROKEN_CHEST = "missed", "not_visible", "false_positive", "manual", "broken_chest"
 
 
 def _now():
@@ -303,10 +304,26 @@ def attribute(history):
     return result
 
 
-def append_chest_correction(folder, correction_id, run_id, delta, reason, counter_token, certain, approximate, detector_approximate):
-    """A +1 or -1 the user made to the total, after the total was saved. Raises OSError if it cannot be saved."""
-    _append_line(Path(folder) / CHESTS, _encode({"kind": "chest_correction", "schema": SCHEMA, "id": correction_id, "run_id": run_id, "at": _now(), "delta": delta, "reason": reason, "counter_token": counter_token,
-                                                 "certain_total": certain, "approximate_total": approximate, "detector_approximate": detector_approximate}))
+def append_chest_correction(folder, correction_id, run_id, delta, reason, counter_token, certain, approximate, detector_approximate, match_number=None):
+    """A +1 or -1 the user made to the total, after the total was saved. Raises OSError if it cannot be saved.
+    `match_number`: the match of this run it was made for (the Game view's buttons), or None for one made to the total alone (Overview)."""
+    row = {"kind": "chest_correction", "schema": SCHEMA, "id": correction_id, "run_id": run_id, "at": _now(), "delta": delta, "reason": reason, "counter_token": counter_token,
+           "certain_total": certain, "approximate_total": approximate, "detector_approximate": detector_approximate}
+    if match_number is not None:
+        row["match_number"] = match_number
+    _append_line(Path(folder) / CHESTS, _encode(row))
+
+
+def corrections_by_match(corrections):
+    """{(run_id, match_number): [added, removed, broken chests among the added]} of the corrections still standing that were made for a match."""
+    out = {}
+    for c in corrections:
+        number = c.get("match_number")
+        if not c["undone"] and isinstance(number, int) and not isinstance(number, bool):
+            tally = out.setdefault((c.get("run_id"), number), [0, 0, 0])
+            tally[0 if c["delta"] > 0 else 1] += 1
+            tally[2] += c["delta"] > 0 and c.get("reason") == BROKEN_CHEST
+    return out
 
 
 def append_correction_undone(folder, undo_id, run_id, undoes, certain, approximate):
@@ -343,7 +360,8 @@ def correction_totals(corrections, counter_token=None):
     reasons = [c.get("reason") for c in standing]
     return {"net": sum(c["delta"] for c in standing), "added": sum(c["delta"] == 1 for c in standing), "removed": sum(c["delta"] == -1 for c in standing), "standing": standing,
             "reversed": sum(c["undone"] for c in corrections), "detector_misses": reasons.count(MISSED), "detector_false_positives": reasons.count(FALSE_POSITIVE),
-            "not_visible": reasons.count(NOT_VISIBLE), "unknown": len(reasons) - reasons.count(MISSED) - reasons.count(FALSE_POSITIVE) - reasons.count(NOT_VISIBLE)}
+            "not_visible": reasons.count(NOT_VISIBLE), "broken_chests": reasons.count(BROKEN_CHEST),
+            "unknown": len(reasons) - reasons.count(MISSED) - reasons.count(FALSE_POSITIVE) - reasons.count(NOT_VISIBLE) - reasons.count(BROKEN_CHEST)}
 
 
 def correct_match(folder, run_id, match_number, not_a_match=True):

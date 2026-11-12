@@ -554,7 +554,7 @@ def test_plus_one_offers_the_broken_chest_reason():
         d = w.win.dashboard
         d.plus.click()
         items = [d.correction_reason.itemData(i) for i in range(d.correction_reason.count())]
-        assert items == ["manual", "not_visible", "missed"] and "broken chest" in d.correction_reason.itemText(1)
+        assert items == ["manual", "broken_chest", "missed", "not_visible"] and d.correction_reason.itemText(1) == "Broken chest"         # its own id since M9H
 
 
 def test_undo_from_the_dashboard():
@@ -778,14 +778,149 @@ def test_a_failed_save_is_explained():
         assert w.errors and "could not be saved" in w.errors[0] and page.matches.value.text() == "4"
 
 
-def test_the_page_says_manual_corrections_are_not_included():
+def test_the_page_says_where_manual_corrections_go():
     with G.window() as w:
         seed(w)
         w.win.dashboard.plus.click()
         page = w.win.analytics
         page.refresh()
         MA.settle(w)
-        assert "Manual corrections are not part of these numbers (+1, −0)" in page.notes.text()
+        assert "Manual corrections: +1, −0" in page.notes.text() and "on Overview change only your totals" in page.notes.text()
+
+
+# ------------------------------------------------------------------ M9H: corrections made for a match (the Game view)
+
+def test_a_correction_for_a_match_keeps_its_match_and_its_undo_does_too():
+    with tempfile.TemporaryDirectory() as tmp:
+        session, _ = session_in(tmp)
+        done = session.apply_correction({**request(1, "not_visible"), "match_number": 3})
+        assert done["status"] == "applied" and done["match_number"] == 3 and corrections(tmp)[0]["match_number"] == 3
+        undone = session.apply_correction({"id": uuid.uuid4().hex, "undoes": done["id"]})
+        assert undone["match_number"] == 3 and undone["delta"] == -1 and corrections(tmp)[0]["undone"] and session.state["approximate"] == 5
+
+
+def test_a_correction_for_an_unknown_match_is_refused():
+    with tempfile.TemporaryDirectory() as tmp:
+        session, _ = session_in(tmp)
+        for bad in (0, -2, "2", True, 1.5):
+            assert session.apply_correction({**request(1), "match_number": bad})["status"] == "refused", bad
+        assert session.state["approximate"] == 5 and corrections(tmp) == []
+
+
+def test_an_overview_correction_names_no_match():
+    with tempfile.TemporaryDirectory() as tmp:
+        session, _ = session_in(tmp)
+        assert session.apply_correction(request(1))["match_number"] is None and "match_number" not in corrections(tmp)[0]
+
+
+def game_match(w, number=2, certain=1, approx=3, active=120.0):
+    from fortnite_chest_counter.gui import theme
+    w.win.dashboard.show_game({"match": {"match_number": number, "english_confirmed": True, "active_seconds": active}, "chests": {"certain": certain, "approx": approx}},
+                              "In a match", theme.CERTAIN)
+
+
+def test_the_game_view_corrects_the_match_on_screen():
+    with G.window() as w:
+        seed(w)
+        d = w.win.dashboard
+        game_match(w)
+        assert not d.game_plus.isEnabled()                                       # only while counting: the running session knows the match
+        w.win.correct_match_chest(1)                                             # nor when asked directly
+        assert H.read_chest_corrections(w.win._history_folder()) == [] and w.win.counts[1] == 5
+        w.win.mode = "counting"
+        game_match(w)
+        assert d.game_approx.value.text() == "3" and d.game_plus.isEnabled()
+        d.game_plus.click()
+        (row,) = H.read_chest_corrections(w.win._history_folder())
+        assert row["match_number"] == 2 and row["delta"] == 1
+        assert d.game_approx.value.text() == "4" and "incl. +1 manual" in d.game_approx.sub.text() and d.game_certain.value.text() == "1"
+        assert "manual" not in d.game_certain.sub.text() and w.win.counts[1] == 6                       # CERTAIN untouched; the total moves with it
+        d.game_undo.click()
+        assert d.game_approx.value.text() == "3" and "manual" not in d.game_approx.sub.text() and w.win.counts[1] == 5
+
+
+def test_between_matches_the_buttons_act_on_the_match_that_just_ended_and_then_on_the_next():
+    from fortnite_chest_counter.gui import theme
+    with G.window() as w:
+        seed(w)
+        d = w.win.dashboard
+        w.win.mode = "counting"
+        last = {"match_number": 1, "english_confirmed": True, "certain": 0, "approx": 4, "active_seconds": 300, "completion": "complete", "ended_by": "placed", "reasons": []}
+        d.show_game({"match": None, "chests": None, "last_match": last}, "In the lobby", theme.MUTED)         # lobby, loading, the next island
+        d.game_plus.click()
+        assert "APPROX 5" in d.game_last.text() and "incl. +1 manual" in d.game_last.text()                  # shown on the last match's line
+        d.show_game({"match": {"match_number": 2, "english_confirmed": True, "active_seconds": 5}, "chests": {"certain": 0, "approx": 0}, "last_match": last},
+                    "In a match", theme.CERTAIN)
+        d.game_plus.click()
+        assert [row["match_number"] for row in H.read_chest_corrections(w.win._history_folder())] == [1, 2]
+        assert d.game_approx.value.text() == "1" and "incl. +1 manual" in d.game_approx.sub.text()       # match 1's +1 is not shown as match 2's
+
+
+def test_after_a_restart_no_old_match_is_targeted():
+    with G.window() as w:
+        seed(w)
+        d = w.win.dashboard
+        w.win.mode = "counting"
+        game_match(w, number=3)
+        w.win.set_mode("connecting")
+        w.win.mode = "counting"
+        d.refresh_game_manual()
+        assert d.game_target is None and not d.game_plus.isEnabled()
+
+
+def test_a_broken_chest_is_its_own_reason_and_no_detector_failure():
+    with tempfile.TemporaryDirectory() as tmp:
+        session, _ = session_in(tmp)
+        done = session.apply_correction({**request(1, "broken_chest"), "match_number": 1})
+        assert done["status"] == "applied" and done["reason"] == "broken_chest" and corrections(tmp)[0]["reason"] == "broken_chest"
+        totals = H.correction_totals(corrections(tmp))
+        assert (totals["broken_chests"], totals["detector_misses"], totals["unknown"]) == (1, 0, 0)
+        assert session.apply_correction(request(-1, "broken_chest"))["status"] == "refused"                  # a -1 is never a broken chest
+
+
+def test_a_game_plus_one_is_a_broken_chest_only_when_you_say_so():
+    """The reasons feed later statistics, so the default claims nothing; a chosen reason stays chosen for the next chest."""
+    with G.window() as w:
+        seed(w)
+        d = w.win.dashboard
+        w.win.mode = "counting"
+        game_match(w)
+        d.game_plus.click()
+        d.game_reason.setCurrentIndex(d.game_reason.findData("broken_chest"))
+        d.game_plus.click()
+        d.game_plus.click()
+        assert [row["reason"] for row in H.read_chest_corrections(w.win._history_folder())] == ["manual", "broken_chest", "broken_chest"]
+
+
+def test_the_game_view_cannot_take_a_match_below_its_certain_chests():
+    with G.window() as w:
+        seed(w)
+        w.win.mode = "counting"
+        game_match(w, certain=2, approx=2)
+        assert not w.win.dashboard.game_minus.isEnabled()
+
+
+def test_the_game_rate_counts_plus_ones_only_when_asked():
+    with G.window() as w:
+        seed(w)
+        d = w.win.dashboard
+        w.win.mode = "counting"
+        game_match(w, certain=0, approx=2, active=120.0)
+        d.game_plus.click()
+        assert d.game_approx.value.text() == "3" and d.game_rate.value.text() == "1.00"                 # 2 detected over 2 minutes
+        C.update_config_file(w.dir / "config.toml", "app", {"analytics_include_manual": True})
+        d.refresh_game_manual()
+        assert d.game_rate.value.text() == "1.50"
+
+
+def test_the_analytics_box_is_remembered_and_changes_the_rates():
+    with G.window() as w:
+        page = page_with_matches(w)
+        assert not page.include_manual.isChecked() and "left out unless you tick" in page.rate_hint.text()
+        page.include_manual.setChecked(True)
+        MA.settle(w)
+        assert settings.load_config(w.dir / "config.toml")[0]["app"]["analytics_include_manual"] is True
+        assert "plus the +1s you made in the Game view" in page.rate_hint.text()
 
 
 def test_statistics_ignore_manual_corrections():

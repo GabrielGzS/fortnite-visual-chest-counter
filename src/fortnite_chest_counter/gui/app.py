@@ -216,7 +216,8 @@ MATCH_STALE_SECONDS = 5                     # the worker reports once a second o
 UNKNOWN_VALUE = "—"
 OVERVIEW_VIEW, GAME_VIEW, CONSOLE_VIEW = range(3)
 # Why a count was corrected. A +1 does not mean the detector failed: Fortnite can count a chest with nothing on screen to detect.
-CORRECTION_WHY = {1: (("manual", "Not sure / balance fix"), ("not_visible", "Fortnite counted it, nothing to see (a broken chest, say)"), ("missed", "A visible chest the counter missed")),
+CORRECTION_WHY = {1: (("manual", "Not sure / balance fix"), ("broken_chest", "Broken chest"), ("missed", "A visible chest the counter missed"),
+                      ("not_visible", "Fortnite counted it, nothing else to see")),
                   -1: (("manual", "Not sure / balance fix"), ("false_positive", "Counted something that was not a chest"))}
 DASHBOARD_VIEWS = (("Overview", "Your counts and the video source"), ("Game", "What match tracking sees right now, and the live preview"),
                    ("Console", "The activity log, warnings and diagnostic recording"))
@@ -475,7 +476,9 @@ class CountCard(QFrame):
         box = QVBoxLayout()
         box.setContentsMargins(0, 14, 0, 14)
         box.setSpacing(0)
-        box.addWidget(label(title, "countLabel"))
+        self._box = box
+        self.title = label(title, "countLabel")
+        box.addWidget(self.title)
         self.value = label("0", "countValue")
         self.value.setStyleSheet(f"color: {color};")
         box.addWidget(self.value)
@@ -485,6 +488,11 @@ class CountCard(QFrame):
         self._flash = QTimer(self)
         self._flash.setSingleShot(True)
         self._flash.timeout.connect(lambda: self.setStyleSheet(""))
+
+    def compact(self):
+        """Less padding above and below, where a page needs the height (the Game view)."""
+        self._box.setContentsMargins(0, 8, 0, 8)
+        return self
 
     def set_value(self, value, flash=False):
         text = UNKNOWN_VALUE if value is None else fmt(value)
@@ -508,6 +516,12 @@ class StatTile(QFrame):
         layout.addWidget(self.value)
         self.sub = label(sub, "countSub", wrap=True)
         layout.addWidget(self.sub)
+        self._layout = layout
+
+    def compact(self):
+        self._layout.setContentsMargins(14, 5, 14, 5)
+        self._layout.setSpacing(0)
+        return self
 
     def set_value(self, value, sub=None):
         self.value.setText(UNKNOWN_VALUE if value is None else str(value))
@@ -1112,9 +1126,20 @@ class Dashboard(QWidget):
         self._build_console(win, console)
 
     def _build_game(self, win, game):
-        box, box_layout = card("Match status (experimental)")
+        # Top: what match tracking sees beside the live preview, so the picture no longer takes a row of its own (the maintainer's layout).
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        left = QVBoxLayout()
+        left.setSpacing(8)
+        box, box_layout = card()
+        box_layout.setContentsMargins(18, 10, 18, 10)          # the Game view needs its height for the numbers and the correction row
+        box_layout.setSpacing(4)
+        head = QHBoxLayout()
+        head.addWidget(label("Match status (experimental):", "cardTitle"))
         self.game_status = label("", "gameStatus", wrap=True)
-        box_layout.addWidget(self.game_status)
+        head.addWidget(self.game_status, 1)
+        box_layout.addLayout(head)
+        box.setToolTip("Followed from the screen once a second. It only reports: it never changes your counts or what OBS shows.")
         self.game_hint = label("", "hint", wrap=True)
         box_layout.addWidget(self.game_hint)
         row = QHBoxLayout()
@@ -1122,7 +1147,31 @@ class Dashboard(QWidget):
         row.addWidget(self.game_settings)
         row.addStretch(1)
         box_layout.addLayout(row)
-        game.addWidget(box)
+        left.addWidget(box)
+        tiles = QGridLayout()
+        tiles.setSpacing(8)
+        self.game_active = StatTile("ACTIVE PLAY", "Alive on the map")
+        self.game_seen = StatTile("SEEN SO FAR", "This match, on screen")
+        self.game_unclear = StatTile("UNCLEAR", "No picture, or not the game")
+        self.game_start = StatTile("START SEEN", "From before the bus")
+        self.game_language = StatTile("LANGUAGE", "From text on screen")
+        for index, tile in enumerate((self.game_active, self.game_seen, self.game_unclear, self.game_start, self.game_language)):
+            tiles.addWidget(tile.compact(), index // 3, index % 3)
+        left.addLayout(tiles)
+        left.addStretch(1)
+        top.addLayout(left, 3)
+        right = QVBoxLayout()                                 # the toggle stays put; with the picture hidden this column shrinks to it
+        right.setSpacing(6)
+        self.show_preview = button("Live preview", "toggle", tip="The video the counter is analysing")
+        self.show_preview.setCheckable(True)
+        right.addWidget(self.show_preview, 0, Qt.AlignRight)
+        self.preview = PreviewPanel()
+        self.preview.view.setMinimumSize(240, 135)
+        right.addWidget(self.preview, 1)
+        top.addLayout(right, 2)
+        self._game_top = top
+        game.addLayout(top)
+
         numbers = QHBoxLayout()
         numbers.setSpacing(12)
         self.game_certain = CountCard("MATCH CERTAIN", "", theme.CERTAIN)
@@ -1132,31 +1181,36 @@ class Dashboard(QWidget):
         self.game_rate = CountCard("DETECTED CHESTS / MIN", "", theme.APPROX)
         self._match_shown = None                              # (match number, certain, approx): a highlight means this match's count went up
         for tile in (self.game_certain, self.game_approx, self.game_rate):
-            numbers.addWidget(tile, 1)
+            numbers.addWidget(tile.compact(), 1)
         game.addLayout(numbers)
+        manual = QHBoxLayout()                                # v0.3.0 M9H: corrections made for this match, through the same path as Overview's
+        fix = label("Fix this match:", "hint")
+        fix.setToolTip("A chest the counter missed, a broken chest, or something it should not have counted, in the match on screen (between matches, "
+                       "the one that just ended). Your total changes too.")
+        manual.addWidget(fix)
+        self.game_minus = button("−1", tip="Take one chest off this match and off APPROX", on_click=lambda: win.correct_match_chest(-1))
+        self.game_plus = button("+1", tip="Add a chest to this match and to APPROX, a broken chest say. It stays a manual chest: never CERTAIN, never a detected type.",
+                                on_click=lambda: win.correct_match_chest(1))
+        self.game_undo = button("Undo", "link", tip="Undo your last correction. It stays in the history as undone.", on_click=win.undo_correction)
+        self.game_reason = QComboBox()                        # what a +1 is for, saved with it as a fixed id
+        for key, text in CORRECTION_WHY[1]:
+            self.game_reason.addItem(text, key)
+        self.game_reason.setToolTip("What the +1 is for. Choose Broken chest only when you know one was broken: they are counted apart in Analytics. "
+                                    "Only \"a visible chest the counter missed\" says the counter failed.")
+        self.game_reason.setCurrentIndex(max(self.game_reason.findData("manual"), 0))      # a broken chest only when you say so: these records feed later statistics
+        self.game_reason.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)       # the longest reason would push the page wider than the window
+        self.game_reason.setMinimumContentsLength(20)
+        for widget in (self.game_minus, self.game_plus, self.game_reason, self.game_undo):
+            manual.addWidget(widget)
+        manual.addStretch(1)
+        game.addLayout(manual)
+        self.game_target = None                               # the match the buttons act on: the open one, else the last one of this run
+        self.game_manual_by_match = {}                        # match number -> [+1s, -1s] standing, this run
+        self._game_last, self._game_last_match = ({}, None), None
         self.game_last = label("", "hint", wrap=True)
         self.game_last.hide()
         game.addWidget(self.game_last)
-        tiles = QHBoxLayout()
-        tiles.setSpacing(12)
-        self.game_active = StatTile("ACTIVE PLAY", "Alive on the map")
-        self.game_seen = StatTile("SEEN SO FAR", "This match, on screen")
-        self.game_unclear = StatTile("UNCLEAR", "No picture, or not the game")
-        self.game_start = StatTile("START SEEN", "From before the bus")
-        self.game_language = StatTile("LANGUAGE", "From text on screen")
-        for tile in (self.game_active, self.game_seen, self.game_unclear, self.game_start, self.game_language):
-            tiles.addWidget(tile, 1)
-        game.addLayout(tiles)
-        row = QHBoxLayout()
-        self.show_preview = button("Live preview", "toggle", tip="The video the counter is analysing")
-        self.show_preview.setCheckable(True)
-        row.addWidget(self.show_preview)
-        row.addStretch(1)
-        game.addLayout(row)
-        self.preview = PreviewPanel()
-        self.preview.view.setMinimumSize(240, 120)
-        game.addWidget(self.preview, 1)
-        game.addStretch(0)
+        game.addStretch(1)
         self.show_preview.toggled.connect(self._preview_toggled)
         self.show_mini.toggled.connect(self._preview_toggled)
         self.source.currentIndexChanged.connect(lambda _: self._panels())
@@ -1215,6 +1269,7 @@ class Dashboard(QWidget):
         counting = self.win.mode in ("connecting", "counting", "stopping")
         link_help_showing = (self.source.currentData() or {}).get("source") == "stream" and not counting       # needed before starting, and it is tall
         self.preview.setVisible(on)
+        self._game_top.setStretch(1, 2 if on else 0)
         self.mini_preview.setVisible(on and not link_help_showing)
         self.win.preview_visibility_changed()
 
@@ -1252,28 +1307,48 @@ class Dashboard(QWidget):
         match = message.get("match") or {}
         self.game_status.setText(text)
         self.game_status.setStyleSheet(f"color: {color};")
-        self.game_hint.setText("Followed from the screen once a second. It only reports: it never changes your counts or what OBS shows.")
+        self.game_hint.setText("")                             # the same words are the card's tooltip: the line is kept for what needs reading
+        self.game_hint.hide()
         self.game_settings.hide()
         self.game_active.set_value(match_clock(match.get("active_seconds")))
         self.game_seen.set_value(match_clock(match.get("observed_seconds")))
         self.game_unclear.set_value(match_clock(match.get("uncertain_seconds")))
         self.game_start.set_value({True: "Yes", False: "No"}.get(match.get("observed_from_start")))
         self.game_language.set_value({True: "English", False: "Not confirmed"}.get(match.get("english_confirmed")))
+        last = message.get("last_match")
+        self.game_target = match.get("match_number") or (last or {}).get("match_number")
+        self._game_last, self._game_last_match = (match, message.get("chests")), last
         self._show_match_numbers(match, message.get("chests"))
-        self._show_last_match(message.get("last_match"))
+        self._show_last_match(last)
+
+    def refresh_game_manual(self):
+        """After a correction: show it at once rather than at the next sample."""
+        self._show_match_numbers(*self._game_last)
+        self._show_last_match(self._game_last_match)
 
     def _show_match_numbers(self, match, chests):
         """This match only, from its own chests. Nothing is shown until it is known to be a match: a zero would say more than is known."""
         known = match.get("english_confirmed") is True and chests is not None
-        note = match_note(match)
+        added, removed = self.game_manual_by_match.get(match.get("match_number"), (0, 0))
+        if known:
+            include = bool(load_cfg()[0]["app"]["analytics_include_manual"])
+            detected = chests
+            chests = {"certain": detected["certain"], "approx": max(detected["approx"] + added - removed, detected["certain"])}
+            rated = {"certain": detected["certain"], "approx": max(detected["approx"] - removed + (added if include else 0), detected["certain"])}
+        note = match_note(match) + (f"  ·  incl. {manual_text(added, removed)}" if known and (added or removed) else "")
         now = (match.get("match_number"), chests["certain"], chests["approx"]) if known else None
         before = self._match_shown if now and self._match_shown and self._match_shown[0] == now[0] else None
         self._match_shown = now
         self.game_certain.set_value(chests["certain"] if known else None, flash=bool(before) and chests["certain"] > before[1])
         self.game_approx.set_value(chests["approx"] if known else None, flash=bool(before) and chests["approx"] > before[2])
         self.game_approx.sub.setText(note)
-        self.game_certain.sub.setText(note)
-        rate = match_analytics.match_rate(chests["certain"], chests["approx"], match.get("active_seconds")) if known else None
+        self.game_certain.sub.setText(match_note(match))                  # manual chests never touch CERTAIN
+        rate = match_analytics.match_rate(rated["certain"], rated["approx"], match.get("active_seconds")) if known else None
+        self.game_rate.title.setText("CHESTS / MIN WITH YOUR +1s" if known and include else "DETECTED CHESTS / MIN")
+        counting = self.win.mode == "counting" and self.game_target is not None
+        self.game_plus.setEnabled(counting)
+        self.game_minus.setEnabled(counting and (not known or chests["approx"] > chests["certain"]))
+
         self.show_game_rate(f"{rate.approx_per_minute:.2f}" if rate else None, "APPROX per minute of play" if rate else "Needs a minute of play" if known else "")
 
     def show_game_rate(self, text, hint):
@@ -1281,7 +1356,10 @@ class Dashboard(QWidget):
         self.game_rate.sub.setText(hint)
 
     def _show_last_match(self, last):
-        text = last_match_text(last)
+        added, removed = self.game_manual_by_match.get((last or {}).get("match_number"), (0, 0))
+        if last and (added or removed):
+            last = {**last, "approx": max(last["approx"] + added - removed, last["certain"])}
+        text = last_match_text(last) + (f"   ·   incl. {manual_text(added, removed)}" if last_match_text(last) and (added or removed) else "")
         if text:                                             # a weak record does not replace the last real one
             self.game_last.setText(text)
             self.game_last.show()
@@ -1290,9 +1368,11 @@ class Dashboard(QWidget):
         self.game_status.setText(text)
         self.game_status.setStyleSheet(f"color: {theme.MUTED};")
         self.game_hint.setText(hint)
+        self.game_hint.setVisible(bool(hint))
         self.game_settings.setVisible(offer_settings)
         for tile in (self.game_active, self.game_seen, self.game_unclear, self.game_start, self.game_language):
             tile.set_value(None)
+        self.game_target, self._game_last, self._game_last_match = None, ({}, None), None     # no match known: the buttons act on nothing
         self._show_match_numbers({}, None)
 
     def set_pill(self, text, color):
@@ -1839,6 +1919,23 @@ def rate_tile(tile, rate, label_text, missing):
     tile.sub.setText(missing if rate is None else f"APPROX per minute  ·  {rate.certain_per_minute:.2f} CERTAIN  ·  {label_text(rate)}")
 
 
+def manual_text(added, removed):
+    """"+2 manual", "−1 manual", "±0 manual" or "": your corrections inside a match's APPROX count, never passed off as detected chests."""
+    net = added - removed
+    return f"{'+' if net > 0 else '−' if net < 0 else '±'}{abs(net)} manual" if added or removed else ""
+
+
+def manual_part(added, removed, broken=0):
+    return f" ({manual_text(added, removed)}" + (f", {fmt(broken)} broken" if broken else "") + ")" if added or removed else ""
+
+
+def rate_hint_text(include_manual):
+    return ("Chests per minute are APPROX chests divided by your time actively playing. The main figure uses complete matches only, meaning their start "
+            "and their end were both seen. It counts the chests the app detected by itself, minus any you took off with −1 in the Game view" +
+            (", plus the +1s you made in the Game view." if include_manual else "; your +1s are left out unless you tick the box below.") +
+            " This is not your Fortnite total.")
+
+
 def rate_cell(match):
     if match.rate is None:
         return UNKNOWN_VALUE
@@ -1857,7 +1954,8 @@ def analytics_notes(summary):
     if summary.excluded:
         notes.append(f"{plural(summary.excluded, 'match')} marked as not a match, left out of every statistic.")
     if summary.manual_added or summary.manual_removed:
-        notes.append(f"Manual corrections are not part of these numbers (+{fmt(summary.manual_added)}, −{fmt(summary.manual_removed)}).")
+        notes.append(f"Manual corrections: +{fmt(summary.manual_added)}, −{fmt(summary.manual_removed)}. Those made in the Game view belong to their match and are in its "
+                     "APPROX count; those made on Overview change only your totals.")
     if summary.matches_left_out_of_rates:
         notes.append(f"{plural(summary.matches_left_out_of_rates, 'match')} left out of chests per minute: some of their chests were not recorded, or their play time is unknown.")
     if summary.missing_approx or summary.missing_certain:
@@ -1904,6 +2002,8 @@ class AnalyticsPage(QWidget):
         self.certain = StatTile("CERTAIN CHESTS", "In recorded history")
         self.approx = StatTile("APPROX CHESTS", "In recorded history, includes CERTAIN")
         self.per_match = StatTile("AVERAGE CHESTS PER COMPLETE MATCH")
+        self.broken = StatTile("BROKEN CHESTS (YOURS)", "Added by you in the Game view")
+        self.broken.setToolTip("Chests you added with +1 in the Game view as broken chests. You reported them: the app did not detect them.")
         self.complete_rate = CountCard("AVERAGE DETECTED CHESTS / MIN", "", theme.APPROX)        # the comparable figure: whole matches only
         self.observed_rate = StatTile("INCLUDING PARTIAL MATCHES")
         headline = QHBoxLayout()
@@ -1911,15 +2011,23 @@ class AnalyticsPage(QWidget):
         headline.addWidget(self.complete_rate, 3)
         headline.addWidget(self.observed_rate, 2)
         layout.addLayout(headline)
-        for tiles in ((self.matches, self.observed, self.confirmed, self.session), (self.certain, self.approx, self.per_match)):
+        for tiles in ((self.matches, self.observed, self.confirmed, self.session), (self.certain, self.approx, self.per_match), (self.broken, None, None)):
             line = QHBoxLayout()
             line.setSpacing(12)
             for tile in tiles:
-                line.addWidget(tile, 1)
+                if tile is None:
+                    line.addStretch(1)                        # the broken-chest tile keeps a third of the width, like the tiles above
+                else:
+                    line.addWidget(tile, 1)
             layout.addLayout(line)
-        self.rate_hint = label("Chests per minute are the APPROX chests the app detected by itself, divided by your time actively playing. The main figure uses complete matches only, "
-                               "meaning their start and their end were both seen. Manual +1 and −1 are not included, and this is not your Fortnite total.", "hint", wrap=True)
+        self.rate_hint = label(rate_hint_text(bool(load_cfg()[0]["app"]["analytics_include_manual"])), "hint", wrap=True)
         layout.addWidget(self.rate_hint)
+        self.include_manual = QCheckBox("Count my +1s from the Game view in chests per minute and per match")
+        self.include_manual.setToolTip("A +1 made for a match is a chest the detector did not see, a broken chest say. Off: the rates stay what the detector measured. "
+                                       "A -1 always counts, because it takes off a chest that should not have been counted. Your totals include both either way.")
+        self.include_manual.setChecked(bool(load_cfg()[0]["app"]["analytics_include_manual"]))
+        self.include_manual.toggled.connect(self._include_manual_toggled)
+        layout.addWidget(self.include_manual)
         self.notes = label("", "hint", wrap=True)
         layout.addWidget(self.notes)
         self.recent_title = label("Recent matches", "cardTitle")
@@ -1952,13 +2060,20 @@ class AnalyticsPage(QWidget):
         self.status.setText("Reading your match history...")
         self._generation += 1
         folder = paths.APP_DIR / profiles.history_folder(profile["state_base"], profile["id"])
-        self._thread = threading.Thread(target=self._read, args=(self._generation, folder), daemon=True, name="analytics")
+        self._thread = threading.Thread(target=self._read, args=(self._generation, folder, self.include_manual.isChecked()), daemon=True, name="analytics")
         self._thread.start()
         self._collector.start(40)
 
-    def _read(self, generation, folder):
+    def _include_manual_toggled(self, on):
         try:
-            self._done.put((generation, match_analytics.load(folder)))
+            C.update_config_file(config_file(), "app", {"analytics_include_manual": bool(on)})
+        except (C.UserError, OSError) as error:
+            show_error(self, f"The setting could not be saved ({error}).")
+        self.refresh()
+
+    def _read(self, generation, folder, include_manual):
+        try:
+            self._done.put((generation, match_analytics.load(folder, include_manual)))
         except Exception as error:
             self._done.put((generation, error))
 
@@ -2000,6 +2115,11 @@ class AnalyticsPage(QWidget):
                   f"Not enough complete matches: needs {match_analytics.MIN_COMPLETE_RATE_SECONDS // 60} minutes of active play across them")
         rate_tile(self.observed_rate, s.observed_rate, lambda r: f"over {duration(r.minutes * 60)} of active play, complete and partial matches",
                   f"Needs at least {match_analytics.MIN_OBSERVED_RATE_SECONDS // 60} minutes of active play")
+        self.rate_hint.setText(rate_hint_text(s.include_manual))
+        self.complete_rate.title.setText("AVERAGE CHESTS / MIN WITH YOUR +1s" if s.include_manual else "AVERAGE DETECTED CHESTS / MIN")
+        broken = s.broken_per_complete_match
+        self.broken.set_value(fmt(s.broken_chests) if not s.empty else None,
+                              f"{broken:.1f} per complete match, as you reported them" if broken is not None else "Added by you in the Game view")
         self.notes.setText(analytics_notes(s))
         self.notes.setVisible(bool(self.notes.text()))
         for row in range(self.table.rowCount()):                # replaced buttons wait to be deleted: they must not stay on screen until then
@@ -2013,7 +2133,7 @@ class AnalyticsPage(QWidget):
             quality, color = ("Not a match", theme.DIM) if match.excluded else QUALITY_LOOK[match.quality]
             cells = (match.started_at.strftime("%b %d, %H:%M") if match.started_at else UNKNOWN_VALUE,
                      UNKNOWN_VALUE if seen is None else seen if match.duration_is_full else f"{seen} seen",
-                     f"{fmt(match.certain)}{more}", f"{fmt(match.approx)}{more}", rate_cell(match), quality + (" (interrupted)" if match.interrupted else ""), match.ending)
+                     f"{fmt(match.certain)}{more}", f"{fmt(match.approx)}{more}" + manual_part(match.manual_added, match.manual_removed, match.broken_chests), rate_cell(match), quality + (" (interrupted)" if match.interrupted else ""), match.ending)
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)
                 if column == 5:
@@ -2703,6 +2823,8 @@ class MainWindow(QMainWindow):
         d.url_note.setVisible(not running)
         if mode == "connecting":
             self.marks_this_session = 0
+            d.game_manual_by_match.clear()                    # match numbers start again with each run
+            d.game_target = None
         if not running:
             self.recording = None
         self.update_recording_ui()
@@ -3200,6 +3322,15 @@ class MainWindow(QMainWindow):
     def correct_chest(self, delta):
         self._send_correction({"id": uuid.uuid4().hex, "delta": delta, "reason": self.correction_memory[delta]})
 
+    def correct_match_chest(self, delta):
+        """The Game view's +1 and -1: the same correction as Overview's, also saved with the match it was made for. Only while counting, since
+        only the running session knows the match."""
+        target = self.dashboard.game_target
+        if self.mode != "counting" or target is None:
+            return
+        reason = self.dashboard.game_reason.currentData() if delta > 0 else self.correction_memory[delta]
+        self._send_correction({"id": uuid.uuid4().hex, "delta": delta, "reason": reason, "match_number": target})
+
     def undo_correction(self):
         if self.last_correction is not None:
             self._send_correction({"id": uuid.uuid4().hex, "undoes": self.last_correction["id"]})
@@ -3224,7 +3355,13 @@ class MainWindow(QMainWindow):
             self.add_log({"type": "warn", "text": f"Correction not applied: {result.get('message', '')}"})
         elif result.get("status") == "applied":
             what = "undone" if result.get("undoes") else "applied"
-            self.add_log({"type": "info", "text": f"Manual correction {what}: APPROX {result.get('delta', 0):+d}."})
+            number = result.get("match_number")
+            self.add_log({"type": "info", "text": f"Manual correction {what}: APPROX {result.get('delta', 0):+d}" + (f", match {number}." if number else ".")})
+            if number is not None:
+                tally = self.dashboard.game_manual_by_match.setdefault(number, [0, 0])
+                original = -result["delta"] if result.get("undoes") else result["delta"]          # undoing a +1 takes back that +1
+                tally[0 if original > 0 else 1] += -1 if result.get("undoes") else 1
+                self.dashboard.refresh_game_manual()
         self.refresh_corrections()
 
     def _history_folder(self):

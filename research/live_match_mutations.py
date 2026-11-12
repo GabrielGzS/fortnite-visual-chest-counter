@@ -82,7 +82,7 @@ MUTATIONS = [
     ("G", "flash=bool(before) and chests[\"approx\"] > before[2])", "flash=False)", "test_the_game_count_highlights_when_it_goes_up"),
     ("G", "flash=bool(before) and chests[\"certain\"] > before[1])", "flash=False)", "test_the_game_count_highlights_when_it_goes_up"),
     ("G", "before = self._match_shown if now and self._match_shown and self._match_shown[0] == now[0] else None", "before = self._match_shown if now and self._match_shown else None", "test_a_new_match_does_not_highlight"),
-    ("G", "        for tile in (self.game_certain, self.game_approx, self.game_rate):\n            numbers.addWidget(tile, 1)", "        for tile in (self.game_approx, self.game_certain, self.game_rate):\n            numbers.addWidget(tile, 1)", "test_certain_is_on_the_left_on_both_views"),
+    ("G", "        for tile in (self.game_certain, self.game_approx, self.game_rate):\n            numbers.addWidget(tile.compact(), 1)", "        for tile in (self.game_approx, self.game_certain, self.game_rate):\n            numbers.addWidget(tile.compact(), 1)", "test_certain_is_on_the_left_on_both_views"),
     ("G", "        self.dashboard.console_counts.setText(console_counts_text(certain, approx))\n", "", "test_the_console_always_shows_the_counts"),
     ("G", "self.show_game_rate(f\"{rate.approx_per_minute:.2f}\" if rate else None,", "self.show_game_rate(f\"{rate.certain_per_minute:.2f}\" if rate else None,", "test_there_is_one_live_rate_and_it_is_approx"),
     ("G", "        headline.addWidget(self.complete_rate, 3)\n        headline.addWidget(self.observed_rate, 2)", "        headline.addWidget(self.observed_rate, 3)\n        headline.addWidget(self.complete_rate, 2)", "test_the_headline_stands_out_on_the_left"),

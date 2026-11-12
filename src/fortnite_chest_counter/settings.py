@@ -86,6 +86,7 @@ DEFAULTS = {
     "app": {
         "remember_window": True,                # the desktop app reopens with the size, position and maximised state it closed with
         "show_preview": True,                   # the Dashboard's live preview; only what the counter already analyses
+        "analytics_include_manual": False,      # your +1s made for a match count in its rates and averages (your -1s always do)
     },
     "update": {
         "check_automatically": True,            # look for a new version shortly after the app opens (nothing is downloaded by itself)

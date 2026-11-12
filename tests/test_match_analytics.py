@@ -50,14 +50,14 @@ class Run:
         self.writer = H.HistoryWriter(f, self.warnings.append, run_id=run_id)
         self.writer.start_run("stream", "0.3.0", 15, ["en"], 0, 0, 0, 60)
 
-    def match(self, number, opened, played, closed, active, completion="complete", ended_by="placed", ended=None, spectating=0.0, uncertain=0.0, english=True, from_start=True):
+    def match(self, number, opened, played, closed, active, completion="complete", ended_by="placed", ended=None, spectating=0.0, uncertain=0.0, english=True, from_start=True, reasons=()):
         self.writer.match_opened({"t": opened, "match_number": number, "observed_from_start": from_start, "start_confidence": "high"})
         if ended is not None:
             self.writer.transition({"t": ended + 1, "previous": "IN_MATCH", "state": "ELIMINATED", "reason": "you_placed_seen", "match_number": number})
         self.writer.match_closed({"match_number": number, "completion": completion, "english_confirmed": english, "ended_by": ended_by, "observed_from_start": from_start, "opened_t": opened,
                                   "played_from_t": played, "ended_t": ended, "closed_t": closed, "observed_seconds": closed - opened - uncertain, "active_seconds": active, "spectating_seconds": spectating,
                                   "uncertain_seconds": uncertain, "complete_duration_seconds": (ended - played) if completion == "complete" else None, "start_confidence": "high", "end_confidence": "high",
-                                  "discontinuity": False, "respawns": 0, "english_chests": 0, "portuguese_chests": 0, "reasons": [], "evidence": []})
+                                  "discontinuity": False, "respawns": 0, "english_chests": 0, "portuguese_chests": 0, "reasons": list(reasons), "evidence": []})
         return self
 
     def chest(self, t, certain=True, approx=True, language="en", chest_type="rare"):
@@ -101,6 +101,92 @@ def worked_example(f):
         run.chest(t, certain=certain)
     run.chest(3100.0, certain=False, language="pt")
     return run.end()
+
+
+# ------------------------------------------------------------------ M9H: the waiting island, and corrections made for a match
+
+ISLAND = ["started: countdown ended", A.WAITING_ISLAND, "next match countdown seen"]
+
+
+def test_the_waiting_island_is_no_match():
+    """rc6 on Replays' stream: between two real matches, 38 s of island read as a match until the countdown proved otherwise. It stays in history
+    (the tracker did think it a match for a moment) but is in no count, list or statistic."""
+    with folder() as f:
+        run = Run(f)
+        run.match(1, 0.0, 30.0, 640.0, 600.0, ended=630.0)
+        run.match(2, 700.0, 700.0, 738.0, 38.0, completion="unconfirmed", ended_by="left_or_unknown", english=False, reasons=ISLAND)
+        run.match(3, 738.0, 760.0, 1200.0, 430.0, ended=1190.0)
+        run.end()
+        s = summary_of(f)
+        assert (s.matches, s.complete, s.unconfirmed, s.waiting_islands) == (2, 2, 0, 1) and s.unconfirmed_seconds is None
+        assert [m.match_number for m in s.recent] == [3, 1]
+
+
+def test_an_unconfirmed_match_that_was_not_the_island_still_shows():
+    with folder() as f:
+        worked_example(f)
+        s = summary_of(f)
+        assert s.unconfirmed == 1 and s.waiting_islands == 0 and 4 in [m.match_number for m in s.recent]
+
+
+def corrected_example(f):
+    """The worked example's match 1 (3 APPROX, 2 CERTAIN, 600 s) with two +1s and one -1 made for it, one more +1 undone, and a +1 made on Overview."""
+    worked_example(f)
+    H.append_chest_correction(f, "p1", "run", 1, "not_visible", "t", 6, 10, 9, match_number=1)
+    H.append_chest_correction(f, "p2", "run", 1, "missed", "t", 6, 11, 9, match_number=1)
+    H.append_chest_correction(f, "m1", "run", -1, "false_positive", "t", 6, 10, 9, match_number=1)
+    H.append_chest_correction(f, "p3", "run", 1, "manual", "t", 6, 11, 9, match_number=1)
+    H.append_correction_undone(f, "u3", "run", "p3", 6, 10)
+    H.append_chest_correction(f, "o1", None, 1, "manual", "t", 6, 11, 10)
+
+
+def test_a_matchs_count_includes_the_corrections_made_for_it():
+    with folder() as f:
+        corrected_example(f)
+        for include in (False, True):
+            row = next(m for m in A.load(f, include).recent if m.match_number == 1)
+            assert (row.certain, row.approx, row.manual_added, row.manual_removed) == (2, 4, 2, 1)        # 3 detected, +2, -1: whatever the setting
+        assert all(m.manual_added == m.manual_removed == 0 for m in A.load(f).recent if m.match_number != 1)   # the Overview +1 belongs to no match
+
+
+def test_a_correction_made_for_what_turned_out_to_be_the_island_belongs_to_no_match():
+    """Pressed while the island was taken for a match: it stays in the total (the counter already has it) but no match is credited with it,
+    neither the island, which is no match, nor a neighbour, which it was not made for."""
+    with folder() as f:
+        run = Run(f)
+        run.match(1, 0.0, 30.0, 640.0, 600.0, ended=630.0)
+        run.match(2, 700.0, 700.0, 738.0, 38.0, completion="unconfirmed", ended_by="left_or_unknown", english=False, reasons=ISLAND)
+        run.match(3, 738.0, 760.0, 1200.0, 430.0, ended=1190.0)
+        run.end()
+        H.append_chest_correction(f, "p", "run", 1, "manual", "t", 0, 1, 0, match_number=2)
+        for include in (False, True):
+            s = A.load(f, include)
+            assert all(m.manual_added == 0 and m.approx == 0 for m in s.recent) and s.credited_approx == 0 and s.manual_added == 1
+
+
+def test_broken_chests_are_counted_apart_as_yours():
+    with folder() as f:
+        worked_example(f)                                                          # matches 1 and 2 complete, 3 partial
+        H.append_chest_correction(f, "b1", "run", 1, "broken_chest", "t", 6, 10, 9, match_number=1)
+        H.append_chest_correction(f, "b2", "run", 1, "broken_chest", "t", 6, 11, 9, match_number=3)
+        H.append_chest_correction(f, "m", "run", 1, "missed", "t", 6, 12, 9, match_number=1)
+        H.append_chest_correction(f, "b3", "run", 1, "broken_chest", "t", 6, 13, 9, match_number=2)
+        H.append_correction_undone(f, "u", "run", "b3", 6, 12)
+        s = A.load(f)
+        assert s.broken_chests == 2 and s.broken_per_complete_match == 0.5               # 1 over two complete matches; the undone one is gone
+        row = next(m for m in s.recent if m.match_number == 1)
+        assert (row.manual_added, row.broken_chests, row.approx) == (2, 1, 5)
+
+
+def test_statistics_take_minus_ones_always_and_plus_ones_only_when_asked():
+    with folder() as f:
+        corrected_example(f)
+        off, on = A.load(f), A.load(f, include_manual=True)
+        assert (off.credited_approx, on.credited_approx) == (5, 7)                 # credited 6: -1 always, +2 only when asked
+        assert (off.complete_rate.approx_per_minute, on.complete_rate.approx_per_minute) == (3 / 15, 5 / 15)
+        assert (off.per_complete_match.approx, on.per_complete_match.approx) == (1.5, 2.5)
+        assert (off.certain_chests, off.approx_chests) == (6, 9) and off.manual_added == 3 and off.manual_removed == 1   # what was detected, and every standing correction
+        assert not off.include_manual and on.include_manual
 
 
 # ------------------------------------------------------------------ the numbers
@@ -608,9 +694,9 @@ def test_switching_profile_shows_that_profiles_history():
 def test_a_slow_history_does_not_freeze_the_window():
     real = A.load
 
-    def slow(folder):
+    def slow(folder, *args, **kwargs):
         time.sleep(0.6)
-        return real(folder)
+        return real(folder, *args, **kwargs)
 
     with G.window() as w, patch.object(A, "load", slow):
         page = w.win.analytics

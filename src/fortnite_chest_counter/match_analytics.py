@@ -10,9 +10,14 @@ What it will not do:
   * Use a match whose history lost chests in either rate: its count would be too low.
   * Add CERTAIN to APPROX. APPROX is the total and already includes CERTAIN.
   * Claim an outcome. An ending is reported only as it was observed; placement numbers are not read.
+  * Call the waiting island a match. A record the countdown proved was the island stays in history but is in no count, list or statistic.
 
 Rates are total chests divided by total active minutes, not an average of per-match rates, so a short match cannot outweigh a long one.
 Which chests belong to which match comes from match_history.attribute: only chests during active play are credited.
+
+Manual corrections made for a match (the Game view's +1 and -1) belong to it. Its APPROX count always includes them, like the counter's total.
+In its statistics a -1 always counts, since it takes off a chest the detector should not have counted, and a +1 only with include_manual: it is
+a chest the detector did not see (a broken chest, say), so by default the rates stay what the detector measured.
 """
 
 import math
@@ -66,6 +71,9 @@ class RecentMatch:
     match_number: object = None
     excluded: bool = False                 # marked "Not a match": shown so it can be restored, left out of every statistic
     rate: object = None                    # a Rate for this match alone, or None when one is not defensible
+    manual_added: int = 0                  # your +1s and -1s made for this match, still standing; approx above already includes them
+    manual_removed: int = 0
+    broken_chests: int = 0                 # of those +1s, the ones you said were broken chests
 
 
 @dataclass
@@ -91,8 +99,12 @@ class Summary:
     matches_left_out_of_rates: int = 0     # history lost chests during them, or no active time is known
     missing_certain: int = 0               # gap rows: chests the totals have and history does not
     missing_approx: int = 0
-    manual_added: int = 0                  # the user's +1s and -1s still standing: on the counter, and in none of these statistics
+    manual_added: int = 0                  # the user's +1s and -1s still standing, on the counter
     manual_removed: int = 0
+    include_manual: bool = False           # whether +1s made for a match count in its statistics; -1s made for a match always do
+    waiting_islands: int = 0               # records the countdown proved were the waiting island: kept in history, no match
+    broken_chests: int = 0                 # +1s you said were broken chests, made for complete and partial matches: reported by you, not detected
+    broken_per_complete_match: object = None   # their average over complete matches, or None without one
     damaged_rows: int = 0
     newer_rows: int = 0
     recent: list = field(default_factory=list)
@@ -158,15 +170,20 @@ def ending_text(match):
     return ENDINGS.get(ended_by, "Not seen")
 
 
-def summarize(history, recent=RECENT_MATCHES):
-    usable = [match for match in history.matches if _usable(match)]
+def is_waiting_island(match):
+    return WAITING_ISLAND in (match.get("reasons") or ())
+
+
+def summarize(history, recent=RECENT_MATCHES, include_manual=False):
+    every = [match for match in history.matches if _usable(match)]
+    usable = [match for match in every if not is_waiting_island(match)]
     chests = [chest for chest in history.chests if _number(chest.get("t")) is not None]
     transitions = [row for row in history.transitions if _number(row.get("t")) is not None and "state" in row and "match_number" in row]
-    summary = Summary(unfinished=len(history.open_matches), newer_rows=history.newer_rows,
-                      damaged_rows=history.bad_lines + len(history.matches) - len(usable) + len(history.chests) - len(chests) + len(history.transitions) - len(transitions))
+    summary = Summary(unfinished=len(history.open_matches), newer_rows=history.newer_rows, include_manual=bool(include_manual), waiting_islands=len(every) - len(usable),
+                      damaged_rows=history.bad_lines + len(history.matches) - len(every) + len(history.chests) - len(chests) + len(history.transitions) - len(transitions))
 
-    credited = {(match["run_id"], match["match_number"]): [0, 0] for match in usable}
-    for chest in H.attribute(H.History(matches=usable, chests=chests, transitions=transitions)):
+    credited = {(match["run_id"], match["match_number"]): [0, 0] for match in every}
+    for chest in H.attribute(H.History(matches=every, chests=chests, transitions=transitions)):        # the island still owns its moments
         certain, approx = bool(chest.get("certain_counted")), bool(chest.get("approx_counted") or chest.get("certain_counted"))
         summary.certain_chests += certain
         summary.approx_chests += approx
@@ -174,6 +191,14 @@ def summarize(history, recent=RECENT_MATCHES):
             totals = credited[chest["run_id"], chest["match_number"]]
             totals[0] += certain
             totals[1] += approx
+
+    # Corrections made for a match. Statistics take a -1 always and a +1 only when asked; the count shown takes both, like the counter.
+    for_match = {key: value for key, value in H.corrections_by_match(history.chest_corrections).items() if key in credited}
+    shown, stats = {}, {}
+    for key, (certain, approx) in credited.items():
+        added, removed, _ = for_match.get(key, (0, 0, 0))
+        shown[key] = [certain, max(approx + added - removed, certain)]
+        stats[key] = [certain, max(approx - removed + (added if include_manual else 0), certain)]
 
     kept = [match for match in usable if not match["not_a_match"]]
     summary.excluded = len(usable) - len(kept)
@@ -185,8 +210,11 @@ def summarize(history, recent=RECENT_MATCHES):
     summary.confirmed_seconds = _total(complete, "active_seconds")
     summary.unconfirmed_seconds = _total(unconfirmed, "observed_seconds")
 
+    summary.broken_chests = sum(for_match.get((m["run_id"], m["match_number"]), (0, 0, 0))[2] for m in complete + partial)
+    if complete:
+        summary.broken_per_complete_match = sum(for_match.get((m["run_id"], m["match_number"]), (0, 0, 0))[2] for m in complete) / len(complete)
     for match in complete + partial:
-        totals = credited[match["run_id"], match["match_number"]]
+        totals = stats[match["run_id"], match["match_number"]]
         summary.credited_certain += totals[0]
         summary.credited_approx += totals[1]
 
@@ -196,11 +224,11 @@ def summarize(history, recent=RECENT_MATCHES):
 
     complete_ready, seen_ready = [m for m in complete if rate_ready(m)], [m for m in complete + partial if rate_ready(m)]
     summary.matches_left_out_of_rates = len(complete + partial) - len(seen_ready)
-    summary.complete_rate = _rate(complete_ready, credited, MIN_COMPLETE_RATE_SECONDS)
-    summary.observed_rate = _rate(seen_ready, credited, MIN_OBSERVED_RATE_SECONDS)
+    summary.complete_rate = _rate(complete_ready, stats, MIN_COMPLETE_RATE_SECONDS)
+    summary.observed_rate = _rate(seen_ready, stats, MIN_OBSERVED_RATE_SECONDS)
     if complete_ready:
         keys = [(match["run_id"], match["match_number"]) for match in complete_ready]
-        summary.per_complete_match = PerMatch(sum(credited[key][0] for key in keys) / len(keys), sum(credited[key][1] for key in keys) / len(keys), len(keys))
+        summary.per_complete_match = PerMatch(sum(stats[key][0] for key in keys) / len(keys), sum(stats[key][1] for key in keys) / len(keys), len(keys))
 
     known_sessions = []
     for run in history.runs.values():
@@ -226,17 +254,19 @@ def summarize(history, recent=RECENT_MATCHES):
     for match in reversed(usable[-recent:]):
         run = history.runs.get(match["run_id"]) or {"start": None}
         full = match["completion"] == COMPLETE and _number(match.get("complete_duration_seconds")) is not None
-        totals = credited[match["run_id"], match["match_number"]]
+        key = (match["run_id"], match["match_number"])
+        totals, figures, (added, removed, broken) = shown[key], stats[key], for_match.get(key, (0, 0, 0))
         fair = rate_ready(match) and match["completion"] != UNCONFIRMED and not match["not_a_match"]              # the same matches the summary rates accept
         summary.recent.append(RecentMatch(_started_at(run, match), _number(match.get("complete_duration_seconds" if full else "observed_seconds")), full, totals[0], totals[1],
                                           bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ending_text(match),
-                                          match["run_id"], match["match_number"], bool(match["not_a_match"]), match_rate(totals[0], totals[1], match.get("active_seconds")) if fair else None))
+                                          match["run_id"], match["match_number"], bool(match["not_a_match"]),
+                                          match_rate(figures[0], figures[1], match.get("active_seconds")) if fair else None, added, removed, broken))
     return summary
 
 
-def load(folder):
+def load(folder, include_manual=False):
     """The summary of one profile's history. Slow on a very large history, so the app calls it off its window's thread."""
-    return summarize(H.read(folder, only=READ_KINDS))
+    return summarize(H.read(folder, only=READ_KINDS), include_manual=include_manual)
 
 
 def duration_text(seconds):
