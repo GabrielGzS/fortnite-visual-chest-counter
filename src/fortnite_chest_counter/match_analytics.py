@@ -74,6 +74,7 @@ class RecentMatch:
     manual_added: int = 0                  # your +1s and -1s made for this match, still standing; approx above already includes them
     manual_removed: int = 0
     broken_chests: int = 0                 # of those +1s, the ones you said were broken chests
+    active_seconds: object = None          # alive on the bus or the map (v0.4.0, for Personal Bests)
 
 
 @dataclass
@@ -108,6 +109,7 @@ class Summary:
     damaged_rows: int = 0
     newer_rows: int = 0
     recent: list = field(default_factory=list)
+    all_matches: list = field(default_factory=list)    # every match `recent` is taken from, newest first (v0.4.0, for Personal Bests)
 
     @property
     def matches(self):
@@ -251,16 +253,18 @@ def summarize(history, recent=RECENT_MATCHES, include_manual=False):
     manual = H.correction_totals(history.chest_corrections)
     summary.manual_added, summary.manual_removed = manual["added"], manual["removed"]
 
-    for match in reversed(usable[-recent:]):
+    for match in reversed(usable):
         run = history.runs.get(match["run_id"]) or {"start": None}
         full = match["completion"] == COMPLETE and _number(match.get("complete_duration_seconds")) is not None
         key = (match["run_id"], match["match_number"])
         totals, figures, (added, removed, broken) = shown[key], stats[key], for_match.get(key, (0, 0, 0))
         fair = rate_ready(match) and match["completion"] != UNCONFIRMED and not match["not_a_match"]              # the same matches the summary rates accept
-        summary.recent.append(RecentMatch(_started_at(run, match), _number(match.get("complete_duration_seconds" if full else "observed_seconds")), full, totals[0], totals[1],
-                                          bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ending_text(match),
-                                          match["run_id"], match["match_number"], bool(match["not_a_match"]),
-                                          match_rate(figures[0], figures[1], match.get("active_seconds")) if fair else None, added, removed, broken))
+        summary.all_matches.append(RecentMatch(_started_at(run, match), _number(match.get("complete_duration_seconds" if full else "observed_seconds")), full, totals[0], totals[1],
+                                               bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ending_text(match),
+                                               match["run_id"], match["match_number"], bool(match["not_a_match"]),
+                                               match_rate(figures[0], figures[1], match.get("active_seconds")) if fair else None, added, removed, broken,
+                                               _number(match.get("active_seconds"))))
+    summary.recent = summary.all_matches[:recent]
     return summary
 
 

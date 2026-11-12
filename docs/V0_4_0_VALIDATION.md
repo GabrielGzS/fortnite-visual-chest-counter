@@ -113,3 +113,35 @@ Rules as tested (`tests/test_progression.py`, a hand-worked fortnight in a real 
 | Synthetic year (82 MB, 151,840 events): snapshot / all five periods / best hour | 1.44 s / 0.84 s / 0.06 s |
 
 Broad regressions are deferred to the end of phase B (M2 + M3), per the batched workflow adopted 2026-11-12.
+
+## M3 — Personal Bests engine (records)
+
+New pure module `records.py`: `personal_bests()` derives every best from history on each call (nothing stored, so Not a match, Restore
+and Undo change them at the next refresh), and `load()` reads history once for the whole Analytics page (match summary, snapshot, the
+five periods and the bests). `match_analytics.summarize` now also returns every match (`all_matches`, newest first) with its active time;
+`recent` is the first 25 of it, as before.
+
+| Best | Eligible |
+|---|---|
+| Most chests in a match | Complete, not Not a match; count includes your corrections for it (D3), shown apart |
+| Best chests per minute | Complete, at least 5 minutes of active play; same counts as the per-minute rate (checkbox respected) |
+| Best hour | 60 real minutes all counted, at least one chest |
+| Best day, best week | Any day or calendar week with recorded chests |
+| Most chests in a session, longest session | Any session |
+| Best session pace | Sessions of an hour or more |
+| Most broken chests in a match | Complete or Partial, as you reported them |
+
+Ties go to the first time a best was reached. Each best carries when, how long, CERTAIN where it applies, the manual part, and whether
+it was cut short (interrupted run or lost history rows).
+
+### Phase B check (M2 + M3 together)
+
+| Check | Result |
+|---|---:|
+| `test_records`, `test_progression` | 14/14, 32/32 |
+| `test_match_analytics`, `test_corrections`, `test_match_ui`, `test_match_history` | 61/61, 82/82, 50/50, 98/98 |
+| Mutations: Personal Bests, progression, analytics, corrections | 8/8, 28/28, 51/51, 58/58 |
+
+Two mutation candidates were dropped as equivalent: excluding a Not a match match again in `records.py` (match_analytics already credits
+it with no chests), and a re-ranking that could not change the winner. Three analytics/correction mutations were re-anchored to the new
+loop over every match.

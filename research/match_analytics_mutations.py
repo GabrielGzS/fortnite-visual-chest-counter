@@ -45,8 +45,8 @@ MUTATIONS = [
     ("A", "sum(credited[key][0] for key in keys) / minutes, sum(credited[key][1] for key in keys) / minutes", "sum(credited[key][1] for key in keys) / minutes, sum(credited[key][0] for key in keys) / minutes", "test_the_complete_rate_uses_only_complete_matches"),
     ("A", "sum(stats[key][0] for key in keys) / len(keys), sum(stats[key][1] for key in keys) / len(keys), len(keys))", "sum(stats[key][0] for key in keys), sum(stats[key][1] for key in keys), len(keys))", "test_per_complete_match"),
     # recent matches and damaged data
-    ("A", "    for match in reversed(usable[-recent:]):", "    for match in usable[-recent:]:", "test_recent_matches_are_newest_first_with_their_evidence"),
-    ("A", "    for match in reversed(usable[-recent:]):", "    for match in reversed(usable):", "test_recent_is_limited"),
+    ("A", "    for match in reversed(usable):", "    for match in usable:", "test_recent_matches_are_newest_first_with_their_evidence"),
+    ("A", "    summary.recent = summary.all_matches[:recent]", "    summary.recent = summary.all_matches", "test_recent_is_limited"),
     ("A", "full = match[\"completion\"] == COMPLETE and _number(match.get(\"complete_duration_seconds\")) is not None", "full = True", "test_recent_matches_are_newest_first_with_their_evidence"),
     ("A", "return ENDINGS.get(ended_by, \"Not seen\")", "return ENDINGS.get(ended_by, \"Placed\")", "test_an_unknown_ending_says_not_seen"),
     ("A", "bool(match[\"history_incomplete\"]), match[\"completion\"]", "False, match[\"completion\"]", "test_a_match_with_lost_chests_is_flagged_and_left_out_of_rates"),

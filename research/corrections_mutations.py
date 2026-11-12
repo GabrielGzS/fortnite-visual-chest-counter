@@ -79,7 +79,7 @@ MUTATIONS = [
     ("GUI", "        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)\n", "", "test_a_narrow_table_scrolls_instead_of_cutting_off"),
     ("GUI", "        self.table.viewport().installEventFilter(self)\n", "", "test_resizing_the_window_fits_the_columns_again"),
     # the statistics
-    ("A", "    for match in reversed(usable[-recent:]):", "    for match in reversed(kept[-recent:]):", "test_not_a_match_updates_the_statistics"),
+    ("A", "    for match in reversed(usable):", "    for match in reversed(kept):", "test_not_a_match_updates_the_statistics"),
     ("A", "    summary.manual_added, summary.manual_removed = manual[\"added\"], manual[\"removed\"]\n", "", "test_statistics_ignore_manual_corrections"),
 ]
 
