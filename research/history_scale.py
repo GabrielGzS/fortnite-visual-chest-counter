@@ -47,7 +47,7 @@ def generate(folder, days, hours_per_day):
                                      "uncertain_seconds": 0.0, "english_confirmed": True}))
         for number, opened in enumerate(range(0, seconds, 600), 1):
             matches.write(row("match_opened", opened, t=float(opened), match_number=number, observed_from_start=True, start_confidence="high"))
-            for k, state in enumerate(("WAITING", "BUS", "IN_MATCH", "ELIMINATED")):
+            for k, state in zip((0, 1, 2, 28), ("WAITING", "BUS", "IN_MATCH", "ELIMINATED")):
                 matches.write(row("transition", opened + 20 * k, t=float(opened + 20 * k), previous="UNKNOWN", state=state, reason="cue", match_number=number))
             matches.write(row("match_closed", opened + 590, match_number=number, completion="complete", english_confirmed=True, ended_by="placed",
                               observed_from_start=True, opened_t=float(opened), played_from_t=float(opened + 60), ended_t=float(opened + 580),

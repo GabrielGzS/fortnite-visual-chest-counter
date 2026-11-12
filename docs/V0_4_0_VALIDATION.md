@@ -89,3 +89,27 @@ check under load, as seen in v0.3.0.
 - During a video stall the loop gets no frames, so no heartbeats: if the app then crashes, the run's length is a lower bound.
 - Days use the PC's current time zone rules. Changing the PC's time zone re-dates history accordingly.
 - Two mutation checks (17, 18 in `timeline_mutations.py`) need the PC's zone to differ from UTC, which it does here.
+
+## M2 — Progress metrics
+
+New pure module `progression.py`: one `Snapshot` per history read gives chests per hour of session time, today / this week / last 7 /
+last 30 days / all time, days and weeks with their status (chests, known zero, not counted), averages per monitored, active and
+calendar day and week (completed days only), best day and week, sessions with their rates, and the current and best hour.
+
+Rules as tested (`tests/test_progression.py`, a hand-worked fortnight in a real daylight-saving zone):
+
+- Recorded chests = detected + standing +1s − standing −1s (D3); undone corrections never happened; `simulate` runs left out.
+- Spectated chests leave progress only inside a recognised English Complete or Partial match not marked Not a match (D4); elsewhere they count.
+- Chests per hour = recorded chests inside sessions ÷ session time, needing 30 minutes; never per-minute × 60 (tested).
+- Active play is unknown (a dash) without a recognised match, and "at least" when chests fell outside recognised matches.
+- The best hour lies inside counting (runs up to 2 minutes apart join, an app restart); a correction made after counting stopped stays out.
+- The calendar-week average is the calendar-day average × 7 over completed weeks, so a history that began mid-week is not a short week.
+
+| Check | Result |
+|---|---:|
+| `test_progression` | 32/32 |
+| `research/progression_mutations.py` | 28/28 caught |
+| `test_match_history` (read-only allowlist now includes `progression.py`) | 98/98 |
+| Synthetic year (82 MB, 151,840 events): snapshot / all five periods / best hour | 1.44 s / 0.84 s / 0.06 s |
+
+Broad regressions are deferred to the end of phase B (M2 + M3), per the batched workflow adopted 2026-11-12.
