@@ -2,12 +2,15 @@
 
 ### ⬇️ [Download for Windows: Fortnite-Visual-Chest-Counter-v0.4.0.zip](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases/download/v0.4.0/Fortnite-Visual-Chest-Counter-v0.4.0.zip) (about 156 MB)
 
+Windows 10 / 11 · nothing to install · extract the zip and open **`Fortnite Visual Chest Counter.exe`**
+
 The Analytics update. See how fast you really progress: chests per hour of real life, per day and per week, next to chests per minute
 of play, plus your Personal Bests.
 
 - Chests per hour, with queues, the lobby and breaks included
 - Today, this week, the last 7 and 30 days, and averages per day and per week
 - Personal Bests: your best match, hour, day, week and session
+- Four Analytics tabs: Performance, Days & weeks, Personal Bests and History
 - A calmer match status, an easier update notice, and fixes to the match list
 
 Your counts, profiles, settings and history are kept. Update from v0.3.0 with the "Update available" link in the app's sidebar, or
@@ -36,7 +39,7 @@ undoing a correction updates them. **History** lists your matches and sessions; 
 ends while the page is open appears by itself.
 
 What is counted: the chests the app detected plus your +1s and minus your −1s, always shown apart. Chests seen while spectating someone
-else are left out. Reset, Edit counts and a starting count are not chests. Full guide: docs/ANALYTICS.md.
+else are left out. Reset, Edit counts and a starting count are not chests. Full guide: [docs/ANALYTICS.md](https://github.com/GabrielGzS/fortnite-visual-chest-counter/blob/main/docs/ANALYTICS.md).
 
 ### Also new
 
@@ -55,3 +58,17 @@ else are left out. Reset, Edit counts and a starting count are not chests. Full 
 - The built-in updater's first real update, v0.2.3 to v0.3.0, worked. Its failure and rollback scenarios have not been run on real
   packages; if an update does not work, install by hand: extract the new zip to its own folder and copy `state\` and `config.toml`.
 - Detection is unchanged from v0.3.0, including its known limits (720p small-HUD start text, the lobby menu with the TREASURE tab).
+
+### Installing v0.4.0
+
+**From v0.3.0:** the app offers the update by itself. Choose **Update available** in the sidebar (or **Settings > Check for updates**),
+then **Download & Install**, then **Restart & Install**.
+
+**By hand, or from an older version:** close the app, extract the new zip to its own folder, then copy `state\` and `config.toml`
+from the old folder into the new one, and point your OBS Text source at the new `obs_output\`. Download it only from the official
+[GitHub releases page](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases).
+
+**Full details:** [README](https://github.com/GabrielGzS/fortnite-visual-chest-counter#readme)
+
+Independent, unofficial project: not affiliated with, endorsed by or approved by Epic Games. "Fortnite" is a trademark of
+Epic Games, Inc. MIT licence. Developed and tested during Fortnite Chapter 7 Season 5 (November 2026).
