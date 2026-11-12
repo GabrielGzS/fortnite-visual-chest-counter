@@ -1,7 +1,8 @@
 # Match tracking and Analytics (experimental)
 
 New in v0.3.0. While the app counts, match tracking follows your Fortnite matches and keeps a history of them on your PC.
-The **Analytics** page shows what that history says.
+The **Analytics** page shows what that history says; v0.4.0's chests per hour, per day and per week and Personal Bests are
+explained in [ANALYTICS.md](ANALYTICS.md).
 
 It is **on by default**, and it **never changes your counts or what OBS shows**. CERTAIN, APPROX and the OBS text are exactly
 the same with it on or off. To turn it off, untick it in **Settings**; if you already turned it off, it stays off.
@@ -17,8 +18,10 @@ the same with it on or off. To turn it off, untick it in **Settings**; if you al
 
 ## Settings
 
-**Settings > Match tracking (experimental)** has **Track matches and keep a match history** and **Save progress every**: 30
-seconds, 1 minute (recommended), 5 minutes or 10 minutes. Changes apply the next time you click **Start counting**.
+**Settings > Match tracking (experimental)** has **Track matches** and **Save progress every**: 30 seconds, 1 minute
+(recommended), 5 minutes or 10 minutes. Changes apply the next time you click **Start counting**. Since v0.4.0 your chest history
+(each chest and session, for chests per hour and per day) is kept whenever your counts are saved, with match tracking on or off;
+match tracking adds the matches.
 
 Matches are followed once a second whatever you choose. That setting only decides how often running totals are
 written. A longer interval writes less to the disk, but after a crash more of the last moments count as uncertain.
@@ -46,8 +49,9 @@ The **Live preview** can be hidden with its button. Only the one on screen updat
 
 ## Analytics
 
-The **Analytics** page reads the match history of the selected profile. The numbers on the Dashboard stay your official
-totals. The two can differ, because Analytics only covers chests recorded with match tracking on.
+The **Analytics** page reads the history of the selected profile. The numbers on the Dashboard stay your official totals. The two
+can differ: history starts with v0.3.0, and matches are only recorded with match tracking on. This section is about the match
+figures; see [ANALYTICS.md](ANALYTICS.md) for the whole page.
 
 | Quality | Meaning | In the statistics? |
 |---|---|---|
@@ -103,8 +107,9 @@ that just ended; there you choose the reason next to +1 before adding.
 | A visible chest the counter missed | The pop-up was on screen and was not counted | Yes |
 | Counted something that was not a chest | A false count | Yes |
 
-Corrections are not part of the Analytics statistics; the page tells you how many there are. **Reset...** and **Edit
-counts...** replace the total, so corrections made before them can no longer be undone. They stay in the history.
+Chests per minute and per match take your −1s always and your +1s only when you tick **Count my +1s from the Game view**. Chests
+per hour, per day and per week include your corrections, like your total, and say how many you made (v0.4.0). **Reset...** and
+**Edit counts...** replace the total, so corrections made before them can no longer be undone. They stay in the history.
 
 ## Where your data is
 
@@ -122,5 +127,5 @@ page.
 **Updating.** An update replaces only the program files, so `state\` and your history are left in place. If you install by
 hand, extract the new zip to its own folder and copy `state\` and `config.toml` into it.
 
-**Going back.** If you return to v0.2.3 or older, your counts, profiles and settings keep working. Those versions ignore the
-history files without touching them, and nothing is recorded while you use them.
+**Going back.** v0.3.0 reads the history v0.4.0 writes. If you return to v0.2.3 or older, your counts, profiles and settings keep
+working. Those versions ignore the history files without touching them, and nothing is recorded while you use them.

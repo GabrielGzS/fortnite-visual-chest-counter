@@ -142,12 +142,19 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
 New in v0.3.0 and **on by default**; turn it off in **Settings > Match tracking (experimental)**. While counting, the app
 follows your matches and keeps a history of them, per profile, on your PC. It never changes your counts or what OBS shows.
 
-The **Game** view shows the current match's own chests and chests per minute. The **Analytics** page shows average detected
-chests per minute from complete matches, and per match. A −1 you make in the Game view counts there, a +1 only if you tick
-**Count my +1s from the Game view**, and broken chests you report are shown apart. The waiting island is never a match. A
-match counts as **complete** if its start and the end of your part in it were both seen with no break in the video, however it
-ended. A **partial** match (joined late, or the video stopped) still shows its observed time but stays out of the main rate. If a recorded
-match was wrong, **Not a match** leaves it out of the statistics, and **Restore** puts it back; nothing is deleted.
+The **Game** view shows the current match's own chests and chests per minute. The **Analytics** page (v0.4.0) has four tabs:
+
+- **Performance**: **chests per hour** of real life (queues, the lobby and breaks included) beside **chests per minute of play**, for
+  today, this week, the last 7 or 30 days or all time, with a chart and where your chests came from (detected, or added by you).
+- **Days & weeks**: today, yesterday, this week, the last 7 and 30 days, averages per day and per week, best day and week. A day
+  nobody counted is shown as not counted, never as a zero.
+- **Personal Bests**: your best match, chests per minute, hour, day, week and session, with when they happened.
+- **History**: your matches (with **Not a match** / **Restore**) and your sessions.
+
+Your chest history is kept whenever your counts are saved, with match tracking on or off; matches need match tracking. A match counts as
+**complete** if its start and the end of your part in it were both seen with no break in the video, however it ended. A **partial**
+match (joined late, or the video stopped) still shows its time but stays out of the main per-minute rate and the match bests. The waiting
+island is never a match. Details: [Analytics guide](docs/ANALYTICS.md).
 
 Match recognition reads **English** screens only for now, and has been tested on only a few real matches. Chest counting is
 not affected in any language. Details: [match tracking guide](docs/MATCH_TRACKING.md).

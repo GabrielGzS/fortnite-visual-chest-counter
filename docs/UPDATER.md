@@ -2,6 +2,13 @@
 
 Internal / developer note. Signing keys are covered in [UPDATE_SIGNING.md](UPDATE_SIGNING.md).
 
+**v0.4.0 (in development):** the update path (download, verification, staging, installation, rollback) is unchanged from v0.3.0. Only the
+window changed: automatic checks are logged, a found update shows a dismissible Dashboard notice and an Updates card in Help &
+diagnostics, and release notes are safe Markdown, highlights first (a release body can end its highlights with
+`<!-- highlights end -->`). **Observed 2026-11-12:** the first real update, v0.2.3 to v0.3.0, succeeded on the second PC as a normal
+user would do it. The failure scenarios below remain unverified on real packages; they need an isolated VM
+([V0_4_0_VALIDATION.md](V0_4_0_VALIDATION.md), M9).
+
 **Current state (v0.2.3, unchanged in v0.3.0):** the whole updater is built, including the app's window controls and settings, and passes the automated tests
 on small synthetic installations. Both production public keys are in the trust list. It ships as **experimental**.
 
@@ -23,12 +30,12 @@ Before v0.3.0's release the real test was reviewed and not run, because the caus
 
 ## In the app
 
-Shortly after opening, the app checks for a new version in the background, unless that is turned off in Settings > Updates. A failed
-automatic check says nothing. Nothing is downloaded or installed without the user asking.
+Shortly after opening, the app checks for a new version in the background, unless that is turned off in Settings > Updates. Up to
+v0.3.0 a failed automatic check said nothing; from v0.4.0 every automatic check writes one line in the Console. Nothing is downloaded or installed without the user asking.
 
 | Step | What the user sees |
 |---|---|
-| A verified newer release exists | A small "Update available" link in the sidebar. Nothing pops up |
+| A verified newer release exists | A small "Update available" link in the sidebar; from v0.4.0 also a dismissible line on the Dashboard and the Updates card in Help. Nothing pops up |
 | Link or manual check | Version, release notes, **Download & Install**, **Later** |
 | Preparing | Stage, percentage, sizes, speed and Cancel. Counting continues, and the window can be closed |
 | Ready | **Restart & Install**, with confirmation first if counting is active |

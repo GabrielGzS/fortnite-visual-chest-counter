@@ -61,8 +61,9 @@ recognition but turning detections into gameplay statistics:
 | v0.2.1 | Livestream URL input (Twitch / YouTube, no OBS) + OBS compatibility: WebSocket overlay output, OBS projector input, analysis-rate presets (released) |
 | v0.2.2 | Better detection (stacked pop-ups, smaller HUD), count profiles, chest types (released) |
 | v0.2.3 | Built-in updater with signed releases (experimental: real-package testing still open, see [UPDATER.md](UPDATER.md)) |
-| **v0.3.0** | **Match Tracking & Statistics Foundation** - experimental match tracking, match history, a first Analytics page, manual corrections |
-| **v0.4.0** | **Statistics & Performance Analytics** - records, history and trends on top of v0.3.0 |
+| v0.3.0 | Match tracking & Analytics foundation (released 2026-11-12) |
+| **v0.4.0** | **Analytics Expansion & Reliability** - chests per hour, day and week, Personal Bests, UX and updater improvements |
+| **v0.5.0** | **Treasure Recognition & Predictions** |
 
 These are **planning milestones, not implementation authorization**: each one starts with an investigation and a design
 the user approves before any code changes.
@@ -147,24 +148,21 @@ Moved to a later version: ship the setup guides (`docs/guides/`) inside the ZIP'
 Not in v0.3.0: the full statistics views (v0.4.0), Auto language (D2, needs match tracking first), detection changes beyond
 what match tracking needs (any change must keep chest events identical in `regress.py`).
 
-### v0.4.0 - Analytics Expansion & Reliability (planned)
+### v0.4.0 - Analytics Expansion & Reliability (in development, branch `dev/v0.4.0`)
 
-Goal: a statistics view built only on the v0.3.0 backend, to benchmark performance over time, and solidifying v0.3.0's behaviour.
+Plan and decisions: [V0_4_0_PLAN.md](V0_4_0_PLAN.md); results: [V0_4_0_VALIDATION.md](V0_4_0_VALIDATION.md); user guide:
+[ANALYTICS.md](ANALYTICS.md). Built so far: chest history whenever counts are saved; chests per hour of real life, per day and per week;
+Personal Bests; the four-tab Analytics page (Performance, Days & weeks, Personal Bests, History); the calmer Partial status; the update
+notice, Updates card and Markdown release notes. Open before a release candidate: the updater's real-package failure tests in an isolated
+VM, a test build, and the maintainer's hands-on acceptance.
 
-Carried over from v0.3.0 (its known limitations, docs/M9_VALIDATION.md): the lobby menu bar with the TREASURE tab (a whole-bar
-search works but needs a cheaper matcher to fit the time budget); small-HUD island and bus text at 720p; stacked pop-ups at 720p;
-a switch away from the game during a match becoming Partial once full-screen map and inventory footage exists; UI rough edges noted
-by the maintainer; broken-chest statistics beyond counts (per minute, share of adjusted totals, per streamer or mode), with no
-correction factor until the data supports one.
+Still deferred from v0.3.0 (detection, not in v0.4.0's scope): the lobby menu bar with the TREASURE tab, small-HUD island and bus text at
+720p, stacked pop-ups at 720p, and a switch away from the game mid-match becoming Partial.
 
-- Total chests, matches analysed, average chests per match, **personal record** (most chests in one match), match history,
-  performance over time; **chests per minute** only if match timing proves reliable.
-- **CERTAIN and APPROX stay separate** in every statistic and record: a record based on estimated (APPROX) chests is labelled
-  as estimated and never shown as equally verified as one made of CERTAIN chests.
-- Matches with unconfirmed boundaries are shown as such and left out of records by default.
-- Everything is recomputed from the stored events, so a corrected boundary updates every number.
-- Later analytics (rates, Sprite Chests, rewards) need the right denominator, mode / season separation and a known detection
-  completeness before they mean anything; observed frequencies are not Fortnite's drop odds.
+### v0.5.0 - Treasure Recognition & Predictions (roadmap)
+
+[V0_5_0_PLAN.md](V0_5_0_PLAN.md): the "YOU FOUND ..." reward notifications, treasure statistics, and a Prediction page (chests, hours and
+days until a goal) built on v0.4.0's daily and weekly history.
 
 ## Unscheduled ideas (still valid; after or between the milestones above)
 
