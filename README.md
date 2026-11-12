@@ -18,7 +18,7 @@ without revealing hidden information or providing gameplay assistance. See
 
 > Independent, unofficial project: not affiliated with, endorsed by or approved by Epic Games. "Fortnite" is a trademark of
 > Epic Games, Inc.
-> Status: **v0.3.0 public beta** (desktop app). Developed and tested during Fortnite Chapter 7 Season 5 (November 2026) -
+> Status: **v0.4.0 public beta** (desktop app). Developed and tested during Fortnite Chapter 7 Season 5 (November 2026) -
 > see [Fortnite compatibility](#fortnite-compatibility). Windows 10 / 11. Nothing to install.
 
 **Contents:** [The two numbers](#the-two-numbers-read-this-first) · [Download](#download) · [Choose your setup](#choose-your-setup) ·
@@ -189,8 +189,9 @@ downloaded and prepared, and **Restart & Install** finishes it. It is built to k
 to return to the previous version by itself if a new one does not start properly. Nothing is downloaded or installed unless you choose
 to. The automatic check and the download speed are in **Settings > Updates**.
 
-v0.3.0 is the first release the updater can install, so it is the updater's first real update. If it does not work, install v0.3.0
-by hand as described below.
+From v0.4.0, an available update also shows a line on the Dashboard (**What's new** / **Later**) and in **Help & diagnostics >
+Updates**, and every automatic check is noted in the Console. The first real update, v0.2.3 to v0.3.0, worked; if an update does
+not work, install it by hand as described below.
 
 **v0.2.2 and older need a manual download**, because those versions have no updater. Download it only from the official
 [GitHub releases page](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases).

@@ -568,7 +568,7 @@ def test_a_changed_manifest_is_rejected():
 
 
 def test_the_version_is_consistent_and_public_beta():
-    assert __version__ == "0.3.0" and RELEASE_CHANNEL == "public beta"
+    assert __version__ == "0.4.0" and RELEASE_CHANNEL == "public beta"
     assert f"**v{__version__} public beta**" in (ROOT / "README.md").read_text(encoding="utf-8")
     assert f"v{__version__} public beta" in (ROOT / "packaging/README.html").read_text(encoding="utf-8")
 

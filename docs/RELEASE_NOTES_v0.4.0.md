@@ -1,4 +1,6 @@
-## Fortnite Visual Chest Counter v0.4.0 — Public Beta (DRAFT, not released)
+## Fortnite Visual Chest Counter v0.4.0 — Public Beta
+
+### ⬇️ [Download for Windows: Fortnite-Visual-Chest-Counter-v0.4.0.zip](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases/download/v0.4.0/Fortnite-Visual-Chest-Counter-v0.4.0.zip) (about SIZE MB)
 
 The Analytics update. See how fast you really progress: chests per hour of real life, per day and per week, next to chests per minute
 of play, plus your Personal Bests.
@@ -48,5 +50,8 @@ else are left out. Reset, Edit counts and a starting count are not chests. Full 
 - History starts with v0.3.0: chests counted with older versions are in your total but cannot be placed on a day.
 - Time between matches is known only when matches are recognised (English screens). Otherwise active play shows as "at least".
 - A day nobody counted is unknown, not zero: per-calendar-day averages say how many days were not counted.
-- The updater's failure and rollback scenarios have not been run on real packages (one real update, v0.2.3 to v0.3.0, succeeded).
+- **Match tracking is experimental** and reads English screens only. In another language chests are still counted and placed on
+  their day, but matches are not recognised.
+- The built-in updater's first real update, v0.2.3 to v0.3.0, worked. Its failure and rollback scenarios have not been run on real
+  packages; if an update does not work, install by hand: extract the new zip to its own folder and copy `state\` and `config.toml`.
 - Detection is unchanged from v0.3.0, including its known limits (720p small-HUD start text, the lobby menu with the TREASURE tab).

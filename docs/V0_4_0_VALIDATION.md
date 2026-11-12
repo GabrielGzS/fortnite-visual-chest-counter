@@ -245,8 +245,9 @@ rather than guess:
 
 **What still holds.** The update path is byte for byte v0.3.0's (checked above). v0.3.0's results for it therefore stand: the automated
 failure tests on small synthetic installations (`test_update.py`, `test_update_prepare.py`, `test_update_install.py`,
-`test_update_release.py`), and one real update, v0.2.3 to v0.3.0, that succeeded on the second PC as a normal user. They were not rerun
-here: the code did not change, and a rerun of failure simulations on the main PC is what D11 rules out.
+`test_update_release.py`), and one real update, v0.2.3 to v0.3.0, that succeeded on the second PC as a normal user. Those automated
+tests use small synthetic installations in temporary folders, never a real installation; they were rerun in the final regression
+below and pass. The real-package scenarios are the ones that need the VM.
 
 **Ready to run once a VM and a test build are approved.** `tests/update_e2e.py` already drives five real-package scenarios, one per run,
 in the order they must pass; the remaining rows are covered by unit tests today and would need new e2e scenarios.
@@ -265,3 +266,69 @@ in the order they must pass; the remaining rows are covered by unit tests today 
 Steps (docs/UPDATER.md, "Checking with a real package"): build a test package; `update_e2e.py make-kit` with a throwaway key, outside
 the repository; copy the kit into the VM; run one scenario at a time with the kit's own Python; keep each `report.txt`. Never the
 production keys; security software stays on.
+
+## Release scope adjustment (2026-11-12)
+
+The maintainer simplified M9: no destructive VM campaign for v0.4.0 (its scenarios stay **deferred, not passed**); instead one genuine
+v0.3.0 → v0.4.0 update on the second PC is a release requirement. Two more items were asked for: a version-independent install folder,
+and a release candidate for hands-on review.
+
+### The install folder name: kept as it is for v0.4.0
+
+**Audit.** The version that installs an update checks the package with its own code, so v0.3.0's rules decide what v0.4.0's zip may look
+like:
+
+| v0.3.0 rule | Where | Effect of a version-independent folder |
+|---|---|---|
+| Every file inside one folder named exactly `Fortnite-Visual-Chest-Counter-v{version}` | `update/archive.py`, `inspect()` | v0.3.0 would refuse the package ("a file outside the version folder"): the in-app update to v0.4.0 would fail |
+| The asset is named `Fortnite-Visual-Chest-Counter-v{version}.zip` | `update/releases.py`, `zip_name()` | Renaming the zip would hide the update from v0.3.0 |
+
+Nothing else depends on the folder's name: the app finds its data next to its own `.exe` (`paths.py`), and an update swaps `runtime\`
+inside whatever folder it is in. The one thing a user must redo after renaming the folder by hand is pointing their OBS Text source at
+the new `obs_output\chest_counter.txt`.
+
+**Decision (the maintainer's fallback):** v0.4.0 keeps the current format, so v0.3.0 can install it.
+
+**A safe migration, for later approval:** (1) teach the *new* updater (in some release N) to accept either folder name, with every other
+check unchanged; (2) once copies older than N are no longer in use, ship packages with the permanent folder `Fortnite Visual Chest Counter`.
+A copy older than N would refuse such a package and need a manual install, so step 2 waits for step 1 to be widespread. Step 1 changes the
+package check of the update path, which v0.4.0 has deliberately left byte for byte as v0.3.0's, so it is not done without approval. Note
+that Windows' "Extract All" also creates a folder named after the zip, which stays versioned whatever the folder inside is called.
+
+### The v0.3.0 → v0.4.0 update test
+
+**Why it cannot happen before publication.** An unmodified v0.3.0 asks only GitHub's public release list (a draft is invisible to it) and
+trusts only the two production keys. No local server or test key can offer it v0.4.0; a copy changed to allow that would no longer be
+the v0.3.0 users have.
+
+**Before publication (on the release candidate, nothing installed):** run v0.3.0's own package checks, loaded from the `v0.3.0` tag, on the
+candidate: `archive.inspect` on its zip (layout, names, the version inside), and `staging.run_staged_checks` on a clean extraction (the
+new version's worker check and window self-test, as v0.3.0 requires before installing). Plus the usual: Defender scan, clean-folder
+launch and count, SHA-256.
+
+**After the production signature and publication (second PC, as a normal user), all of:**
+
+| Check | Pass when |
+|---|---|
+| Discovery | v0.3.0 shows "Update available: v0.4.0" (sidebar link; Settings > Check for updates if needed) |
+| Download and authentication | Download & Install completes; no signature or package error |
+| Installation and relaunch | Restart & Install closes the app, it reopens by itself, and the result notice says "Updated to v0.4.0" |
+| Data kept | Same profile selected; CERTAIN and APPROX unchanged; OBS text unchanged; settings unchanged |
+| New version | Help & diagnostics shows v0.4.0 and the Updates card; Analytics has its four tabs and shows the existing v0.3.0 history |
+
+If it fails, v0.3.0's automatic rollback applies, and a manual install (extract to a new folder, copy `state\` and `config.toml`) remains
+the fallback, as for every earlier release.
+
+## Final regression (phase E)
+
+Every suite and every mutation check, after all the changes above:
+
+| | Result |
+|---|---|
+| Test suites | **32 of 32 pass** (1,451 checks), including `test_cases` (the 16 real-world detection cases), the updater's automated tests (63, 102, 81, 68), and `test_obs` (its known flaky check passed this time) |
+| Mutation checks | **14 of 14 catch every mutation** (507 in all) |
+| Detector, match recognition and update path | Byte for byte as v0.3.0 (`git diff v0.3.0` empty for `detection/`, `estimator.py`, `templates/`, `match_state.py`, `match_cues.py`, `update/`), so the full-video detector regression is not rerun |
+| Real history | The maintainer's own v0.3.0 session read correctly and unchanged: 75 minutes, 215 detected + 46 manual = 261 chests, 208.9 per hour, 3.83 per minute of play, 7 complete matches |
+
+The version is now 0.4.0 (`version.py`), with the README, the in-zip guide and the release notes (draft, size to fill after the build)
+stating it; the release gate's version check moved with it.
