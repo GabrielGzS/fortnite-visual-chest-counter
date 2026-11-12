@@ -50,7 +50,7 @@ QToolTip {{ background: {SURFACE_3}; color: {TEXT}; border: 1px solid {BORDER}; 
 #countSub {{ color: {MUTED}; font-size: 9pt; }}
 #statCard {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px; }}
 #statValue {{ font-size: 18pt; font-weight: 600; }}
-#gameStatus {{ font-size: 15pt; font-weight: 600; }}
+#gameStatus {{ font-size: 13pt; font-weight: 600; }}
 
 #pill {{ border-radius: 11px; padding: 3px 12px; font-size: 9pt; font-weight: 600; }}
 #banner {{ background: #3a1d22; border: 1px solid #6b2a33; border-radius: 8px; }}

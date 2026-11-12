@@ -274,7 +274,7 @@ def test_a_match_fills_the_tiles():
         d = w.win.dashboard
         counting(w)
         w.win.handle(U.status("IN_MATCH", {**U.match(from_start=False), "uncertain_seconds": 65.0}))
-        assert "partial" in d.game_status.text() and tiles(d) == ["12:34", "13:20", "01:05", "No", "English"] and d.game_settings.isHidden()
+        assert "partial" not in d.game_status.text() and d.game_doubt.text().startswith("Partial") and not d.game_doubt.isHidden() and tiles(d) == ["12:34", "13:20", "01:05", "No", "English"] and d.game_settings.isHidden()
 
 
 def test_no_open_match_shows_dashes_not_zeros():

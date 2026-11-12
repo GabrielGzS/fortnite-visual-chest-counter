@@ -269,6 +269,17 @@ def match_line(message):
     return text, color
 
 
+def game_status_parts(text, color):
+    """The Game view's status (v0.4.0, UX-05): the state on its own, in a calm colour, and what to know about it (partial, not confirmed, no
+    picture) as a small note. -> (state, colour, note, note colour). Partial is a normal outcome, so it is never shown as a large warning."""
+    state, *notes = text.split("   ·   ")
+    note = "   ·   ".join(notes)
+    if note:
+        note = note[0].upper() + note[1:]
+    calm = theme.TEXT if color == theme.APPROX else color
+    return state, calm, note, theme.MUTED if note.startswith("No picture") else theme.APPROX
+
+
 def match_note(match):
     """What the numbers of the current match can be taken to mean."""
     if not match:
@@ -1134,11 +1145,12 @@ class Dashboard(QWidget):
         box, box_layout = card()
         box_layout.setContentsMargins(18, 10, 18, 10)          # the Game view needs its height for the numbers and the correction row
         box_layout.setSpacing(4)
-        head = QHBoxLayout()
-        head.addWidget(label("Match status (experimental):", "cardTitle"))
-        self.game_status = label("", "gameStatus", wrap=True)
-        head.addWidget(self.game_status, 1)
-        box_layout.addLayout(head)
+        box_layout.addWidget(label("Match status (experimental)", "cardTitle"))
+        self.game_status = label("", "gameStatus", wrap=True)             # on its own line, so it does not wrap beside the title (UX-05)
+        box_layout.addWidget(self.game_status)
+        self.game_doubt = label("", "pill")                  # why this match is partial or unconfirmed: small, beside the facts (UX-05)
+        self.game_doubt.hide()
+        box_layout.addWidget(self.game_doubt, 0, Qt.AlignLeft)
         box.setToolTip("Followed from the screen once a second. It only reports: it never changes your counts or what OBS shows.")
         self.game_hint = label("", "hint", wrap=True)
         box_layout.addWidget(self.game_hint)
@@ -1305,8 +1317,12 @@ class Dashboard(QWidget):
 
     def show_game(self, message, text, color):
         match = message.get("match") or {}
-        self.game_status.setText(text)
-        self.game_status.setStyleSheet(f"color: {color};")
+        state, calm, note, note_color = game_status_parts(text, color)
+        self.game_status.setText(state)
+        self.game_status.setStyleSheet(f"color: {calm};")
+        self.game_doubt.setText(note)
+        self.game_doubt.setStyleSheet(theme.pill_style(note_color))
+        self.game_doubt.setVisible(bool(note))
         self.game_hint.setText("")                             # the same words are the card's tooltip: the line is kept for what needs reading
         self.game_hint.hide()
         self.game_settings.hide()
@@ -1367,6 +1383,7 @@ class Dashboard(QWidget):
     def show_game_idle(self, text, hint, offer_settings):
         self.game_status.setText(text)
         self.game_status.setStyleSheet(f"color: {theme.MUTED};")
+        self.game_doubt.hide()
         self.game_hint.setText(hint)
         self.game_hint.setVisible(bool(hint))
         self.game_settings.setVisible(offer_settings)
@@ -3119,6 +3136,7 @@ class MainWindow(QMainWindow):
     def _check_match_video(self):
         """The worker reports once a second of video, so silence means no video is arriving."""
         if self.match_seen_at is not None and time.monotonic() - self.match_seen_at >= MATCH_STALE_SECONDS:
+            self.dashboard.game_doubt.hide()
             for line in (self.dashboard.match, self.dashboard.game_status):
                 line.setText("No video right now")
                 line.setStyleSheet(f"color: {theme.MUTED};")
