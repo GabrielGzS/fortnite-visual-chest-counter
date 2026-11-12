@@ -325,10 +325,32 @@ Every suite and every mutation check, after all the changes above:
 
 | | Result |
 |---|---|
-| Test suites | **32 of 32 pass** (1,451 checks), including `test_cases` (the 16 real-world detection cases), the updater's automated tests (63, 102, 81, 68), and `test_obs` (its known flaky check passed this time) |
-| Mutation checks | **14 of 14 catch every mutation** (507 in all) |
+| Test suites | **32 of 32 pass** (1,428 checks), including `test_cases` (the 16 real-world detection cases), the updater's automated tests (63, 102, 81, 68), and `test_obs` (its known flaky check passed this time) |
+| Mutation checks | **14 of 14 catch every mutation** (503 in all) |
 | Detector, match recognition and update path | Byte for byte as v0.3.0 (`git diff v0.3.0` empty for `detection/`, `estimator.py`, `templates/`, `match_state.py`, `match_cues.py`, `update/`), so the full-video detector regression is not rerun |
 | Real history | The maintainer's own v0.3.0 session read correctly and unchanged: 75 minutes, 215 detected + 46 manual = 261 chests, 208.9 per hour, 3.83 per minute of play, 7 complete matches |
 
 The version is now 0.4.0 (`version.py`), with the README, the in-zip guide and the release notes (draft, size to fill after the build)
 stating it; the release gate's version check moved with it.
+
+## rc1 (unsigned, for hands-on review)
+
+`build_out\v0.4.0-rc1\Fortnite-Visual-Chest-Counter-v0.4.0.zip`, 155.9 MB, **unsigned**, SHA-256
+`651d13d00f9e1ad7e06d6da6477a941b45d06b58c5ca1988292be7c08fd05881`, built from `047a2f9` (only docs changed after it; none ship).
+The build's own release audit passed (no samples, logs, saved counts, scripts or unexpected executables; OBS files start at 0).
+
+| Check | Result |
+|---|---|
+| Defender scan of the zip | No threats |
+| **v0.3.0's own package check** (`archive.inspect`, loaded from the `v0.3.0` tag) | Accepted: 5,039 files and 7 placeholders in `Fortnite-Visual-Chest-Counter-v0.4.0/`, the version inside is 0.4.0 |
+| **v0.3.0's own start-up checks** (`staging.run_staged_checks`, from the tag) on a clean extraction | Passed: worker check (version, packaged, templates, FFmpeg, update keys, package list) and window self-test with update health |
+| Counting with the packaged program, from a clean folder | `replays_vault_five_chests` 5 of 5 (3 CERTAIN); `thiefs_small_hud` 5 of 5 (2 CERTAIN) |
+| The maintainer's real history through the packaged code | 261 chests, 208.9 per hour, 9 of 9 Personal Bests; the files were unchanged afterwards |
+
+Together these show that v0.3.0's updater would accept and start this package. What remains unproven before publication is only what
+needs the production signature and a public release: discovery, download and signature check by a real v0.3.0, and the swap on a real
+installation (the plan above, on the second PC).
+
+**Before publishing (each needs the maintainer's approval):** the maintainer's hands-on review of rc1; then the release build from the
+release commit, the production signature (docs/UPDATE_SIGNING.md), `check_release.py`, push, tag and the GitHub pre-release with the
+release notes in docs/RELEASE_NOTES_v0.4.0.md; then the second-PC update test.

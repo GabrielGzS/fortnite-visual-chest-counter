@@ -1,6 +1,6 @@
 ## Fortnite Visual Chest Counter v0.4.0 — Public Beta
 
-### ⬇️ [Download for Windows: Fortnite-Visual-Chest-Counter-v0.4.0.zip](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases/download/v0.4.0/Fortnite-Visual-Chest-Counter-v0.4.0.zip) (about SIZE MB)
+### ⬇️ [Download for Windows: Fortnite-Visual-Chest-Counter-v0.4.0.zip](https://github.com/GabrielGzS/fortnite-visual-chest-counter/releases/download/v0.4.0/Fortnite-Visual-Chest-Counter-v0.4.0.zip) (about 156 MB)
 
 The Analytics update. See how fast you really progress: chests per hour of real life, per day and per week, next to chests per minute
 of play, plus your Personal Bests.
