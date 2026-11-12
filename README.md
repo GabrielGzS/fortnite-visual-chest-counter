@@ -106,7 +106,8 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
   - **Overview:** your lifetime numbers, the video source list (OBS Virtual Camera, capture devices, screens; **Refresh** after
     plugging something in), **Start counting** / **Stop counting** and a small **Live preview**. Counts are saved after every chest
     and kept between sessions.
-  - **Game:** this match only: its chests, chests per minute and time played, plus a larger **Live preview**.
+  - **Game:** this match only: its status and details beside the **Live preview**, its chests and chests per minute, and
+    **Fix this match** (**−1**, **+1**, **Undo**) for a chest the counter missed, a broken chest or a wrong count.
   - **Console:** **Activity**, every decision as it happens - **green** = certain chest, **yellow** = counted in APPROX
     only, **red** = looked like a chest pop-up but not counted - with the reason, plus **Diagnostic recording**. The
     button shows a number when there are warnings you have not seen.
@@ -115,7 +116,8 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
 - **+1 / −1** (v0.3.0, next to the numbers): adjust APPROX by one chest, also while counting. CERTAIN never changes this
   way, because the counter did not confirm that chest. A line then shows how much was counted and how much was adjusted by
   hand, with an optional **Why?** and **Undo**. Fortnite can count a chest with nothing on screen to detect (a broken
-  chest, for example), so a +1 does not have to mean the counter made a mistake.
+  chest, for example), so a +1 does not have to mean the counter made a mistake. In the **Game** view the same buttons also
+  belong to that match, and a **Broken chest** reason is counted apart in Analytics.
 - **Profiles** (v0.2.2): one per person you count, for example one per streamer. Each profile keeps its own counts and its
   own video source (such as that streamer's Twitch link). **New profile...**, **Rename...** and **Delete...** sit above the
   numbers; a deleted profile's counts are kept in `state\profiles\deleted\`. One profile counts at a time, and the OBS text
@@ -141,7 +143,8 @@ New in v0.3.0 and **on by default**; turn it off in **Settings > Match tracking 
 follows your matches and keeps a history of them, per profile, on your PC. It never changes your counts or what OBS shows.
 
 The **Game** view shows the current match's own chests and chests per minute. The **Analytics** page shows average detected
-chests per minute from complete matches, and per match, using only chests the app detected, never manual +1 / −1. A
+chests per minute from complete matches, and per match. A −1 you make in the Game view counts there, a +1 only if you tick
+**Count my +1s from the Game view**, and broken chests you report are shown apart. The waiting island is never a match. A
 match counts as **complete** if its start and the end of your part in it were both seen with no break in the video, however it
 ended. A **partial** match (joined late, or the video stopped) still shows its observed time but stays out of the main rate. If a recorded
 match was wrong, **Not a match** leaves it out of the statistics, and **Restore** puts it back; nothing is deleted.
@@ -233,8 +236,9 @@ can, a diagnostic capture.
 - **Screen source:** the gameplay must fill the screen; a small player inside a web page is not counted.
 - **Clean gameplay feed recommended:** overlays on top of the HUD can hide the clues.
 - **Audio is not used**; only the picture is analysed.
-- **Match tracking is experimental:** it reads English screens only and has been tested on recordings and a few real
-  matches. Other modes, reboots and squads are untested. Your counts never depend on it
+- **Match tracking is experimental:** it reads English screens only and has been tested on recordings, two streamers and a
+  few real matches. Other modes, reboots and squads are untested. On 720p video with a smaller HUD the island and bus text
+  are often not read, so those matches are Partial; 1080p works best. Your counts never depend on it
   ([guide](docs/MATCH_TRACKING.md)).
 - Tested on a limited set of recordings (PC English, PS5 Portuguese, their stream-compressed versions, diagnostic
   recordings of streams with a larger and a smaller HUD, 11 labelled real-world cases), live sessions (incl. a 3-hour

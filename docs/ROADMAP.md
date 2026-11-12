@@ -88,7 +88,7 @@ Driven by a real streamer setup: capture card owned by OBS, OBS Virtual Camera u
   render-lag skipped frames). Offline evidence so far: JPEG quality 95 (4:4:4) left every counted decision unchanged,
   quality 90 (4:2:0) did not; detection needs 15 pictures per second.
 
-### v0.3.0 - Match Tracking & Statistics Foundation (release candidate)
+### v0.3.0 - Match Tracking & Analytics (released 2026-11-12, public beta)
 
 Built, in the order M0 to M9; see `M4_VALIDATION.md` to `M9_VALIDATION.md` and [MATCH_TRACKING.md](MATCH_TRACKING.md). The plan below is kept as
 written. What changed from it: a deliberately small **Analytics** page did ship (matches, match time, chests per match and per minute), the Dashboard
@@ -147,9 +147,15 @@ Moved to a later version: ship the setup guides (`docs/guides/`) inside the ZIP'
 Not in v0.3.0: the full statistics views (v0.4.0), Auto language (D2, needs match tracking first), detection changes beyond
 what match tracking needs (any change must keep chest events identical in `regress.py`).
 
-### v0.4.0 - Statistics & Performance Analytics (planned)
+### v0.4.0 - Analytics Expansion & Reliability (planned)
 
-Goal: a statistics view built only on the v0.3.0 backend, to benchmark performance over time.
+Goal: a statistics view built only on the v0.3.0 backend, to benchmark performance over time, and solidifying v0.3.0's behaviour.
+
+Carried over from v0.3.0 (its known limitations, docs/M9_VALIDATION.md): the lobby menu bar with the TREASURE tab (a whole-bar
+search works but needs a cheaper matcher to fit the time budget); small-HUD island and bus text at 720p; stacked pop-ups at 720p;
+a switch away from the game during a match becoming Partial once full-screen map and inventory footage exists; UI rough edges noted
+by the maintainer; broken-chest statistics beyond counts (per minute, share of adjusted totals, per streamer or mode), with no
+correction factor until the data supports one.
 
 - Total chests, matches analysed, average chests per match, **personal record** (most chests in one match), match history,
   performance over time; **chests per minute** only if match timing proves reliable.

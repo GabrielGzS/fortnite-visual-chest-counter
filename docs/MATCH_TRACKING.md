@@ -36,9 +36,11 @@ The Dashboard has three views, switched at the top. Changing view never changes 
 The status says only what the picture supports: *In the lobby*, *Loading*, *Waiting for the match to start*, *In match*,
 *Possibly in a match*, *Spectating or out of the match*, *Match over* or *Not sure yet*.
 
-**Game** counts only chests detected during this match, starting from zero each match. Your Overview totals, a **Reset...**, an
-**Edit counts...** or a **+1 / −1** do not change it. It shows a dash, not a zero, until the app is sure it is watching a match,
-and chests per minute appear after a minute of play. If the app joined late or part of the match was not seen, it says so.
+**Game** counts only chests detected during this match, starting from zero each match, plus the corrections you make there. Your
+Overview totals, a **Reset...**, an **Edit counts...** or Overview's **+1 / −1** do not change it. It shows a dash, not a zero, until
+the app is sure it is watching a match, and chests per minute appear after a minute of play. If the app joined late or part of the
+match was not seen, it says so. The match status and details sit beside the **Live preview**; the numbers and the correction row
+follow.
 
 The **Live preview** can be hidden with its button. Only the one on screen updates, and neither affects counting.
 
@@ -59,7 +61,10 @@ evidence, so on a small HUD it can stay at 0 while APPROX climbs. That is expect
 **Average detected chests / min** is the main number: APPROX chests the app detected by itself, divided by your time actively
 playing, across complete matches only. It needs five minutes of active play across those matches together, and until then it says
 *Not enough complete matches*. Short matches count, weighted by their length. **Including partial matches** is the same sum with
-partial matches added, shown apart and never used in its place. Manual **+1** and **−1** are in neither.
+partial matches added, shown apart and never used in its place. A **−1** made in the Game view counts in both, because it removes a
+chest that should not have counted; a **+1** made there counts only if you tick **Count my +1s from the Game view**. Overview's
+corrections change only your total. **Broken chests (yours)** shows the broken-chest +1s you made for complete and partial matches,
+and how many per complete match: your reports, not something the app detected.
 
 **Recent matches** shows each match's own chests per minute. "seen" means only part of that match was seen, and a dash means
 there is under a minute of play, or it is not a confirmed match.
@@ -81,7 +86,9 @@ the minimap still show the game is there. Such a break does not by itself make a
 **A wrong match.** In **Recent matches**, **Not a match** leaves a match out of the statistics, and **Restore** puts it back
 exactly as it was. Nothing is deleted, and its chests stay in your totals.
 
-**A wrong chest count.** The **+1** and **−1** buttons next to the numbers change APPROX by one, also while counting.
+**A wrong chest count.** The **+1** and **−1** buttons next to the numbers on Overview change APPROX by one, also while counting.
+In the **Game** view, **−1**, **+1** and **Undo** (*Fix this match*) also belong to the match on screen, or between matches to the one
+that just ended; there you choose the reason next to +1 before adding.
 
 - CERTAIN never changes this way, because the counter did not confirm that chest.
 - APPROX cannot go below CERTAIN, so **−1** is disabled when they are equal. To correct CERTAIN, use **Edit counts...**.
@@ -91,7 +98,8 @@ exactly as it was. Nothing is deleted, and its chests stay in your totals.
 | Reason | Means | Says the counter made a mistake? |
 |---|---|---|
 | Not sure / balance fix (default) | You just want the number right | No |
-| Fortnite counted it, nothing to see | For example a broken chest, which gives no pop-up | No |
+| Broken chest | You broke a chest rather than opened it; counted apart in Analytics | No |
+| Fortnite counted it, nothing else to see | Fortnite counted a chest with nothing to detect | No |
 | A visible chest the counter missed | The pop-up was on screen and was not counted | Yes |
 | Counted something that was not a chest | A false count | Yes |
 
