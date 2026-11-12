@@ -1,5 +1,6 @@
 """
-Match history (v0.3.0, M5, M6): the durable evidence later statistics are calculated from. Written only when [match] mode = "on".
+Match history (v0.3.0, M5, M6): the durable evidence later statistics are calculated from. Since v0.4.0 (D7) runs, heartbeats, chests and
+corrections are written whenever counts are saved; match rows only when [match] mode = "on". The row kinds are the same either way.
 
     state/history/<profile id>/matches.jsonl    runs, heartbeats, state changes, matches, counter changes, gaps, corrections
     state/history/<profile id>/chests.jsonl     counted chests and later chest-type changes
@@ -232,7 +233,7 @@ class HistoryWriter:
             return
         self._warned = True
         try:
-            self._warn(f"match history could not be saved ({detail}); counting is not affected")
+            self._warn(f"chest and match history could not be saved ({detail}); counting is not affected")
         except Exception:
             pass
 
@@ -425,6 +426,35 @@ def _note_totals(run, row):
     order = int(row["id"].rpartition(":")[2])
     if order > run["_order"]:
         run["_order"], run["totals"] = order, (row["certain_total"], row["approximate_total"])
+
+
+def last_heartbeats(folder, run_ids):
+    """{run_id: its newest heartbeat row}, for the given runs only. Analytics otherwise skips heartbeats, which are most of the file; this is how
+    it learns when a run that never ended was last seen, parsing only the heartbeat lines of those runs. Reading never changes a file."""
+    wanted = {run_id: f'"run_id":{json.dumps(run_id, ensure_ascii=False)}'.encode("utf-8") for run_id in run_ids if isinstance(run_id, str)}
+    found = {}
+    if not wanted:
+        return found
+    try:
+        data = (Path(folder) / MATCHES).read_bytes()
+    except FileNotFoundError:
+        return found
+    for line in data.split(b"\n"):
+        if not line.startswith(b'{"kind":"heartbeat"'):
+            continue
+        for run_id, needle in wanted.items():
+            if needle not in line:
+                continue
+            row = _parse(line)
+            if row is not None and row["schema"] <= SCHEMA and row.get("run_id") == run_id:
+                try:
+                    order = int(row["id"].rpartition(":")[2])
+                except ValueError:
+                    break
+                if run_id not in found or order > found[run_id][0]:
+                    found[run_id] = (order, row)
+            break
+    return {run_id: row for run_id, (_, row) in found.items()}
 
 
 def read(folder, only=None, warn=None):

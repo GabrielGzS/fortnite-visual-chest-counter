@@ -106,6 +106,11 @@ class MatchTracker:
         except Exception as error:
             self._fail("close", error)
 
+    @property
+    def keeps_history(self):
+        """True while this tracker writes the run's heartbeats: in "on" mode, until it closes or stops after an error."""
+        return self._history is not None and not self.failed and not self.closed
+
     def stats(self):
         """Time spent here, apart from chest detection. Measured on the wall clock in the counting thread, so at worst an overestimate of
         its CPU. The share of one core is per second of source time, which also holds when a recording runs faster than real time."""

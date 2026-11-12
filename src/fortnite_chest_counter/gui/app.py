@@ -1744,9 +1744,10 @@ class SettingsPage(QWidget):
         layout.addWidget(box)
 
         box, box_layout = card("Match tracking (experimental)",
-                               "Follows your matches while counting and keeps a history of them for future statistics. English "
-                               "games only for now. It never changes your counts or what OBS shows.")
-        self.match_on = QCheckBox("Track matches and keep a match history")
+                               "Follows your matches while counting, for match statistics. English games only for now. It never changes "
+                               "your counts or what OBS shows. Your chest history for Analytics (per hour, per day) is kept whenever your "
+                               "counts are saved, with match tracking on or off.")
+        self.match_on = QCheckBox("Track matches")
         box_layout.addWidget(self.match_on)
         row = QHBoxLayout()
         row.addWidget(label("Save progress every"))
@@ -1755,9 +1756,9 @@ class SettingsPage(QWidget):
             self.heartbeat.addItem(text, seconds)
         row.addWidget(self.heartbeat, 1)
         box_layout.addLayout(row)
-        box_layout.addWidget(label("Matches are still followed once a second whatever you choose. A longer interval writes less to the disk, "
-                                   "but after a crash more of the last moments count as uncertain.", "hint", wrap=True))
-        self.match_on.toggled.connect(self.heartbeat.setEnabled)
+        box_layout.addWidget(label("How often the history saves where counting has got to. Matches are still followed once a second whatever you "
+                                   "choose. A longer interval writes less to the disk, but after a crash more of the last moments count as uncertain.",
+                                   "hint", wrap=True))
         self._match_mode = "off"
         layout.addWidget(box)
 
@@ -1832,7 +1833,6 @@ class SettingsPage(QWidget):
         self._match_mode = cfg["match"]["mode"]
         self.match_on.setChecked(self._match_mode == "on")
         self.heartbeat.setCurrentIndex(max(self.heartbeat.findData(cfg["match"]["heartbeat_seconds"]), 0))
-        self.heartbeat.setEnabled(self.match_on.isChecked())
         self.remember_window.setChecked(cfg["app"]["remember_window"])
         update = cfg["update"]
         self.update_auto.setChecked(update["check_automatically"])

@@ -755,17 +755,17 @@ def run_command(tmp, command, mode, items=None, interrupt_at=None, extra=()):
     return outcome(tmp)
 
 
-def run_app(tmp, mode, items=None):
-    """Through --gui, as the desktop app runs it. -> (outcome, log, the app's messages)."""
+def run_app(tmp, mode, items=None, extra=()):
+    """Through --gui, as the desktop app runs it. -> (outcome, log, the app's messages); the outcome and log are None when nothing was saved."""
     read, write = os.pipe()
     stdin = sys.stdin
     buf = io.StringIO()
     try:
         sys.stdin = os.fdopen(read, "r")
         with scripted_pipeline(items or scripted_frames()), contextlib.redirect_stdout(buf):
-            code = C.main(["live", "--gui", "--source", "file", "--reset", *folders(tmp), "--match-mode", mode])
+            code = C.main(["live", "--gui", "--source", "file", "--reset", *folders(tmp), "--match-mode", mode, *extra])
         assert code == 0, buf.getvalue()
-        result, log = outcome(tmp)
+        result, log = outcome(tmp) if (Path(tmp) / "s.json").exists() else (None, None)
     finally:
         sys.stdin = stdin
         CONSOLE.machine, paths.HIDE_CHILD_CONSOLES = False, False

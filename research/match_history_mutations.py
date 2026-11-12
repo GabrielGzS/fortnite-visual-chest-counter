@@ -44,7 +44,7 @@ MUTATIONS = [
     ("H", "self._lost[\"certain\"] += int(fields[\"certain_counted\"])", "pass", "test_rows_really_lost_become_a_gap_row_at_the_next_successful_write"),
     ("H", "        except Exception as error:\n            self._warn_once(f\"{type(error).__name__}: {error}\")", "        except ZeroDivisionError as error:\n            self._warn_once(f\"{type(error).__name__}: {error}\")", "test_every_writer_call_contains_bad_input"),
     ("H", "        except Exception as error:\n            self._warn_once(f\"{type(error).__name__}: {error}\")", "        except BaseException as error:\n            self._warn_once(f\"{type(error).__name__}: {error}\")", "test_the_user_stopping_is_not_swallowed"),
-    ("H", "        try:\n            self._warn(f\"match history could not be saved ({detail}); counting is not affected\")\n        except Exception:\n            pass", "        self._warn(f\"match history could not be saved ({detail}); counting is not affected\")", "test_a_failing_warning_is_contained"),
+    ("H", "        try:\n            self._warn(f\"chest and match history could not be saved ({detail}); counting is not affected\")\n        except Exception:\n            pass", "        self._warn(f\"chest and match history could not be saved ({detail}); counting is not affected\")", "test_a_failing_warning_is_contained"),
     ("H", "        if self._ended:\n            return None\n", "", "test_nothing_is_written_after_the_run_ends"),
     # recovery
     ("H", "            if run[\"end\"] is not None:\n                continue\n", "", "test_a_finished_run_is_left_alone_when_another_one_crashed"),

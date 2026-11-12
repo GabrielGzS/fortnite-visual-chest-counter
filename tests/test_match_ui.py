@@ -410,7 +410,7 @@ def test_settings_start_on_at_a_minute():
     with G.window(config='[match]\nmode = "off"\n') as w:
         page = w.win.settings_page
         page.load()
-        assert not page.match_on.isChecked() and not page.heartbeat.isEnabled()
+        assert not page.match_on.isChecked() and page.heartbeat.isEnabled()      # v0.4.0 (D7): history is kept with tracking off too
 
 
 def test_the_choices_are_the_supported_ones_and_shadow_is_not_offered():
@@ -426,9 +426,7 @@ def test_turning_it_on_is_saved_and_read_back():
     with G.window(config='[match]\nmode = "off"\n') as w:
         page = w.win.settings_page
         page.load()
-        assert not page.heartbeat.isEnabled()
         page.match_on.setChecked(True)
-        assert page.heartbeat.isEnabled()
         page.heartbeat.setCurrentIndex(page.heartbeat.findData(300))
         page.save()
         cfg, _, warnings = saved(w)

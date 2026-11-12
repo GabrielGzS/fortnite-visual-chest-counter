@@ -739,7 +739,8 @@ def cmd_simulate(args):
     est = estimator.ChestEstimator()
     source = Mp4FrameSource(video, fps, start, args.until)
     history = _open_history(cfg, session, "simulate")
-    tracker = _open_tracker(cfg, session, history, source)
+    tracker = _open_tracker(cfg, session, _tracker_history(cfg, history), source)
+    beat = HistoryHeartbeat(history, cfg["match"]["heartbeat_seconds"], lambda: (source.frames_processed, source.frames_dropped)) if history is not None else None
     wall0, events, last_t = time.time(), [], start
     for t, frame in source.frames():
         last_t = t
@@ -750,6 +751,8 @@ def cmd_simulate(args):
             for ev in applied:
                 tracker.chest(ev)
             tracker.offer(t, frame)
+        if beat is not None:
+            beat.offer(t, tracker)
         if args.realtime:
             ahead = (t - start) - (time.time() - wall0)
             if ahead > 0:
@@ -1244,12 +1247,14 @@ def _history_folder(cfg):
 
 
 def _open_history(cfg, session, source_type):
-    """[match] mode = on: keep this run's match history. Never fatal, and imported here so that other modes load none of it."""
-    if cfg["match"]["mode"] != "on":
-        return None
+    """Keep this run's history whenever counts are saved (v0.4.0, D7): the run, its heartbeats, its chests and corrections, which Analytics
+    measures real-life time and daily progress from. Match rows are added only when [match] mode = "on" (see _tracker_history). Never fatal,
+    and imported here so that nothing loads it when saving is off."""
+    tracking = cfg["match"]["mode"] == "on"
     if not session.persist:
-        CONSOLE.warn("match history needs saving turned on ([state] persist); none is kept for this run")
-        CONSOLE.emit("match", unavailable=True)
+        if tracking:
+            CONSOLE.warn("match history needs saving turned on ([state] persist); none is kept for this run")
+            CONSOLE.emit("match", unavailable=True)
         return None
     try:
         from fortnite_chest_counter.match_history import HistoryWriter
@@ -1257,11 +1262,36 @@ def _open_history(cfg, session, source_type):
         history.start_run(source_type, __version__, cfg["detector"]["process_fps"], cfg["detector"]["languages"], session.state["certain"],
                           session.state["approximate"], session.state["events_logged"], cfg["match"]["heartbeat_seconds"])
     except Exception as error:
-        CONSOLE.warn(f"match history could not start ({error}); counting is not affected")
-        CONSOLE.emit("match", unavailable=True)
+        CONSOLE.warn(f"chest and match history could not start ({error}); counting is not affected")
+        if tracking:
+            CONSOLE.emit("match", unavailable=True)
         return None
     session.history = history
     return history
+
+
+def _tracker_history(cfg, history):
+    """Only "on" lets match tracking write match rows; "shadow" reports to the session log alone, as in v0.3.0."""
+    return history if cfg["match"]["mode"] == "on" else None
+
+
+class HistoryHeartbeat:
+    """Keeps a run's history alive when match tracking does not: tracking off, shadow mode, or a tracker that stopped after an error. The same
+    heartbeat row the tracker writes, every `seconds` of source time, so a run that ends without a clean stop is known to have lasted at least
+    until its last heartbeat. History contains its own errors, so this never reaches counting."""
+
+    def __init__(self, history, seconds, frames):
+        self.history, self.seconds, self.frames, self.last = history, seconds, frames, None
+
+    def offer(self, t, tracker):
+        if tracker is not None and tracker.keeps_history:
+            self.last = None                      # the tracker has it: start afresh if it ever stops
+            return
+        last = self.last
+        if last is None or t < last or t - last >= self.seconds - 1e-6:
+            self.last = t
+            processed, dropped = self.frames()
+            self.history.heartbeat(t, processed, dropped, None)
 
 
 def _open_tracker(cfg, session, history=None, source=None):
@@ -1382,7 +1412,8 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                        "process_fps": fps, "session_started": now_iso(), "config": origin,
                        "ui": "app" if control is not None else "console", "profile": profile_label(cfg)})
     history = _open_history(cfg, session, kind)
-    tracker = _open_tracker(cfg, session, history, source)
+    tracker = _open_tracker(cfg, session, _tracker_history(cfg, history), source)
+    beat = HistoryHeartbeat(history, cfg["match"]["heartbeat_seconds"], lambda: (source.frames_processed, source.frames_dropped)) if history is not None else None
     last_t = None
     interval = live["status_interval_seconds"]
     recent = deque(maxlen=300)                              # bounded: a 12-hour stream must not grow memory
@@ -1425,6 +1456,8 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                 for ev in applied:
                     tracker.chest(ev)
                 tracker.offer(t, frame)
+            if beat is not None:
+                beat.offer(t, tracker)
             now_m = time.monotonic()
             if control is not None:
                 for mode in control.take_capture_requests():

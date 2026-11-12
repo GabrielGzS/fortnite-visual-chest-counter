@@ -253,26 +253,29 @@ def test_the_desktop_app_sees_no_difference():
     def shape(messages):                                                  # "match" is the status line added on purpose in M7
         return [(m["type"], sorted(m)) for m in messages if m["type"] not in ("status", "match")]
 
-    with tempfile.TemporaryDirectory() as off, tempfile.TemporaryDirectory() as on:
-        plain, _, plain_messages = T.run_app(off, "off")
+    with tempfile.TemporaryDirectory() as off, tempfile.TemporaryDirectory() as on, tempfile.TemporaryDirectory() as unsaved:
+        plain, _, _ = T.run_app(off, "off")
         recorded, _, recorded_messages = T.run_app(on, "on")
-    assert plain == recorded and shape(plain_messages) == shape(recorded_messages), (shape(plain_messages), shape(recorded_messages))
+        _, _, unsaved_messages = T.run_app(unsaved, "off", extra=["--config", str(toml(unsaved, "[state]\npersist = false\n"))])   # no history at all
+        assert not (Path(unsaved) / "history").exists()
+    assert plain == recorded and shape(unsaved_messages) == shape(recorded_messages), (shape(unsaved_messages), shape(recorded_messages))
 
 
-def test_only_on_keeps_a_history():
+def test_only_on_keeps_match_rows():
+    """v0.4.0 (D7) changed v0.3.0's rule on purpose: every mode now keeps the run and its chests; only "on" adds match rows."""
     for mode in ("off", "shadow"):
         with tempfile.TemporaryDirectory() as tmp:
             T.run_command(tmp, "live", mode)
-            assert not (Path(tmp) / "history").exists(), mode
+            kinds = {row["kind"] for row in rows_of(history_of(tmp))}
+            assert {"run_start", "run_end"} <= kinds and not kinds & {"match_opened", "match_closed", "transition"}, (mode, kinds)
 
 
-def test_off_and_shadow_load_no_history_code():
+def test_off_and_shadow_load_no_match_code():
     code = ("import sys; sys.path.insert(0, 'src')\n"
             "from fortnite_chest_counter import counter as C\n"
-            "class Session: persist = True\n"
             "for mode in ('off', 'shadow'):\n"
-            "    assert C._open_history({'match': {'mode': mode}}, Session(), 'file') is None\n"
-            "assert 'fortnite_chest_counter.match_history' not in sys.modules\n")
+            "    assert C._tracker_history({'match': {'mode': mode}}, object()) is None\n"
+            "assert not [m for m in sys.modules if m.split('.')[-1] in ('match_tracker', 'match_cues', 'match_state')]\n")
     subprocess.run([sys.executable, "-c", code], check=True, cwd=ROOT, capture_output=True, timeout=120)
 
 

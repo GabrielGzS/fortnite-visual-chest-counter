@@ -23,8 +23,8 @@ MUTATIONS = [
     ("settings", "MATCH_HEARTBEATS = (30, 60, 300, 600)", "MATCH_HEARTBEATS = (30, 60, 300)", "test_every_offered_interval_is_accepted"),
     ("settings", "type(value) is int and value in MATCH_HEARTBEATS", "value in MATCH_HEARTBEATS", "test_anything_else_falls_back_to_a_minute"),
     # the live wiring
-    ("C", "    if cfg[\"match\"][\"mode\"] != \"on\":\n        return None\n", "", "test_only_on_keeps_a_history"),
-    ("C", "    if not session.persist:\n        CONSOLE.warn(\"match history needs", "    if False:\n        CONSOLE.warn(\"match history needs", "test_nothing_is_kept_when_saving_is_turned_off"),
+    ("C", "    return history if cfg[\"match\"][\"mode\"] == \"on\" else None", "    return history", "test_only_on_keeps_match_rows"),
+    ("C", "    if not session.persist:\n        if tracking:", "    if False:\n        if tracking:", "test_nothing_is_kept_when_saving_is_turned_off"),
     ("C", "if self.history is not None and (certain_inc or approx_inc):", "if False:", "test_history_chests_equal_the_runs_increase_in_the_totals"),
     ("C", "            st[\"last_processed_time\"] = now_t\n            self.save()\n", "            st[\"last_processed_time\"] = now_t\n            if self.history is not None and (certain_inc or approx_inc):\n                self.history.chest(ev, st[\"certain\"], st[\"approximate\"])\n            self.save()\n", "test_the_totals_are_saved_before_history"),
     ("C", "                self.history.chest_type(event_id, u[\"time\"], new)\n", "                pass\n", "test_a_better_chest_type_reaches_history"),
@@ -34,7 +34,8 @@ MUTATIONS = [
     ("C", "    return state.parent / \"history\" / state.stem", "    return state.parent / \"history\" / \"shared\"", "test_two_explicit_state_files_stay_apart"),
     ("C", "        return profiles.history_folder(profile[\"state_base\"], profile[\"id\"])", "        return profiles.history_folder(profile[\"state_base\"], \"default\")", "test_each_profile_records_into_its_own_history"),
     ("C", "    session.history = history\n    return history", "    return history", "test_history_chests_equal_the_runs_increase_in_the_totals"),
-    ("C", "    tracker = _open_tracker(cfg, session, history, source)\n    last_t = None", "    tracker = _open_tracker(cfg, session, None, source)\n    last_t = None", "test_on_records_the_whole_run"),
+    ("C", "    tracker = _open_tracker(cfg, session, _tracker_history(cfg, history), source)\n    beat = HistoryHeartbeat(history, cfg[\"match\"][\"heartbeat_seconds\"], lambda: (source.frames_processed, source.frames_dropped)) if history is not None else None\n    last_t = None",
+     "    tracker = _open_tracker(cfg, session, None, source)\n    beat = HistoryHeartbeat(history, cfg[\"match\"][\"heartbeat_seconds\"], lambda: (source.frames_processed, source.frames_dropped)) if history is not None else None\n    last_t = None", "test_on_records_the_whole_run"),
     ("C", "    history = _open_history(cfg, session, kind)\n", "    history = _open_history(cfg, session, kind); session.state[\"certain\"] += 1\n", "test_live_counts_the_same_in_every_mode"),
     ("C", "        if history is not None:\n            history.end_run(last_t, stop_reason, stats[\"frames_processed\"]", "        if history is not None:\n            stats[\"match_recorded\"] = True\n            history.end_run(last_t, stop_reason, stats[\"frames_processed\"]", "test_the_desktop_app_sees_no_difference"),
     # the tracker's checkpoints
