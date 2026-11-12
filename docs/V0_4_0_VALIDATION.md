@@ -232,3 +232,36 @@ will show the body as plain text, and v0.4.0's will show what comes before the m
 | `test_app`, `test_dashboard_views` | 30/30, 27/27 |
 
 The notice, the Updates card and the update window with v0.3.0's real notes were rendered with real fonts at 920 × 640 and reviewed.
+
+## M9 — Updater reliability tests: blocked, not run
+
+**Status: not run, and documented as not run (never as passed).** Two approvals are missing, and the plan says to stop this workstream
+rather than guess:
+
+1. **An isolated machine (D11).** Destructive update tests may run only in an isolated Windows VM or disposable environment with synthetic
+   data, never on the main PC or the second PC's real installation. This PC runs Windows 11 Home (no Windows Sandbox or Hyper-V), and no
+   Windows VM exists yet.
+2. **A test package.** The real-package scenarios need a built v0.4.0 package, and building one is not yet authorized ("no release build").
+
+**What still holds.** The update path is byte for byte v0.3.0's (checked above). v0.3.0's results for it therefore stand: the automated
+failure tests on small synthetic installations (`test_update.py`, `test_update_prepare.py`, `test_update_install.py`,
+`test_update_release.py`), and one real update, v0.2.3 to v0.3.0, that succeeded on the second PC as a normal user. They were not rerun
+here: the code did not change, and a rerun of failure simulations on the main PC is what D11 rules out.
+
+**Ready to run once a VM and a test build are approved.** `tests/update_e2e.py` already drives five real-package scenarios, one per run,
+in the order they must pass; the remaining rows are covered by unit tests today and would need new e2e scenarios.
+
+| UT | Scenario | How |
+|---|---|---|
+| 1 | Healthy update | `update_e2e.py run healthy` |
+| 5 | New version fails to start: rollback | `run failed-start` |
+| 6 | Helper killed after the swap: launcher recovery | `run crash-after-swap` |
+| 7 | Saved data the old version cannot read | `run damaged-data` |
+| 8 | An updated copy updates again | `run chained` |
+| 2, 3, 4 | Interrupted and resumed download; damaged download or manifest; untrusted or bad signature | Unit tests today; new e2e scenarios if wanted |
+| 9 | Preparing while counting | By hand in the VM, comparing event identities on a reference clip |
+| 10 | Smart App Control and Defender on | Each e2e report records the Smart App Control state and any file Windows blocked |
+
+Steps (docs/UPDATER.md, "Checking with a real package"): build a test package; `update_e2e.py make-kit` with a throwaway key, outside
+the repository; copy the kit into the VM; run one scenario at a time with the kit's own Python; keep each `report.txt`. Never the
+production keys; security software stays on.
