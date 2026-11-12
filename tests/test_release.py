@@ -749,6 +749,18 @@ def test_console_lines_are_readable_without_colours():
     assert "%" not in out and "confidence" not in out.lower()                      # scores are not probabilities
 
 
+def test_console_names_the_hud_size_and_never_calls_a_certain_chest_approx_only():
+    """M9H: every scaled pop-up was described as "large-HUD ... drawn larger than usual (approx only)", also small-HUD ones, and a strong
+    small-HUD pop-up can now be CERTAIN."""
+    small = dict(EV_APPROX, scaled_popup={"blur": 0.93, "scale": 1.25})
+    strong = dict(EV_CERTAIN, adjusted_tier="HIGH", scaled_popup={"blur": 0.97, "scale": 1.25})
+    large = dict(EV_APPROX, scaled_popup={"blur": 0.88, "scale": 0.85})
+    lines = _printed(lambda: [_console("normal").event(e, "20", "231") for e in (small, strong, large)]).splitlines()
+    assert "small-HUD match 0.93" in lines[0] and "drawn smaller than usual (approx only)" in lines[0]
+    assert "small-HUD match 0.97 (HIGH)" in lines[1] and "drawn smaller than usual" in lines[1] and "approx only" not in lines[1]
+    assert "large-HUD match 0.88" in lines[2] and "drawn larger than usual (approx only)" in lines[2]
+
+
 def test_console_colours_use_one_meaning_per_colour():
     c = _console("normal", colors=True)
     green, yellow, red = (_printed(lambda e=e: c.event(e, "1", "2")) for e in (EV_CERTAIN, EV_APPROX, EV_REJECT))
