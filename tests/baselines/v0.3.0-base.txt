@@ -26,3 +26,9 @@ These must stay as they are at 032df3b. Only the new folder templates/match/ may
     src/fortnite_chest_counter/estimator.py    blob f0c42178f8611d977fb6172bc1c0e522e64ba83d
 
     git diff --exit-code 032df3b -- src/fortnite_chest_counter/detection src/fortnite_chest_counter/estimator.py src/fortnite_chest_counter/templates ":!src/fortnite_chest_counter/templates/match"
+
+M9H exception, approved by the maintainer (missed small-HUD chests were made the top release blocker): estimator.py changes in the
+small-HUD channel only (trigger 0.60, a 2 s same-pop-up rule, HIGH when both small-word matches are strong). detection/ and templates/
+stay as they are. The English and PS5 baselines must still be byte-identical: no frame of either video reaches the 0.90 blurred
+confirmation, so the small channel cannot fire there (docs/M9_VALIDATION.md, M9H). Confirm that with the full-video comparison at
+release qualification; the freeze check above now expects exactly this one file to differ.
