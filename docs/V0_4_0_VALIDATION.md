@@ -145,3 +145,62 @@ it was cut short (interrupted run or lost history rows).
 Two mutation candidates were dropped as equivalent: excluding a Not a match match again in `records.py` (match_analytics already credits
 it with no chests), and a re-ranking that could not change the winner. Three analytics/correction mutations were re-anchored to the new
 loop over every match.
+
+## Phase C — Analytics page and UX (M4, M5, M6, M7, M10)
+
+Committed as M7 (the Game status, `fc87e45`) and the Analytics page (M4, M5, M6, M10, `ba4a167`).
+
+### What the page is now
+
+Four tabs, as on the Dashboard (D9): **Performance** (opens first), **Days & weeks**, **Personal Bests**, **History**. One background read
+(`records.load`) feeds every tab, so the calculations stay out of the window code.
+
+| Tab | Contents |
+|---|---|
+| Performance | Period choice (Today, This week, Last 7 days, Last 30 days, All time; All time first). Headline: **chests per hour** of session time beside **chests per minute of play**. Chests, session time, active play, matches; a build-up chart with the counted stretches shaded; details (time counting, between matches, match time seen, CERTAIN, per complete match, including partial); **Where your chests came from** (M10): detected, broken, missed, other +1s and your −1s, each with its share and per hour of counting |
+| Days & weeks | Today, yesterday, this week, last 7 and 30 days with how many days were counted; a 30-day chart (bars = chests, a short line = counted with none, a ring = not counted); per day counted, per day with chests, per calendar day (with the days not counted), per week; best day and week; a 12-week chart |
+| Personal Bests | One card per best: value, when, how long, CERTAIN, the manual part, Complete/Partial, "at least" when cut short; what it needs when there is none yet |
+| History | Matches (up to 100, newest first, Not a match / Restore as before) or Sessions; the table fills the tab |
+
+Charts are drawn with `QPainter` (`gui/charts.py`): QtCharts is not in the package and nothing was added to it.
+
+### UX fixes
+
+| ID | Fix | Checked by |
+|---|---|---|
+| UX-04 | History does not scroll as a page; its table is the only scroller. The other tabs scroll as one page with no scroller inside | `test_history_has_one_scroller` |
+| UX-05 | Game status at 13 pt on its own line in a calm colour; partial, unconfirmed or no picture as a small tinted note | `test_partial_is_a_small_note_not_a_large_warning`, Dashboard views |
+| UX-06 | The list jumps to the top only when its newest match (run id + match number) is new; refreshes, corrections and the checkbox keep the position | `test_a_new_match_comes_into_view_and_nothing_else_moves_the_list` |
+| UX-07 | When a match ends while Analytics is open, history is read again 5 seconds later (after the detector's last chests); nothing happens while another page is open | `test_a_match_ending_refreshes_the_page_only_while_it_is_open` |
+| UX-08 | Every tab fits 920 × 640 with no sideways scroll and no text cut off: tighter table padding, minutes in the list ("18m", "20m seen"), "10 (+2)" with the details on hover, "Per min" | `test_every_tab_fits_the_smallest_window_without_scrolling_sideways` (real fonts) |
+
+Screenshots of every tab at 1120 × 800 and 920 × 640, and of the Game view with a partial match, were rendered with real fonts and
+reviewed. Two problems found that way were fixed: the "&" of "Days & weeks" shown as a shortcut underline, and the chest-source row too
+wide at 920.
+
+### Meanings that changed on purpose (tests updated)
+
+- **Active play** covers Complete and Partial matches (v0.3.0's tile showed Complete only; that time stays in the per-minute figure's
+  line), shown as "at least" when some play was not recognised.
+- **Chests / CERTAIN** on Performance are recorded chests (D3, D4): the worked example's chest seen after its match ended is someone
+  else's, so 8 and 5 instead of 9 and 6.
+- The match list shows durations in minutes.
+
+### D12 — decided: not built in v0.4.0
+
+The Overview "Today · last hour" line was to be built only if the same code as Analytics could keep it current cheaply. It cannot: a full
+read of a heavy year takes about two seconds, so keeping it current chest by chest would need a second, incremental calculation that could
+disagree with Analytics (spectated chests, corrections), and refreshing it only when a match ends would show stale numbers on a live
+screen. Performance > Today shows the same figures. Deferred, as the decision allowed.
+
+### Tests
+
+| Check | Result |
+|---|---:|
+| `test_analytics_ui` (new; includes the real-font fit check) | 12/12 |
+| `test_match_analytics`, `test_dashboard_views`, `test_match_ui`, `test_live_match`, `test_corrections` | 61/61, 27/27, 50/50, 88/88, 82/82 |
+| `test_app`, `test_update_gui` | 30/30, 70/70 |
+| Mutations: analytics, live match, corrections, Dashboard, match UI | 51/51, 59/59, 58/58, 25/25, 40/40 |
+
+Six mutation anchors moved to the new page code with the same intent. The analytics and corrections runners now also swap the module the
+page reads through (`records`, `progression`); without that, one mutation could not reach the page.
