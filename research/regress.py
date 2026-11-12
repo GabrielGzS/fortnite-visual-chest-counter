@@ -19,7 +19,9 @@ CLIPS = {"en": ("Fortnites-NEW", "samples/video tests/Fortnites-NEW-HD-No-Audio.
          "en_tw6000": ("Fortnites-NEW", "analysis_output/variants/en_tw6000.mp4"),
          "en_tw2500": ("Fortnites-NEW", "analysis_output/variants/en_tw2500.mp4"),
          "ps5_tw6000": ("Fortnite-PS5-Pro", "analysis_output/variants/ps5_tw6000.mp4"),
-         "ps5_tw2500": ("Fortnite-PS5-Pro", "analysis_output/variants/ps5_tw2500.mp4")}
+         "ps5_tw2500": ("Fortnite-PS5-Pro", "analysis_output/variants/ps5_tw2500.mp4"),
+         # v0.4.1: the maintainer's own game (pop-up 0.95x, HUD text 0.90x), fully labelled in tests/cases/user_20261112.json
+         "user1112": ("user_20261112", "samples/video tests/2026-11-12 12-52-32.mp4")}
 DEFAULT_CLIPS = ["en", "ps5"]
 KEYS = ("time", "source", "popup_score", "popup_template", "base_tier", "adjusted_tier", "shooting_negative", "ammo_steps",
         "interaction_score", "sprite_present", "certain_counted", "approx_counted")
@@ -47,7 +49,35 @@ def run_clip(video, tmp, sets=(), match_mode=None, until=None):
     return out
 
 
+def labelled(name):
+    """A recording with complete labels (tests/cases/<name>.json): every chest listed, so anything else counted is not a chest."""
+    path = Path("tests/cases") / f"{name}.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def score_labelled(labels, events, before=0.5, after=2.5):
+    """The cases' scoring (research/cases.py) over a whole labelled recording -> found, missed, duplicates, false, certain."""
+    chests = [dict(c, hits=[]) for c in labels["chests"]]
+    dup = false = 0
+    for e in sorted((e for e in events if e["approx_counted"]), key=lambda e: e["time"]):
+        near = [c for c in chests if c["t"] - before <= e["time"] <= c["t"] + after]
+        free = [c for c in near if not c["hits"]]
+        if free:
+            min(free, key=lambda c: abs(c["t"] - e["time"]))["hits"].append(e)
+        elif near:
+            dup += 1
+        else:
+            false += 1
+    found = sum(1 for c in chests if c["hits"])
+    return {"found": found, "missed": len(chests) - found, "duplicates": dup, "false": false,
+            "certain": sum(1 for c in chests if c["hits"] and c["hits"][0]["certain_counted"])}
+
+
 def classify(name, t):
+    labels = labelled(name)
+    if labels is not None:
+        hit = any(c["t"] - 0.5 <= t <= c["t"] + 2.5 for c in labels["chests"])
+        return "REAL" if hit else "NONCHEST"
     items = C.known_items(name)
     m = [q for q in items if q[0] - q[1] <= t <= q[0] + q[2]]
     q = min(m, key=lambda q: abs(q[0] - t)) if m else None
@@ -87,6 +117,12 @@ def compare(clip, base, new, tol=0.6):
             cls = classify(name, n["time"])
             print(f"  NEW    {C.mmss(n['time'])} {cls:8} {n['adjusted_tier']} score {n['popup_score'] or 0:.3f} C={int(n['certain_counted'])} A={int(n['approx_counted'])}")
             bad += cls in ("FALSE", "NONCHEST") and n["approx_counted"]
+    labels = labelled(name)
+    if labels is not None:
+        b, n = score_labelled(labels, base), score_labelled(labels, new)
+        print(f"  labelled: found {b['found']}->{n['found']}/{len(labels['chests'])}  duplicates {b['duplicates']}->{n['duplicates']}  "
+              f"false {b['false']}->{n['false']}  CERTAIN {b['certain']}->{n['certain']}")
+        bad += (n["found"] < b["found"]) + (n["duplicates"] > b["duplicates"]) + (n["false"] > b["false"]) + (n["certain"] < b["certain"])
     if len(base) == len(new) and not bad and (bc, ba) == (nc, na) and not any(
             (b["adjusted_tier"], b["certain_counted"], b["approx_counted"]) != (n["adjusted_tier"], n["certain_counted"], n["approx_counted"])
             for b, n in zip(base, new)):

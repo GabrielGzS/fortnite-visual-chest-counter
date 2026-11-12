@@ -1,5 +1,5 @@
 {
-  "about": "Real-world detection cases (docs/INVESTIGATION_2026-11-08.md). Every confirmed failure becomes a case. Times are CLIP seconds of the capture's clip. truth: one row per chest opening (what: new_popup = a new pop-up appears, new_line = a chest line is added to a pop-up already on screen, multiplier = a line's X2/X3 changes) and per non-chest pop-up change that must NOT count (what: not_chest). type: chest | rare | sprite (the word on the line). Footage: research/cases.py fetch copies the needed segments into samples/cases/ (not in Git); tests/fixtures/popups/<case>.npz holds the pop-up box masks so tests/test_cases.py runs without footage.",
+  "about": "Real-world detection cases (docs/INVESTIGATION_2026-11-08.md). Every confirmed failure becomes a case. Times are CLIP seconds of the capture's clip. truth: one row per chest opening (what: new_popup = a new pop-up appears, new_line = a chest line is added to a pop-up already on screen, multiplier = a line's X2/X3 changes) and per non-chest pop-up change that must NOT count (what: not_chest). type: chest | rare | sprite (the word on the line). Footage: research/cases.py fetch copies the needed segments into samples/cases/ (not in Git); tests/fixtures/popups/<case>.npz holds the pop-up box masks so tests/test_cases.py runs without footage. Cases with \"video\" instead of \"capture\" are windows of a plain recording under samples/ (times are video seconds). \"v041_gap\" pins what v0.4.0 does on a confirmed failure (tests/test_cases.py checks it exactly); remove it when a v0.4.1 change fixes the case, so the case then has to pass like every other.",
   "cases": {
     "thiefs_small_hud": {
       "capture": "20261108_024147",
@@ -441,6 +441,192 @@
           "text": "+4,500 XP / ... / SPRITE CHEST / RARE CHEST"
         }
       ]
+    },
+    "user_inventory_hides_popup": {
+      "video": "samples/video tests/2026-11-12 12-52-32.mp4",
+      "window": [
+        63.0,
+        71.0
+      ],
+      "source": "maintainer's own game, OBS local recording 720p30 NVENC 4 Mbps (tests/cases/user_20261112.json)",
+      "hud": 0.95,
+      "live": "v0.4.0: counted twice (66.07 and 67.80), both APPROX",
+      "truth": [
+        {
+          "t": 65.95,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST, covered 66.7-67.45 s by the inventory panel, then the same pop-up again"
+        }
+      ],
+      "v041_gap": {
+        "found": 1,
+        "duplicates": 1,
+        "false": 0,
+        "certain": 0,
+        "why": "the scale-aware channel has no same-pop-up rule (the small-HUD channel has one since M9H)"
+      }
+    },
+    "user_plain_popups_approx_only": {
+      "video": "samples/video tests/2026-11-12 12-52-32.mp4",
+      "window": [
+        108.0,
+        152.0
+      ],
+      "source": "maintainer's own game, OBS local recording 720p30 NVENC 4 Mbps (tests/cases/user_20261112.json)",
+      "hud": 0.95,
+      "live": "v0.4.0: 3 of 3 found, all APPROX",
+      "truth": [
+        {
+          "t": 110.8,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST"
+        },
+        {
+          "t": 137.47,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST"
+        },
+        {
+          "t": 147.33,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST"
+        }
+      ],
+      "v041_gap": {
+        "found": 3,
+        "duplicates": 0,
+        "false": 0,
+        "certain": 0,
+        "why": "the pop-up is drawn 0.95x: exact match 0.47-0.60 never fires, only the APPROX-only scale-aware channel does"
+      }
+    },
+    "user_chest_line_on_crown_bonus": {
+      "video": "samples/video tests/2026-11-12 12-52-32.mp4",
+      "window": [
+        969.0,
+        977.0
+      ],
+      "source": "maintainer's own game, OBS local recording 720p30 NVENC 4 Mbps (tests/cases/user_20261112.json)",
+      "hud": 0.95,
+      "live": "v0.4.0: missed",
+      "truth": [
+        {
+          "t": 972.4,
+          "what": "not_chest",
+          "type": "chest",
+          "text": "+1,161 XP / CROWN BONUS / NEW STORM PHASE"
+        },
+        {
+          "t": 972.9,
+          "what": "new_line",
+          "type": "chest",
+          "text": "CHEST line added to the CROWN BONUS pop-up (total +1,800); about 22 px wide, cause not established"
+        }
+      ],
+      "v041_gap": {
+        "found": 0,
+        "duplicates": 0,
+        "false": 0,
+        "certain": 0,
+        "why": "no tracker follows a pop-up opened by non-chest lines, and no template matched this line (<= 0.47 exact)"
+      }
+    },
+    "user_low_margin_popup": {
+      "video": "samples/video tests/2026-11-12 12-52-32.mp4",
+      "window": [
+        1037.5,
+        1044.0
+      ],
+      "source": "maintainer's own game, OBS local recording 720p30 NVENC 4 Mbps (tests/cases/user_20261112.json)",
+      "hud": 0.95,
+      "live": "v0.4.0: missed",
+      "truth": [
+        {
+          "t": 1039.9,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST"
+        }
+      ],
+      "v041_gap": {
+        "found": 0,
+        "duplicates": 0,
+        "false": 0,
+        "certain": 0,
+        "why": "blurred match at the wrong size peaked at 0.79, under the 0.80 trigger; a native 0.95x template scores 0.78 / 0.92"
+      }
+    },
+    "user_bright_background_popup": {
+      "video": "samples/video tests/2026-11-12 12-52-32.mp4",
+      "window": [
+        1053.5,
+        1060.0
+      ],
+      "source": "maintainer's own game, OBS local recording 720p30 NVENC 4 Mbps (tests/cases/user_20261112.json)",
+      "hud": 0.95,
+      "live": "v0.4.0: missed",
+      "truth": [
+        {
+          "t": 1055.5,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST over bright water"
+        }
+      ],
+      "v041_gap": {
+        "found": 0,
+        "duplicates": 0,
+        "false": 0,
+        "certain": 0,
+        "why": "blurred match at the wrong size 0.73; a native 0.95x template scores 0.65 / 0.87"
+      }
+    },
+    "user_two_rares_then_rare_line": {
+      "video": "samples/video tests/2026-11-12 12-52-32.mp4",
+      "window": [
+        1214.0,
+        1228.0
+      ],
+      "source": "maintainer's own game, OBS local recording 720p30 NVENC 4 Mbps (tests/cases/user_20261112.json)",
+      "hud": 0.95,
+      "live": "v0.4.0: the two rare pop-ups found (APPROX), the added RARE CHEST line missed",
+      "truth": [
+        {
+          "t": 1216.2,
+          "what": "new_popup",
+          "type": "rare",
+          "text": "+900 XP / RARE CHEST"
+        },
+        {
+          "t": 1219.73,
+          "what": "new_popup",
+          "type": "rare",
+          "text": "+900 XP / RARE CHEST"
+        },
+        {
+          "t": 1222.6,
+          "what": "not_chest",
+          "type": "chest",
+          "text": "+1,200 XP / CROWN BONUS / NEW STORM PHASE"
+        },
+        {
+          "t": 1223.7,
+          "what": "new_line",
+          "type": "rare",
+          "text": "RARE CHEST line added to the CROWN BONUS pop-up (total +2,100)"
+        }
+      ],
+      "v041_gap": {
+        "found": 2,
+        "duplicates": 0,
+        "false": 0,
+        "certain": 0,
+        "why": "the CROWN BONUS lines held the blurred score at 0.62-0.69, above the 0.55 re-arm level, so the channel was still disarmed"
+      }
     }
   }
 }

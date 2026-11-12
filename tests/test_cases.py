@@ -186,8 +186,25 @@ def test_old_position_re_fire_double_counts_the_e0015_pop_up_under_noise_and_the
 
 def test_every_case_finds_every_chest_once_and_nothing_else():
     for name, case in CASES.items():
-        if not case.get("known_limitation"):
+        if not case.get("known_limitation") and not case.get("v041_gap"):
             check(name)
+
+
+def test_v041_gaps_reproduce_exactly_until_fixed():
+    """The maintainer's own recording (tests/cases/user_20261112.json): v0.4.0 on a 0.95x pop-up. Each gap is pinned exactly, so a change
+    that fixes it fails here on purpose: then remove its "v041_gap" and the case must pass like every other (found all, 0 duplicates,
+    0 false)."""
+    gaps = {name: case for name, case in CASES.items() if case.get("v041_gap")}
+    assert len(gaps) == 6
+    for name, case in gaps.items():
+        gap = case["v041_gap"]
+        counted = replay(name)
+        found, missed, dup, false = score(name, counted)
+        real = len([r for r in case["truth"] if r["what"] != "not_chest"])
+        assert found < real or dup or gap["certain"] < real, f"{name}: a gap entry must describe a failure"
+        got = {"found": found, "duplicates": dup, "false": false, "certain": sum(e["certain_counted"] for e in counted)}
+        want = {k: gap[k] for k in got}
+        assert got == want, f"{name} changed: {got} (pinned v0.4.0 gap {want}). Fixed? Remove its v041_gap. Worse? Investigate."
 
 
 def test_five_chest_vault_counts_every_step_including_the_third_lines_x2():

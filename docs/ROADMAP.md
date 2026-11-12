@@ -63,6 +63,7 @@ recognition but turning detections into gameplay statistics:
 | v0.2.3 | Built-in updater with signed releases (experimental: real-package testing still open, see [UPDATER.md](UPDATER.md)) |
 | v0.3.0 | Match tracking & Analytics foundation (released 2026-11-12) |
 | **v0.4.0** | **Analytics Expansion & Reliability** - chests per hour, day and week, Personal Bests, UX and updater improvements |
+| **v0.4.1** | **HUD Compatibility & Detection Reliability** - the app must work with the player's own HUD Scale, not one streamer's |
 | **v0.5.0** | **Treasure Recognition & Predictions** |
 
 These are **planning milestones, not implementation authorization**: each one starts with an investigation and a design
@@ -159,6 +160,14 @@ VM, a test build, and the maintainer's hands-on acceptance.
 Still deferred from v0.3.0 (detection, not in v0.4.0's scope): the lobby menu bar with the TREASURE tab, small-HUD island and bus text at
 720p, stacked pop-ups at 720p, and a switch away from the game mid-match becoming Partial.
 
+### v0.4.1 - HUD Compatibility & Detection Reliability (in development, branch `dev/v0.4.1`)
+
+Plan, milestones and gate: [V0_4_1_PLAN.md](V0_4_1_PLAN.md); results: [V0_4_1_VALIDATION.md](V0_4_1_VALIDATION.md). On the maintainer's own
+footage v0.4.0 counts every chest APPROX, misses 4 of 20, counts 1 twice and marks a fully observed match Partial: the HUD is drawn 0.90x
+(pop-up 0.95x) and only 1.0x and 0.78x templates exist. v0.4.1 makes HUD size a supported configuration with native templates, fixes the
+duplicate, short end screens, shifted and grey match text and the READY overlay, and measures active time. An architecture gate after the
+HUD calibration research (M1) decides between a template bank, in-app calibration or both. Supersedes A2 below.
+
 ### v0.5.0 - Treasure Recognition & Predictions (roadmap)
 
 [V0_5_0_PLAN.md](V0_5_0_PLAN.md): the "YOU FOUND ..." reward notifications, treasure statistics, and a Prediction page (chests, hours and
@@ -175,6 +184,12 @@ Every step is built and measured on labelled captures (CAPTURE.md), never by tun
   types next to normal chests (one opening = one event, whatever clues fire).
 - **C. Rewards** - the "YOU FOUND ..." animation and similar reward cues as their own events, de-duplicated across frames
   and linked to the chest they came from when the footage shows it.
+- **E. Self-service HUD calibration (high priority)** - the player confirms a few chest openings, the app cuts and validates personal
+  native templates and keeps them per profile, so a new HUD Scale needs no app update. Match cues need their own capture. Design notes:
+  V0_4_1_PLAN.md section 7.1; v0.4.1's HUD profile is built to accept such templates later.
+- **F. Spectator recognition and adaptive processing (research)** - recognise spectating (SPECTATING replaces the compass area), pause the
+  chest search while it is certain, sample the light match signals faster to catch a reboot or the end, and revisit the v0.3.0 rule that
+  keeps play inactive after an elimination. Never on ambiguous evidence. V0_4_1_PLAN.md section 7.2.
 - **D2. Auto language** - after v0.3.0: identify English or Portuguese (Brazil) from the pop-ups at the start of each match,
   lock it for the match, reset at the lobby; while unsure keep checking both (never trade chests for a language guess).
   Until then the Settings choice is English / Portuguese (Brazil) / Both - "Both" is not automatic detection.

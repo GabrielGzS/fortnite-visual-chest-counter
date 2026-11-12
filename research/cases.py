@@ -63,6 +63,8 @@ def needed_segments(folder, case):
 def fetch(source_root):
     source_root = Path(source_root)
     for name, case in load_cases().items():
+        if "video" in case:                    # a plain recording under samples/, nothing to copy
+            continue
         src = source_root / case["capture"]
         dst = FOOTAGE / case["capture"]
         (dst / "video").mkdir(parents=True, exist_ok=True)
@@ -78,8 +80,34 @@ def fetch(source_root):
         print(f"{name}: {len(segs)} segment(s) -> {dst}")
 
 
+def _video_frames(case):
+    """(video seconds, 1280x720 RGB) over the case window of a plain recording (case["video"], relative to the repository)."""
+    video = ROOT / case["video"]
+    if not video.exists():
+        raise FileNotFoundError(f"no footage {case['video']} (samples/ is not in Git)")
+    start, dur = case["window"][0], case["window"][1] - case["window"][0]
+    cmd = ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-i", str(video), "-t", f"{dur:.3f}",
+           "-vf", f"{V.scale_filter()},fps={FPS}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, bufsize=10 ** 8)
+    size = V.NORMALIZED_WIDTH * V.NORMALIZED_HEIGHT * 3
+    i = 0
+    try:
+        while True:
+            raw = p.stdout.read(size)
+            if len(raw) < size:
+                break
+            yield start + i / FPS, np.frombuffer(raw, np.uint8).reshape(V.NORMALIZED_HEIGHT, V.NORMALIZED_WIDTH, 3)
+            i += 1
+    finally:
+        p.kill()
+        p.wait()
+
+
 def case_frames(case, root=FOOTAGE):
-    """(clip seconds, 1280x720 RGB) over the case window, decoded from the copied segments."""
+    """(clip seconds, 1280x720 RGB) over the case window, decoded from the copied segments (or a plain recording)."""
+    if "video" in case:
+        yield from _video_frames(case)
+        return
     folder = root / case["capture"]
     clip, segs = needed_segments(folder, case)
     if not segs:
@@ -194,11 +222,11 @@ def run(names, sets, out=None, quiet=False):
     return summary
 
 
-def fixtures():
-    """Pop-up box lavender masks (bit-packed) for every frame of every case window -> tests/fixtures/popups/."""
+def fixtures(names=None):
+    """Pop-up box lavender masks (bit-packed) for every frame of every case window (or only the named cases) -> tests/fixtures/popups/."""
     FIXTURES.mkdir(parents=True, exist_ok=True)
     for name, case in load_cases().items():
-        if case.get("known_limitation"):
+        if case.get("known_limitation") or (names and name not in names):
             continue
         times, masks = [], []
         for t, frame in case_frames(case):
@@ -220,7 +248,8 @@ def main():
     r.add_argument("--set", action="append", default=[])
     r.add_argument("--json")
     r.add_argument("--quiet", action="store_true")
-    sub.add_parser("fixtures")
+    fx = sub.add_parser("fixtures")
+    fx.add_argument("--case", action="append", help="only these cases (the others' files stay untouched)")
     a = ap.parse_args()
     if a.cmd == "fetch":
         fetch(a.src)
@@ -228,7 +257,7 @@ def main():
         sets = [(k, ast.literal_eval(v)) for k, v in (s.split("=", 1) for s in a.set)]
         run(a.case, sets, a.json, a.quiet)
     else:
-        fixtures()
+        fixtures(a.case)
 
 
 if __name__ == "__main__":
