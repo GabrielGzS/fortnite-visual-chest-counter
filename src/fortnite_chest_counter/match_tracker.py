@@ -51,7 +51,7 @@ class MatchTracker:
         self._reader = cues.CueReader()
         self._machine = machine if machine is not None else S.MatchStateMachine()
         self._picture = None               # a small copy of the last sample's picture, never the frame itself
-        self._pending = []                 # languages of the chests counted since the last sample
+        self._pending = []                 # (language, own time) of the chests counted since the last sample
         self._counted = []                 # (time, certain, approx) of every chest counted in this run, for the live per-match numbers
         self._out_at = None                # when the open match's player was first out
         self._closed = None                # the match that closed last, for its final numbers
@@ -88,7 +88,7 @@ class MatchTracker:
             if self._break_t is not None and ev["time"] < self._break_t:
                 self._chests["dropped_at_break"] += 1
                 return
-            self._pending.append(S.chest_language(ev.get("popup_template")))
+            self._pending.append((S.chest_language(ev.get("popup_template")), float(ev["time"])))
         except Exception as error:
             self._fail("chest", error)
 
@@ -134,12 +134,14 @@ class MatchTracker:
         picture = self._cues.picture_evidence(frame, self._picture)
         self._picture = picture.sample
         scores, health = self._reader.read(frame), self._cues.health_bar_pixels(frame)
-        chests, self._pending = tuple(self._pending), []
+        green = self._cues.health_bar_green_pixels(frame) if health >= S.HEALTH_BAR_MIN_PIXELS and hasattr(self._cues, "health_bar_green_pixels") else None
+        pending, self._pending = self._pending, []
+        chests, first_chest_t = tuple(language for language, _ in pending), min((t for _, t in pending), default=None)
         # The HUD only matters when nothing else shows the game: beside a health bar, a chest or any text it changes nothing, so it is not read.
         alone = health < S.HEALTH_BAR_MIN_PIXELS and not chests and max(scores.values(), default=0.0) < S.SCORE_THRESHOLD
         hud = self._reader.hud_in_view(frame) if alone else None
         self._chests["no_picture" if picture.black or picture.frozen else "delivered"] += len(chests)
-        self._checkpoint(t, self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests, hud))))
+        self._checkpoint(t, self._report(self._machine.update(S.Observation(t, scores, health, picture.black, picture.frozen, chests, hud, first_chest_t, green))))
         self._tell(t, picture)
         return True
 

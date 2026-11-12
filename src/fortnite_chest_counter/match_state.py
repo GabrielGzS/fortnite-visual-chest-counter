@@ -19,7 +19,8 @@ Each rule needs a signal in 2 of the last 3 samples, unless the table says other
     any                       LOBBY                 menu bar or CANCEL. An open match closes.
     any but PRE_GAME          PRE_GAME              WAITING FOR PLAYERS or LAUNCHING IN
     PRE_GAME                  IN_MATCH              countdown gone 3 s with no health bar (the bus), or gone 15 s
-    UNKNOWN, LOBBY, LOADING   IN_MATCH, joined late health bar in 5 of 8 samples, or a counted chest; no menu or loading text
+    UNKNOWN, LOBBY, LOADING   IN_MATCH, joined late green health bar in 5 of 8 samples, or a counted chest (dated from the chest's
+                                                    own time); no menu or loading text
     any                       ELIMINATED            YOU PLACED, Victory Royale, SPECTATING or ELIMINATED BY
     ELIMINATED                stays non-active      a health bar cannot distinguish a reboot from watching another player
     IN_MATCH, ELIMINATED      UNKNOWN               no evidence of play or no picture for 60 s, or video time ran backwards
@@ -88,6 +89,8 @@ class Observation:
     frozen: bool = False
     chests: tuple = ()                     # the language of each chest counted since the last observation
     hud_in_view: object = None             # the fixed HUD seen (True) or not (False); None when it was not measured, as in a recorded timeline
+    first_chest_t: object = None           # the earliest of those chests' own times; None when not known, as in a recorded timeline
+    health_green_pixels: object = None     # the health bar's green part alone; None when not measured, as in a recorded timeline
 
 
 @dataclass(frozen=True)
@@ -188,6 +191,7 @@ class MatchStateMachine:
         self._no_picture_since = None
         self._last_evidence_t = None
         self._last_closed_t = float("-inf")
+        self._last_screen_text_t = float("-inf")
         self._loading_english_continuous = False
         self._unseen_since = None
         self._active_at_unseen = 0.0
@@ -261,7 +265,7 @@ class MatchStateMachine:
             self._close(self._last_t, self._match.ended_by or DISCONTINUITY, ["video time ran backwards"], events)
         self._countdown = None
         self._clear_memory()
-        self._last_closed_t = float("-inf")               # the old clock no longer applies
+        self._last_closed_t = self._last_screen_text_t = float("-inf")       # the old clock no longer applies
         if self.state != UNKNOWN:
             self._go(t, UNKNOWN, "video_time_jump", events)
 
@@ -331,8 +335,13 @@ class MatchStateMachine:
         for signal in ALL_SIGNALS:
             self._recent[signal].append((t, hit[signal], scores.get(signal, 0.0)))
         screen_text = hit["connecting"] or hit["lobby_menu"] or hit["matchmaking"]          # loading artwork can imitate a health bar
+        if screen_text:
+            self._last_screen_text_t = t
         hud = observation.health_bar_pixels >= HEALTH_BAR_MIN_PIXELS and not screen_text
-        self._hud.append((t, hud))
+        # Only the player's own green health bar may open a match. The menus' blue PARTY CHANNEL tiles sit where a small HUD draws the bar and
+        # read as a shield bar; a shield bar alone keeps a match going but never starts one.
+        green = observation.health_green_pixels
+        self._hud.append((t, hud, hud and (green is None or green >= HEALTH_BAR_MIN_PIXELS)))
         self._after.append((hud, hit["you_placed"] or hit["eliminated_by"] or hit["spectating"]))
         if hud or observation.hud_in_view or observation.chests or any(hit.values()):
             self._last_evidence_t = t
@@ -450,7 +459,7 @@ class MatchStateMachine:
     def _after_countdown(self, t, events):
         countdown = self._countdown
         gone = t - countdown.last_t
-        no_hud_lately = not any(hud for _, hud in list(self._hud)[-3:])
+        no_hud_lately = not any(hud for _, hud, _ in list(self._hud)[-3:])
         if not ((gone >= COUNTDOWN_GONE_ON_BUS and no_hud_lately) or gone >= COUNTDOWN_GONE_ANYWAY):
             return
         unseen_after_countdown = countdown.uncertain - countdown.uncertain_at_last
@@ -469,11 +478,16 @@ class MatchStateMachine:
 
     def _maybe_joined_late(self, t, observation, hit, events):
         text_lately = any(any(seen for _, seen, _ in self._recent[signal]) for signal in ("connecting", "lobby_menu", "matchmaking"))
-        sustained = sum(1 for _, hud in self._hud if hud) >= HUD_HITS
+        sustained = sum(1 for _, _, own in self._hud if own) >= HUD_HITS
         chest = bool(observation.chests)
         if text_lately or not (sustained or chest):
             return
-        first = next((seen_t for seen_t, hud in self._hud if hud), t) if sustained else t
+        first = next((seen_t for seen_t, _, own in self._hud if own), t) if sustained else t
+        if chest and observation.first_chest_t is not None:
+            # The chest that shows the match is being played happened before it reached here (the detector finishes it a moment later):
+            # reach back to it, or the live and saved per-match numbers would leave out the very chest that opened the match.
+            # Never back into a screen that showed menus or loading; _open also stops at the previous match.
+            first = max(min(first, observation.first_chest_t), self._last_screen_text_t)
         from_loading = self.state == LOADING
         match = self._open(t, first, first, False, LOW, events)
         match.after_loading = from_loading

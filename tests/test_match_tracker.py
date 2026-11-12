@@ -279,6 +279,32 @@ def test_a_chest_is_delivered_once_with_its_language():
     assert [o.chests for o in observations] == [(), ("en", "pt"), (), ("unknown",)], observations
 
 
+def test_the_chest_that_opens_a_match_is_in_its_live_numbers():
+    """rc5 (M9H): Overview went up and the Game view did not, because the match opened at the sample after the chest."""
+    shown = []
+    rig = Rig(status=lambda **kw: shown.append(kw)).show(3)
+    rig.chest("en", onset=0.7).show(1)
+    assert rig.tracker._machine.snapshot()["opened_t"] == 0.7 and shown[-1]["chests"] == {"certain": 1, "approx": 1}, shown[-1]
+
+
+class GreenCues(Cues):
+    def health_bar_green_pixels(self, frame):
+        return frame.get("green", frame["health"])
+
+
+def test_party_tiles_reach_the_machine_as_a_shield_bar_only():
+    log = []
+    tracker = MT.MatchTracker(log.append, [].append, cues=GreenCues())
+    for t in range(5):
+        tracker.offer(float(t), fake_frame(t, {"connecting": 0.95}))
+    for t in range(5, 40):
+        tracker.offer(float(t), {**fake_frame(t, health=280), "green": 0})
+    assert tracker._machine.state == S.LOADING and not [line for line in log if line["kind"] == "opened"]
+    for t in range(40, 50):
+        tracker.offer(float(t), fake_frame(t, health=HP))
+    assert tracker._machine.state == S.IN_MATCH
+
+
 def test_the_event_is_not_changed():
     rig, ev = Rig().show(1), chest_event(0.5)
     before = dict(ev)

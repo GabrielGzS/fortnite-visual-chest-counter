@@ -196,3 +196,14 @@ def health_bar_pixels(frame):
     red, green, blue = roi[..., 0], roi[..., 1], roi[..., 2]
     rows = (((green > 165) & (green - red > 45) & (blue < 130)) | ((blue > 165) & (red < 110) & (green > 110))).sum(axis=1)
     return int(np.partition(rows, -4)[-4])
+
+
+def health_bar_green_pixels(frame):
+    """The same measure for the green health bar alone. The lobby's blue PARTY CHANNEL tiles sit where a small HUD draws the bar and pass
+    the shield colour test, but have no green: in the M9H footage every one of 67 menu samples with a "bar" was blue only, while 123 of
+    126 in play had the green bar (the other 3 were a thin shield bar at low health)."""
+    _check_frame(frame)
+    roi = frame[610:716, 0:420].astype(np.int16)
+    red, green, blue = roi[..., 0], roi[..., 1], roi[..., 2]
+    rows = ((green > 165) & (green - red > 45) & (blue < 130)).sum(axis=1)
+    return int(np.partition(rows, -4)[-4])

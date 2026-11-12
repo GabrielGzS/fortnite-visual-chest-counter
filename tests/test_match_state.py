@@ -34,9 +34,10 @@ class Script:
         self.machine = S.MatchStateMachine()
         self.events = []
 
-    def show(self, seconds, *signals, health=0, black=False, frozen=False, chests=(), hud=None):
+    def show(self, seconds, *signals, health=0, black=False, frozen=False, chests=(), hud=None, chest_t=None, green=None):
         for i in range(seconds):
-            self.events += self.machine.update(S.Observation(self.t, {s: 0.95 for s in signals}, health, black, frozen, tuple(chests) if i == 0 else (), hud))
+            self.events += self.machine.update(S.Observation(self.t, {s: 0.95 for s in signals}, health, black, frozen, tuple(chests) if i == 0 else (), hud,
+                                                             chest_t if i == 0 else None, green))
             self.t += 1
         return self
 
@@ -157,6 +158,83 @@ def test_a_loading_screen_counts_as_english_evidence_for_the_match_after_it():
 
 def test_a_counted_chest_shows_a_match_is_being_played():
     s = Script().show(2).show(1, chests=("en",))
+    assert s.state == S.IN_MATCH
+
+
+def test_the_chest_that_shows_a_match_is_being_played_belongs_to_it():
+    """rc5, 2026-11-11 (M9H): a chest at 1.0 s reached the tracker with the 3.3 s sample, the match opened at 3.3 s, and the Game view and
+    Analytics left out the very chest that opened it. The match now starts at the chest's own time."""
+    s = Script().show(3).show(1, chests=("en",), chest_t=0.7).finish()
+    match = s.records[0]
+    assert match.opened_t == 0.7 and match.played_from_t == 0.7 and match.english_chests == 1 and not match.observed_from_start
+
+
+def test_a_chest_never_dates_a_match_back_into_a_menu():
+    s = Script().show(3, "lobby_menu").show(3).show(1, chests=("en",), chest_t=1.0).finish()
+    assert s.records[0].opened_t == 2.0                                 # the last moment the menu was on screen, not the chest's 1.0
+
+
+def test_a_chest_never_dates_a_match_back_into_the_previous_one():
+    s = Script().show(12, health=HP).show(4, "connecting").show(3).show(1, chests=("en",), chest_t=10.0).finish()
+    first, second = s.records
+    assert second.opened_t >= first.closed_t
+
+
+def test_without_a_chest_time_the_match_opens_as_before():
+    s = Script().show(3).show(1, chests=("en",)).finish()
+    assert s.records[0].opened_t == 3.0
+
+
+# ---- the lobby's party tiles (M9H)
+
+def test_party_tiles_after_leaving_a_match_do_not_start_one():
+    """rc5 and the M9H stream captures: after CONNECTING, the lobby's blue PARTY CHANNEL tiles read as a shield bar for 25-40 s and opened
+    a phantom match. They have no green health bar."""
+    s = Script().show(12, health=HP, green=HP).show(4, "connecting").show(40, health=280, green=0).show(4, "matchmaking").finish()
+    assert len(s.records) == 1 and S.IN_MATCH not in s.path[2:], s.path
+
+
+def test_party_tiles_in_the_lobby_do_not_start_a_match():
+    s = Script().show(5, "matchmaking").show(30, health=140, green=0).finish()
+    assert s.records == [] and S.IN_MATCH not in s.path
+
+
+def test_a_green_health_bar_still_starts_a_late_join():
+    s = Script().show(5, "connecting").show(12, health=HP, green=HP).finish()
+    assert s.records[0].completion == S.PARTIAL and s.records[0].opened_t == 5.0
+
+
+def test_a_shield_bar_alone_keeps_an_open_match_going():
+    """Low health leaves only the thin shield bar: that must not look like the game going away."""
+    s = Script().show(12, health=HP, green=HP).show(70, health=40, green=0).finish()
+    assert s.records[0].ended_by == S.STOPPED and s.records[0].active_seconds >= 80
+
+
+PARTY = json.loads(gzip.open(HERE / "fixtures" / "match" / "m9h_party_tiles.json.gz").read())["timelines"]
+
+
+def replay_party(name, measure_green=True):
+    machine, events = S.MatchStateMachine(), []
+    for t, scores, health, green, hud in PARTY[name]:
+        events += machine.update(S.Observation(t, scores, health, False, False, (), hud, None, green if measure_green else None))
+    return events + machine.finish(PARTY[name][-1][0] + 1)
+
+
+def test_the_real_party_lobby_opens_no_match():
+    """The rc5 footage itself: after each match the duo's lobby read as a 26 s and a 38 s match. Real play, the waiting island and the
+    countdown start still come out as before."""
+    for name, phantom in (("rc5_clip1", (219, 276)), ("rc5_clip3", (598, 641))):
+        opened = [e for e in replay_party(name) if isinstance(e, S.MatchOpened)]
+        assert not [e for e in opened if phantom[0] <= e.t <= phantom[1]], (name, opened)
+        before = [e for e in replay_party(name, measure_green=False) if isinstance(e, S.MatchOpened)]
+        assert [e for e in before if phantom[0] <= e.t <= phantom[1]], name                           # the fixture holds the rc5 failure
+    records = [e for e in replay_party("rc5_clip1") if isinstance(e, S.MatchRecord)]
+    assert [r.completion for r in records][:2] == [S.PARTIAL, S.UNCONFIRMED] and abs(records[0].opened_t - 135.6) < 1.5
+    assert records[2].observed_from_start                                                             # the countdown start, untouched
+
+
+def test_a_chest_still_starts_a_match_beside_party_tiles():
+    s = Script().show(3, health=140, green=0).show(1, health=140, green=0, chests=("en",), chest_t=2.5)
     assert s.state == S.IN_MATCH
 
 

@@ -46,6 +46,12 @@ MUTATIONS = [
     ("            moved = match.active - self._active_at_unseen", "            moved = min(lost_for, match.active)", "test_no_moment_is_counted_twice"),
     ("        self._unseen_since, self._out_of_view = None, False\n        self._loading_english_continuous = False\n", "        self._loading_english_continuous = False\n", "test_a_long_black_picture_still_restarts_the_count"),
     ("            match.reasons.append(OUT_OF_VIEW_REASON)\n", "            match.discontinuity = True\n            match.reasons.append(OUT_OF_VIEW_REASON)\n", "test_the_game_out_of_view_is_not_an_ending_and_does_not_decide_quality"),
+    # M9H
+    ("hud and (green is None or green >= HEALTH_BAR_MIN_PIXELS)", "hud", "test_party_tiles_after_leaving_a_match_do_not_start_one"),
+    ("hud and (green is None or green >= HEALTH_BAR_MIN_PIXELS)", "hud and (green is not None and green >= HEALTH_BAR_MIN_PIXELS)", "test_starting_in_the_middle_of_a_match_is_partial"),
+    ("        if chest and observation.first_chest_t is not None:", "        if False:", "test_the_chest_that_shows_a_match_is_being_played_belongs_to_it"),
+    ("first = max(min(first, observation.first_chest_t), self._last_screen_text_t)", "first = min(first, observation.first_chest_t)", "test_a_chest_never_dates_a_match_back_into_a_menu"),
+    ("        if screen_text:\n            self._last_screen_text_t = t\n", "", "test_a_chest_never_dates_a_match_back_into_a_menu"),
 ]
 
 
