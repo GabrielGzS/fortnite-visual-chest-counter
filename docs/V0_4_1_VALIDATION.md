@@ -65,3 +65,107 @@ there: every run used its own temporary folder.
 
 All 33 suites pass, 1,433 checks (v0.4.0: 32 suites, 1,428), run one after another (the packaged app's live session was running). New: `test_user_recording`
 (4) and `test_v041_gaps_reproduce_exactly_until_fixed` in `test_cases` (17). `test_obs`'s known flaky check passed this time.
+
+## M1 — HUD calibration research
+
+### M1a — existing footage (`research/hud_calibration.py`, `research/hud_cue_calibration.py`)
+
+Every native CHEST template we have, on every labelled footage family. Cells: exact median, share of chests with exact >= 0.75 (the
+trigger), blurred median, share with blurred >= 0.88 (the CERTAIN promotion line). A template is never scored on the pop-up it was cut from.
+
+| Footage (pop-up size, source) | 1.00 reference | 0.95 maintainer | 0.78 Thiefs | synthetic 0.95 (shrunk 1.00) |
+|---|---|---|---|---|
+| reference 1.00, 720p x264 (6 chests) | **0.87, 100%, 0.96, 100%** | 0.60, 0%, 0.85, 0% | 0.38, 0%, 0.72, 0% | 0.55, 0%, 0.71, 0% |
+| Replays 1.00, stream captures (7) | **0.76, 71%, 0.90, 71%** | 0.56, 0%, 0.82, 0% | 0.34, 0%, 0.65, 0% | 0.61, 0%, 0.74, 0% |
+| Thiefs 0.78, OBS camera (2) | 0.31, 0%, 0.42, 0% | 0.34, 0%, 0.59, 0% | **0.95, 100%, 0.99, 100%** | 0.31, 0%, 0.53, 0% |
+| Thiefs 0.78, 1080p browser (3) | 0.29, 0%, 0.41, 0% | 0.30, 0%, 0.46, 0% | **0.88, 100%, 0.96, 100%** | 0.31, 0%, 0.48, 0% |
+| Thiefs 0.78, 720p stream (3) | 0.29, 0%, 0.42, 0% | 0.29, 0%, 0.55, 0% | **0.72, 0%, 0.92, 100%** | 0.31, 0%, 0.49, 0% |
+| maintainer 0.95, 720p NVENC (18) | 0.53, 0%, 0.83, 0% | **0.80, 82%, 0.94, 94%** | 0.36, 0%, 0.65, 0% | 0.49, 0%, 0.77, 0% |
+
+Highest score on any non-chest frame (exact / blurred):
+
+| Non-chest footage | 1.00 reference | 0.95 maintainer | 0.78 Thiefs | synthetic 0.95 |
+|---|---|---|---|---|
+| reference video, away from its chests | 0.65 / 0.80 | 0.48 / 0.78 | 0.45 / 0.76 | 0.49 / 0.73 |
+| PS5, Portuguese combat text, every frame | 0.35 / 0.62 | 0.45 / 0.77 | 0.59 / 0.84 | 0.38 / 0.72 |
+| maintainer recording, away from its chests | 0.52 / 0.74 | 0.59 / 0.81 | 0.48 / 0.82 | 0.53 / 0.76 |
+
+Match text at the maintainer's size (one waiting island and one death screen exist, so "on screen" is within the session the template was
+cut from; "elsewhere" is every other sample of the three videos):
+
+| Signal | Native 0.90 (cut) | Production 1.0 | Production 0.78 | Native: highest elsewhere |
+|---|---:|---:|---:|---:|
+| WAITING FOR PLAYERS | 0.99 | 0.29 | 0.30 | 0.22 |
+| LAUNCHING IN | 1.00 | 0.23 | 0.26 | 0.27 |
+| YOU PLACED | 0.98 | 0.25 | - | 0.49 |
+
+Exact match over the whole pop-up box: 2.0 ms per template on the main PC.
+
+**What this establishes**
+
+1. **A native template does not carry across a 5% size step** at the detector's 1280x720 working size, where the word is 7 px high.
+   0.95 on 1.00 footage and 1.00 on 0.95 footage both stay under the exact trigger on every chest. Match text 10% off scores like text
+   20% off (0.23-0.30).
+2. **Blurred matching tolerates about 5%** (0.81-0.85): over the 0.80 APPROX trigger, under the 0.88 CERTAIN line, and with margins of
+   0.01-0.05. That thin margin is the maintainer's 3 low-margin misses.
+3. **Synthesis is rejected at every offset tested.** Shrinking the 1.00 word by 5% scores worse on real 0.95 pop-ups (0.49) than the
+   unchanged 1.00 word (0.53); at 0.8x it failed on 2026-11-12.
+4. **The source moves exact scores by 0.1-0.2 at the same size** (Thiefs' 0.78 word: 0.95 on its own OBS source, 0.88 on a 1080p browser,
+   0.72 on a 720p stream; the 1.00 word: 0.87 on the reference, 0.76 on Replays' stream captures). Blurred scores stay at 0.90-0.99. Native
+   templates therefore need validating per source quality, and CERTAIN at a given size depends on the input.
+5. **Element families scale differently:** the maintainer's pop-up is 0.95x and HUD text 0.90x; Thiefs' are about 0.80x and 0.78x. A
+   single "HUD scale" number cannot select every template.
+6. **One pop-up is a weak template source:** the two cuts from the maintainer's footage reach the trigger on 82% and 65% of the other
+   pop-ups. Templates should be built from several confirmed pop-ups.
+7. **False alarms stay low at native size:** the maintainer's template never passes 0.59 exact on any non-chest frame of the three videos.
+8. **Cost forbids scanning a bank:** 2 ms per template per frame, so the size must be selected (setting or locked evidence), never
+   searched over every frame.
+
+### What M1a cannot answer
+
+How many distinct rendered sizes Fortnite's HUD Scale slider produces for each element family, and how the slider value maps to the pop-up
+and text sizes. The three sizes above come from three different players and sources, so they say nothing about slider steps. That needs
+the calibration footage below (M1b).
+
+### Candidate architectures for the gate (to be decided on M1b's evidence)
+
+| Option | How a player's size gets native templates | Maintenance | Main risk |
+|---|---|---|---|
+| A. Template bank | the maintainer records every supported slider value once | grows with every value and every Fortnite font change | values nobody recorded fall back to APPROX |
+| B. In-app calibration | the app cuts templates from 3-6 chests the player confirms, validated before use (must match the other confirmed pop-ups and stay low on the session's non-chest frames) | none per size | a bad cut; needs strict validation and a way back |
+| C. Hybrid | a bank for the common values (100% and the most used), calibration for the rest | small | both of the above, smaller |
+
+M1b's footage answers which is needed: if several slider values render the same word, a small bank (A or C) is enough; if every value
+differs, B avoids an ever-growing bank. The single cuts above (65-82% of held-out pop-ups over the trigger, no false alarms) are the first
+evidence that B can work; templates built from several pop-ups have to be measured.
+
+### M1b calibration recording protocol
+
+**Before recording, tell me three facts** (a screenshot of the setting is enough): your Fortnite **HUD Scale** value, the slider's lowest
+and highest value, and its step (what one click or arrow press changes). The plan below assumes 5% steps; it shrinks if the slider is coarser.
+
+**OBS (main PC, not the SRT feed):** record the game at its own resolution, 1920x1080, 60 fps, NVENC **CQP 18**, no output rescaling,
+MKV (remux to MP4 afterwards). Expected size: about 3-6 GB per 15 minutes. Keep overlays (the counter's own text included) away from the
+centre-right of the screen and the top centre.
+
+**Label every change on camera:** after changing HUD Scale, keep the settings page with the value visible for 2 seconds, then return to
+the game. The recording then documents itself; no notes needed.
+
+**Values:** your normal value, 100%, and every step between them, plus the two steps below yours (for example 80, 85, 90, 95, 100 if you
+play at 90). One step above 100 if the slider has it.
+
+**Per value (one recording can cover several values; change HUD Scale between chests):**
+1. **Six separate chests**, waiting until the previous pop-up is gone (about 3 s) before opening the next. A rare chest if one is
+   near. If it happens naturally, open one while another XP line is still on screen (a stacked pop-up).
+2. Nothing else needed for chests: three are used to cut templates, the other three are held out to test them.
+
+**Match text (start a match at the value; the countdown and the end cannot be changed mid-match):**
+- Your normal value: **two full matches**, waiting island to the end screen, one ending with READY (ready up) and one with RETURN TO
+  LOBBY.
+- 100% and your lowest recorded value: **one full match each** (waiting island, bus countdown, and the end screen, whatever it is).
+
+**Held back for acceptance (record, do not send yet):** one more session at your normal value on another day, and 10 minutes of the same
+game received on PC B over SRT, captured by the app's capture tool in lossless mode.
+
+**Total:** 4 full matches plus about 36 chests, roughly 60-90 minutes of play, about 15-30 GB of footage. Keep the files in
+`samples/video tests/` (not in Git); I will cut only short labelled windows into cases, as with the existing ones.
