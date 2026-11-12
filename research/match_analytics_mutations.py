@@ -5,6 +5,8 @@ tests/test_match_analytics.py. Run after that file passes.
 """
 
 import sys
+
+from fortnite_chest_counter import progression, records
 import types
 from pathlib import Path
 from unittest.mock import patch
@@ -58,15 +60,15 @@ MUTATIONS = [
     ("H", "if index >= 0 and t < by_run[run_id][index][\"closed_t\"] else None", "if index >= 0 else None", "test_an_interrupted_match_counts_as_partial_with_only_its_reported_time"),
     # the page
     ("GUI", "            if generation != self._generation:                # an older request: a newer one, or another profile, replaced it\n                continue\n", "", "test_an_old_request_cannot_overwrite_a_newer_one"),
-    ("GUI", "        self._thread = threading.Thread(target=self._read, args=(self._generation, folder, self.include_manual.isChecked()), daemon=True, name=\"analytics\")\n        self._thread.start()\n", "        self._read(self._generation, folder, self.include_manual.isChecked())\n", "test_a_slow_history_does_not_freeze_the_window"),
-    ("GUI", "        self.empty.setVisible(s.empty)\n", "", "test_the_empty_page_shows_dashes_and_explains"),
-    ("GUI", "self.certain.set_value(fmt(s.certain_chests) if not s.empty else None)", "self.certain.set_value(fmt(s.certain_chests))", "test_the_empty_page_shows_dashes_and_explains"),
+    ("GUI", "        self._thread = threading.Thread(target=self._read, args=(self._generation, folder, self.include_manual.isChecked(), counting), daemon=True, name=\"analytics\")\n        self._thread.start()\n", "        self._read(self._generation, folder, self.include_manual.isChecked(), counting)\n", "test_a_slow_history_does_not_freeze_the_window"),
+    ("GUI", "        self.empty.setVisible(empty)\n", "", "test_the_empty_page_shows_dashes_and_explains"),
+    ("GUI", "        if not watched:\n            for tile in", "        if False:\n            for tile in", "test_the_empty_page_shows_dashes_and_explains"),
     ("GUI", "if seen is None else seen if match.duration_is_full else f\"{seen} seen\"", "if seen is None else seen", "test_the_page_shows_the_worked_example"),
     ("GUI", "more = \"+\" if match.chests_may_be_missing else \"\"", "more = \"\"", "test_the_page_tells_the_reader_what_to_be_careful_about"),
     ("GUI", "        elif page is self.analytics:\n            self.analytics.refresh()\n", "", "test_opening_the_page_reads_the_history"),
     ("GUI", "            if self.pages.currentWidget() is self.analytics:\n                self.analytics.refresh()", "            if True:\n                self.analytics.refresh()", "test_the_page_refreshes_when_counting_stops_only_if_open"),
     ("GUI", "folder = paths.APP_DIR / profiles.history_folder(profile[\"state_base\"], profile[\"id\"])", "folder = paths.APP_DIR / profiles.history_folder(profile[\"state_base\"], \"default\")", "test_switching_profile_shows_that_profiles_history"),
-    ("GUI", "self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)", "pass", "test_the_table_cannot_be_edited"),
+    ("GUI", "        table.setEditTriggers(QAbstractItemView.NoEditTriggers)\n        table.setSelectionMode", "        table.setSelectionMode", "test_the_table_cannot_be_edited"),
     ("GUI", "        self.notes.setText(analytics_notes(s))\n", "", "test_the_page_tells_the_reader_what_to_be_careful_about"),
     # M9H: the waiting island, and corrections made for a match
     ("A", "    usable = [match for match in every if not is_waiting_island(match)]", "    usable = list(every)", "test_the_waiting_island_is_no_match"),
@@ -91,7 +93,7 @@ def main():
         sys.modules[mutant.__name__] = mutant
         exec(compile(source.replace(old, new, 1), original.__file__, "exec"), mutant.__dict__)
         if name == "A":
-            patches = [patch.object(T, "A", mutant), patch.object(real_app, "match_analytics", mutant)]
+            patches = [patch.object(T, "A", mutant), patch.object(real_app, "match_analytics", mutant), patch.object(records, "A", mutant), patch.object(progression, "A", mutant)]
         elif name == "H":
             patches = [patch.object(T.A, "H", mutant)]
         else:

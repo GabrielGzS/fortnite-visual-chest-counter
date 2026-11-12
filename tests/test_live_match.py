@@ -310,7 +310,7 @@ def test_the_table_shows_the_rate_and_marks_partial():
         page = w.win.analytics
         page.refresh()
         MA.settle(w)
-        assert page.COLUMNS[4] == "Chests/min"
+        assert page.COLUMNS[4] == "Per min"
         cells = {page.table.item(r, 5).text(): page.table.item(r, 4).text() for r in range(page.table.rowCount())}
         assert cells["Partial"] == "0.50 seen" and cells["Unconfirmed"] == DASH and cells["Complete"] in ("0.20", "0.30"), cells
 
@@ -354,8 +354,8 @@ def test_the_headline_stands_out():
 def test_the_headline_stands_out_on_the_left():
     with G.window() as w:
         page = w.win.analytics
-        row = layout_holding(page, page.complete_rate)
-        assert row.indexOf(page.complete_rate) < row.indexOf(page.observed_rate)
+        row = layout_holding(page, page.hour_rate)                     # v0.4.0: per hour of real life first, per minute of play beside it
+        assert row.indexOf(page.hour_rate) < row.indexOf(page.complete_rate)
 
 
 def test_no_internal_words_remain_on_the_page():

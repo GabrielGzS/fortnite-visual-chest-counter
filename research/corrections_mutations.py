@@ -5,6 +5,8 @@ Run after that file passes.
 """
 
 import sys
+
+from fortnite_chest_counter import progression, records
 import types
 from pathlib import Path
 from unittest.mock import patch
@@ -76,7 +78,7 @@ MUTATIONS = [
     ("GUI", "for row in range(table.rowCount()) if table.cellWidget(row, last)] + [0]) + 24)", "for row in range(0)] + [0]) + 20)", "test_the_longest_labels_are_not_cut_off"),
     ("GUI", "if table.cellWidget(row, last)] + [0]) + 24)", "if table.cellWidget(row, last)] + [0]) + 12)", "test_the_longest_labels_are_not_cut_off"),
     ("GUI", "            table.setColumnWidth(column, width + (spare if column < last else 0))", "            table.setColumnWidth(column, width)", "test_a_wide_table_uses_its_width"),
-    ("GUI", "        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)\n", "", "test_a_narrow_table_scrolls_instead_of_cutting_off"),
+    ("GUI", "        table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)\n", "", "test_a_narrow_table_scrolls_instead_of_cutting_off"),
     ("GUI", "        self.table.viewport().installEventFilter(self)\n", "", "test_resizing_the_window_fits_the_columns_again"),
     # the statistics
     ("A", "    for match in reversed(usable):", "    for match in reversed(kept):", "test_not_a_match_updates_the_statistics"),
@@ -99,7 +101,7 @@ def main():
         targets = {"C": [(R, "C"), (T, "C")],
                    "H": [(R, "H"), (R.A, "H"), (package, "match_history"), (real_app, "match_history")],
                    "GUI": [(gui_package, "app")],
-                   "A": [(R, "A"), (R.MA, "A"), (real_app, "match_analytics")]}[name]
+                   "A": [(R, "A"), (R.MA, "A"), (real_app, "match_analytics"), (records, "A"), (progression, "A")]}[name]   # v0.4.0: the page reads through records
         if name == "C":                                        # the window calls the counter through its own reference
             targets.append((real_app, "C"))
         patches = [patch.object(owner, attribute, mutant) for owner, attribute in targets]

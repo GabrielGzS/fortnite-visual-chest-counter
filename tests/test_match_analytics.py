@@ -20,6 +20,7 @@ import json
 import os
 import tempfile
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -29,6 +30,7 @@ from fortnite_chest_counter import counter as C
 from fortnite_chest_counter import match_analytics as A
 from fortnite_chest_counter import match_history as H
 from fortnite_chest_counter import profiles, settings
+from fortnite_chest_counter import records as R
 
 import test_match_recording as MR
 import test_match_state as M2
@@ -47,7 +49,8 @@ class Run:
 
     def __init__(self, f, run_id="run"):
         self.f, self.warnings, self.count = Path(f), [], 0
-        self.writer = H.HistoryWriter(f, self.warnings.append, run_id=run_id)
+        # dated two hours back, so the whole run lies in the past as a real one does (v0.4.0: time-based figures stop at now)
+        self.writer = H.HistoryWriter(f, self.warnings.append, run_id=run_id, now=lambda: (datetime.now().astimezone() - timedelta(hours=2)).isoformat(timespec="milliseconds"))
         self.writer.start_run("stream", "0.3.0", 15, ["en"], 0, 0, 0, 60)
 
     def match(self, number, opened, played, closed, active, completion="complete", ended_by="placed", ended=None, spectating=0.0, uncertain=0.0, english=True, from_start=True, reasons=()):
@@ -630,13 +633,16 @@ def test_the_page_shows_the_worked_example():
         page.refresh()
         settle(w)
         assert page.empty.isHidden() and text_of(page.matches) == "4" and page.matches.sub.text() == "2 complete · 1 partial · 1 unconfirmed"
-        assert text_of(page.observed) == "20m 20s" and text_of(page.confirmed) == "15m 00s" and text_of(page.session) == "1h 06m"
-        assert text_of(page.certain) == "6" and text_of(page.approx) == "9" and text_of(page.per_match) == "2.0" and "1.5 CERTAIN" in page.per_match.sub.text()
+        # v0.4.0: ACTIVE PLAY covers Complete and Partial matches (600 + 300 + 240 s), and the chest at 635, after match A ended, is someone
+        # else's (D4): recorded chests are 9 - 1 = 8, CERTAIN 6 - 1 = 5. The complete-only 15 minutes stay in the per-minute figure.
+        assert text_of(page.observed) == "20m 20s" and text_of(page.confirmed) == "at least 19m 00s" and text_of(page.session) == "1h 06m"   # match D and the chest at 900 were play not recognised
+        assert "15m 00s of active play" in page.complete_rate.sub.text() and "1 spectated left out" in page.approx.sub.text()
+        assert text_of(page.certain) == "5" and text_of(page.approx) == "8" and text_of(page.per_match) == "2.0" and "1.5 CERTAIN" in page.per_match.sub.text()
         assert text_of(page.complete_rate) == "0.27" and text_of(page.observed_rate) == "0.32"
         assert "0.20 CERTAIN" in page.complete_rate.sub.text() and "2 complete matches" in page.complete_rate.sub.text() and "0.21 CERTAIN" in page.observed_rate.sub.text() and "partial" in page.observed_rate.sub.text()
         assert page.table.rowCount() == 4
-        assert [page.table.item(3, c).text() for c in (1, 2, 3, 4, 5, 6)] == ["10m 00s", "2", "3", "0.30", "Complete", "Placed"]
-        assert [page.table.item(1, c).text() for c in (1, 4, 5, 6)] == ["4m 00s seen", "0.50 seen", "Partial", "Counting stopped"]
+        assert [page.table.item(3, c).text() for c in (1, 2, 3, 4, 5, 6)] == ["10m", "2", "3", "0.30", "Complete", "Placed"]   # v0.4.0: minutes in the list
+        assert [page.table.item(1, c).text() for c in (1, 4, 5, 6)] == ["4m seen", "0.50 seen", "Partial", "Counting stopped"]
 
 
 def test_partial_only_shows_dashes_for_complete_figures():
@@ -645,7 +651,7 @@ def test_partial_only_shows_dashes_for_complete_figures():
         page = w.win.analytics
         page.refresh()
         settle(w)
-        assert text_of(page.observed) == "10m 00s" and text_of(page.confirmed) == DASH and text_of(page.per_match) == DASH and text_of(page.complete_rate) == DASH
+        assert text_of(page.observed) == "10m 00s" and text_of(page.confirmed) == "10m 00s" and text_of(page.per_match) == DASH and text_of(page.complete_rate) == DASH
         assert page.per_match.sub.text() == "No complete matches yet" and text_of(page.observed_rate) != DASH
 
 
@@ -692,13 +698,13 @@ def test_switching_profile_shows_that_profiles_history():
 
 
 def test_a_slow_history_does_not_freeze_the_window():
-    real = A.load
+    real = R.load
 
     def slow(folder, *args, **kwargs):
         time.sleep(0.6)
         return real(folder, *args, **kwargs)
 
-    with G.window() as w, patch.object(A, "load", slow):
+    with G.window() as w, patch.object(R, "load", slow):
         page = w.win.analytics
         begin = time.perf_counter()
         page.refresh()
@@ -721,7 +727,7 @@ def test_an_old_request_cannot_overwrite_a_newer_one():
 
 
 def test_a_read_failure_is_explained():
-    with G.window() as w, patch.object(A, "load", side_effect=PermissionError("locked")):
+    with G.window() as w, patch.object(R, "load", side_effect=PermissionError("locked")):
         page = w.win.analytics
         page.refresh()
         settle(w)

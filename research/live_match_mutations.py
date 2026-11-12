@@ -85,7 +85,7 @@ MUTATIONS = [
     ("G", "        for tile in (self.game_certain, self.game_approx, self.game_rate):\n            numbers.addWidget(tile.compact(), 1)", "        for tile in (self.game_approx, self.game_certain, self.game_rate):\n            numbers.addWidget(tile.compact(), 1)", "test_certain_is_on_the_left_on_both_views"),
     ("G", "        self.dashboard.console_counts.setText(console_counts_text(certain, approx))\n", "", "test_the_console_always_shows_the_counts"),
     ("G", "self.show_game_rate(f\"{rate.approx_per_minute:.2f}\" if rate else None,", "self.show_game_rate(f\"{rate.certain_per_minute:.2f}\" if rate else None,", "test_there_is_one_live_rate_and_it_is_approx"),
-    ("G", "        headline.addWidget(self.complete_rate, 3)\n        headline.addWidget(self.observed_rate, 2)", "        headline.addWidget(self.observed_rate, 3)\n        headline.addWidget(self.complete_rate, 2)", "test_the_headline_stands_out_on_the_left"),
+    ("G", "        headline.addWidget(self.hour_rate, 1)\n        headline.addWidget(self.complete_rate, 1)", "        headline.addWidget(self.complete_rate, 1)\n        headline.addWidget(self.hour_rate, 1)", "test_the_headline_stands_out_on_the_left"),
     ("G", "rate_tile(self.complete_rate, s.complete_rate, lambda r:", "rate_tile(self.complete_rate, s.complete_rate or s.observed_rate, lambda r:", "test_a_partial_rate_never_stands_in_for_the_headline"),
 ]
 

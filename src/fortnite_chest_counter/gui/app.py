@@ -32,9 +32,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
 
 from fortnite_chest_counter import counter as C
 from fortnite_chest_counter.console import CHEST_LABELS
-from fortnite_chest_counter import match_analytics, match_history, paths, profiles, settings
+from fortnite_chest_counter import match_analytics, match_history, paths, profiles, progression, records, settings, timeline
 from fortnite_chest_counter.detection import chest_types
-from fortnite_chest_counter.gui import theme
+from fortnite_chest_counter.gui import charts, theme
 from fortnite_chest_counter.gui import update_manager as UM
 from fortnite_chest_counter.gui.worker import Worker, run_command
 from fortnite_chest_counter.obs import credentials as obs_credentials
@@ -1984,24 +1984,163 @@ def analytics_notes(summary):
     return "   ".join(notes)
 
 
-class AnalyticsPage(QWidget):
-    """What the recorded matches show. Read-only, and worked out away from this window's thread so a huge history cannot freeze it."""
+ANALYTICS_VIEWS = (("Performance", "How fast you progress: chests per hour of real life, and per minute of play"),
+                   ("Days & weeks", "Your chests day by day and week by week"),
+                   ("Personal Bests", "Your best match, hour, day, week and session"),
+                   ("History", "Every recorded match and session"))
+PERFORMANCE_VIEW, DAYS_VIEW, BESTS_VIEW, HISTORY_VIEW = range(4)
+HISTORY_MATCHES = 100                      # the History tab lists this many matches, newest first
+AUTO_REFRESH_MS = 5000                     # after a match ends, so the detector's last chests of it are saved first
+BEST_TITLES = {"match_chests": "MOST CHESTS IN A MATCH", "match_rate": "BEST CHESTS PER MINUTE", "hour": "BEST HOUR", "day": "BEST DAY",
+               "week": "BEST WEEK", "session": "MOST CHESTS IN A SESSION", "session_rate": "BEST SESSION PACE (PER HOUR)",
+               "longest_session": "LONGEST SESSION", "match_broken": "MOST BROKEN CHESTS IN A MATCH"}
+BEST_NEEDS = {"match_chests": "A Complete match with chests", "match_rate": "A Complete match with 5 minutes of play",
+              "hour": "60 minutes of counting in a row", "day": "A day with chests", "week": "A week with chests", "session": "A session with chests",
+              "session_rate": "A session of an hour or more", "longest_session": "A session", "match_broken": "A broken chest you add in the Game view"}
 
-    COLUMNS = ("Started", "Duration", "CERTAIN", "APPROX", "Chests/min", "Quality", "Ending", "")
+
+def scroll_tab():
+    """A tab that scrolls as one page. -> (the tab widget, its content layout)."""
+    area = QScrollArea()
+    area.setWidgetResizable(True)
+    area.setFrameShape(QFrame.NoFrame)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    inner = QWidget()
+    inner.setObjectName("page")
+    layout = QVBoxLayout(inner)
+    layout.setContentsMargins(0, 8, 6, 8)
+    layout.setSpacing(12)
+    area.setWidget(inner)
+    return area, layout
+
+
+def tile_row(*tiles):
+    row = QHBoxLayout()
+    row.setSpacing(12)
+    for tile in tiles:
+        row.addWidget(tile, 1)
+    return row
+
+
+def tile_grid(tiles, columns):
+    grid = QGridLayout()
+    grid.setSpacing(10)
+    for index, tile in enumerate(tiles):
+        grid.addWidget(tile, index // columns, index % columns)
+    for column in range(columns):
+        grid.setColumnStretch(column, 1)
+    return grid
+
+
+def minutes_text(seconds):
+    """"1h 02m", "18m" or "45s": the History list needs no seconds once there are minutes."""
+    if seconds is None:
+        return None
+    seconds = int(seconds)
+    return f"{seconds // 3600}h {seconds // 60 % 60:02d}m" if seconds >= 3600 else f"{seconds // 60}m" if seconds >= 60 else f"{seconds}s"
+
+
+def day_text(day):
+    return f"{day:%a} {day.day} {day:%b}"
+
+
+def clock_of(moment):
+    return timeline.local(moment).strftime("%H:%M")
+
+
+def when_text(moment):
+    """A UTC moment as the PC's local day and time: "Mon 9 Nov, 20:03"."""
+    return f"{day_text(timeline.local(moment).date())}, {clock_of(moment)}"
+
+
+def average_text(value):
+    return None if value is None else f"{value:.1f}"
+
+
+def counted_text(days):
+    counted = sum(1 for day in days if day.monitored)
+    return f"{counted} of {len(days)} days counted"
+
+
+class BestCard(QFrame):
+    """One personal best with its evidence."""
+
+    def __init__(self, key):
+        super().__init__()
+        self.key = key
+        self.setObjectName("statCard")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(2)
+        layout.addWidget(label(BEST_TITLES[key], "countLabel"))
+        self.value = label(UNKNOWN_VALUE, "statValue")
+        layout.addWidget(self.value)
+        self.when = label("", "countSub", wrap=True)
+        layout.addWidget(self.when)
+        self.detail = label("", "countSub", wrap=True)
+        layout.addWidget(self.detail)
+
+    def show_best(self, best):
+        if best is None:
+            self.value.setText(UNKNOWN_VALUE)
+            self.when.setText(f"Needs: {BEST_NEEDS[self.key][0].lower()}{BEST_NEEDS[self.key][1:]}")
+            self.detail.setText("")
+            return
+        duration = match_analytics.duration_text
+        value = best.value
+        self.value.setText(duration(value) if self.key == "longest_session" else f"{value:.2f}" if self.key == "match_rate"
+                           else f"{value:.1f}" if self.key == "session_rate" else fmt(value))
+        if self.key in ("day",):
+            when = day_text(best.start)
+        elif self.key == "week":
+            when = f"Week of {best.start.day} {best.start:%b %Y}"
+        elif best.end is not None:
+            when = f"{when_text(best.start)} to {clock_of(best.end)}" + (f"  ·  {duration(best.seconds)}" if self.key != "longest_session" else "")
+        elif best.start is not None:
+            when = when_text(best.start) + (f"  ·  {duration(best.seconds)}" if duration(best.seconds) else "")
+        else:
+            when = ""
+        self.when.setText(when)
+        parts = []
+        if best.certain is not None and self.key in ("match_chests", "hour", "day", "week", "session"):
+            parts.append(f"{fmt(best.certain)} CERTAIN")
+        elif best.certain is not None and self.key == "match_rate":
+            parts.append(f"{best.certain:.2f} CERTAIN")
+        if best.manual_added or best.manual_removed:
+            parts.append(f"incl. {manual_text(best.manual_added, best.manual_removed)}")
+        if best.quality:
+            parts.append(QUALITY_LOOK[best.quality][0])
+        if best.cut_short:
+            parts.append("at least: part of it was not saved")
+        self.detail.setText("  ·  ".join(parts))
+
+
+class AnalyticsPage(QWidget):
+    """What history shows, in four tabs. Read-only, and worked out away from this window's thread so a huge history cannot freeze it."""
+
+    COLUMNS = ("Started", "Duration", "CERTAIN", "APPROX", "Per min", "Quality", "Ending", "")
+    SESSION_COLUMNS = ("Started", "Session time", "Counting", "Chests", "Per hour", "Your +1/−1")
 
     def __init__(self, win):
         super().__init__()
         self.win = win
-        layout = page_layout(self, "Analytics", "What your recorded matches show, from match history only. The numbers on the Dashboard stay your official totals.")
-        row = QHBoxLayout()
+        self.setObjectName("page")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 24, 30, 16)
+        layout.setSpacing(10)
+        top = QHBoxLayout()
+        top.addWidget(label("Analytics", "pageTitle"))
+        top.addStretch(1)
         self.profile_line = label("", "hint")
-        row.addWidget(self.profile_line)
-        self.status = label("", "hint")
-        row.addWidget(self.status, 1)
-        self.refresh_button = button("Refresh", tip="Read the match history again", on_click=self.refresh)
-        row.addWidget(self.refresh_button)
-        layout.addLayout(row)
-        self.empty, empty_layout = card("No matches recorded yet")
+        top.addWidget(self.profile_line, 0, Qt.AlignVCenter)
+        self.refresh_button = button("Refresh", tip="Read the history again", on_click=self.refresh)
+        top.addWidget(self.refresh_button, 0, Qt.AlignVCenter)
+        layout.addLayout(top)
+        layout.addWidget(label("From your saved history. Your official totals stay on the Dashboard.", "pageSub", wrap=True))
+        self.status = label("", "hint", wrap=True)
+        self.status.hide()
+        layout.addWidget(self.status)
+        self.empty, empty_layout = card("Nothing recorded yet")
         self.empty_hint = label("", "hint", wrap=True)
         empty_layout.addWidget(self.empty_hint)
         erow = QHBoxLayout()
@@ -2012,74 +2151,251 @@ class AnalyticsPage(QWidget):
         self.empty.hide()
         layout.addWidget(self.empty)
 
-        self.matches = StatTile("MATCHES")
-        self.observed = StatTile("MATCH TIME SEEN", "On screen, complete and partial matches")
-        self.confirmed = StatTile("TIME ACTIVELY PLAYING", "Alive on the map, complete matches only")
-        self.session = StatTile("TIME COUNTING")
-        self.certain = StatTile("CERTAIN CHESTS", "In recorded history")
-        self.approx = StatTile("APPROX CHESTS", "In recorded history, includes CERTAIN")
-        self.per_match = StatTile("AVERAGE CHESTS PER COMPLETE MATCH")
-        self.broken = StatTile("BROKEN CHESTS (YOURS)", "Added by you in the Game view")
-        self.broken.setToolTip("Chests you added with +1 in the Game view as broken chests. You reported them: the app did not detect them.")
-        self.complete_rate = CountCard("AVERAGE DETECTED CHESTS / MIN", "", theme.APPROX)        # the comparable figure: whole matches only
-        self.observed_rate = StatTile("INCLUDING PARTIAL MATCHES")
-        headline = QHBoxLayout()
-        headline.setSpacing(12)
-        headline.addWidget(self.complete_rate, 3)
-        headline.addWidget(self.observed_rate, 2)
-        layout.addLayout(headline)
-        for tiles in ((self.matches, self.observed, self.confirmed, self.session), (self.certain, self.approx, self.per_match), (self.broken, None, None)):
-            line = QHBoxLayout()
-            line.setSpacing(12)
-            for tile in tiles:
-                if tile is None:
-                    line.addStretch(1)                        # the broken-chest tile keeps a third of the width, like the tiles above
-                else:
-                    line.addWidget(tile, 1)
-            layout.addLayout(line)
-        self.rate_hint = label(rate_hint_text(bool(load_cfg()[0]["app"]["analytics_include_manual"])), "hint", wrap=True)
-        layout.addWidget(self.rate_hint)
-        self.include_manual = QCheckBox("Count my +1s from the Game view in chests per minute and per match")
-        self.include_manual.setToolTip("A +1 made for a match is a chest the detector did not see, a broken chest say. Off: the rates stay what the detector measured. "
-                                       "A -1 always counts, because it takes off a chest that should not have been counted. Your totals include both either way.")
-        self.include_manual.setChecked(bool(load_cfg()[0]["app"]["analytics_include_manual"]))
-        self.include_manual.toggled.connect(self._include_manual_toggled)
-        layout.addWidget(self.include_manual)
-        self.notes = label("", "hint", wrap=True)
-        layout.addWidget(self.notes)
-        self.recent_title = label("Recent matches", "cardTitle")
-        layout.addWidget(self.recent_title)
-        self.table = QTableWidget(0, len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(self.COLUMNS)
-        self.table.horizontalHeaderItem(4).setToolTip("Detected APPROX chests per minute of active play in that match. \"seen\" means only part of the match was seen. A dash means there is not enough to go on.")
-        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.table.verticalHeader().hide()
-        self.table.setShowGrid(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.table.setFocusPolicy(Qt.NoFocus)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)     # sized by _fit_columns
-        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.table.viewport().installEventFilter(self)
-        self.table.setMinimumHeight(170)
-        layout.addWidget(self.table, 1)
+        segments = QHBoxLayout()
+        segments.setSpacing(4)
+        self.view_buttons = QButtonGroup(self)
+        for index, (name, tip) in enumerate(ANALYTICS_VIEWS):
+            view_button = button(name.replace("&", "&&"), "segment", tip=tip)         # a single & would mark a keyboard shortcut
+            view_button.setCheckable(True)
+            self.view_buttons.addButton(view_button, index)
+            segments.addWidget(view_button)
+        segments.addStretch(1)
+        layout.addLayout(segments)
+        layout.addWidget(hline())
+        self.views = QStackedWidget()
+        layout.addWidget(self.views, 1)
+        self.view_buttons.button(PERFORMANCE_VIEW).setChecked(True)
+        self.view_buttons.idClicked.connect(self.show_view)
 
+        self._build_performance()
+        self._build_days()
+        self._build_bests()
+        self._build_history()
+
+        self._analytics = None
+        self._newest = None                                   # the newest match listed, so only a genuinely new one moves the list
         self._generation = 0
         self._done = queue.SimpleQueue()
         self._thread = None
         self._collector = QTimer(self)
         self._collector.timeout.connect(self._collect)
+        self._auto_refresh = QTimer(self)
+        self._auto_refresh.setSingleShot(True)
+        self._auto_refresh.timeout.connect(self._refresh_if_open)
 
+    # ------------------------------------------------------------------ building
+    def _build_performance(self):
+        tab, layout = scroll_tab()
+        self.views.addWidget(tab)
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        self.period_buttons = QButtonGroup(self)
+        for index, (key, text) in enumerate(progression.PERIODS):
+            period = button(text, "toggle")
+            period.setCheckable(True)
+            self.period_buttons.addButton(period, index)
+            row.addWidget(period)
+        row.addStretch(1)
+        self.period_buttons.button(len(progression.PERIODS) - 1).setChecked(True)      # All time
+        self.period_buttons.idClicked.connect(lambda _: self._show_period())
+        layout.addLayout(row)
+
+        self.hour_rate = CountCard("CHESTS PER HOUR", "", theme.APPROX)
+        self.hour_rate.setToolTip("Your chests divided by your session time: the whole time from starting to stopping, with queues, the lobby and short "
+                                  "breaks in it. Sessions are counting runs less than 30 minutes apart. It is your real pace, not chests per minute times 60.")
+        self.complete_rate = CountCard("AVERAGE DETECTED CHESTS / MIN", "", theme.APPROX)
+        self.complete_rate.setToolTip("Chests per minute of active play in complete matches: how fast you loot while playing.")
+        headline = QHBoxLayout()
+        headline.setSpacing(12)
+        headline.addWidget(self.hour_rate, 1)
+        headline.addWidget(self.complete_rate, 1)
+        layout.addLayout(headline)
+
+        self.approx = StatTile("CHESTS")
+        self.approx.setToolTip("Chests the app detected, plus your +1s and minus your −1s. Chests seen while spectating someone else after you were "
+                               "out of a recognised match are left out. Reset, Edit counts and a starting count are not chests.")
+        self.session_time = StatTile("SESSION TIME")
+        self.confirmed = StatTile("ACTIVE PLAY")
+        self.confirmed.setToolTip("Alive on the bus or the map, in recognised Complete and Partial matches.")
+        self.matches = StatTile("MATCHES")
+        layout.addLayout(tile_row(self.approx, self.session_time, self.confirmed, self.matches))
+        layout.addWidget(label("Chests over time", "cardTitle"))
+        self.buildup = charts.BuildUpChart()
+        self.buildup.setToolTip("Your chests adding up. Shaded: the app was counting. A flat line outside the shading is time nobody watched.")
+        layout.addWidget(self.buildup)
+
+        self.session = StatTile("TIME COUNTING")
+        self.session.setToolTip("Time the app was counting. Session time minus this is time between runs that was not watched.")
+        self.between = StatTile("BETWEEN MATCHES")
+        self.between.setToolTip("Time counting minus active play: the lobby, queues, the waiting island, after your elimination and breaks.")
+        self.observed = StatTile("MATCH TIME SEEN", "On screen, complete and partial matches")
+        self.certain = StatTile("CERTAIN")
+        self.per_match = StatTile("PER COMPLETE MATCH")
+        self.observed_rate = StatTile("INCLUDING PARTIAL MATCHES")
+        details = [self.session, self.between, self.observed, self.certain, self.per_match, self.observed_rate]
+        for tile in details:
+            tile.compact()
+        layout.addLayout(tile_grid(details, 3))
+
+        box, box_layout = card("Where your chests came from", "Your +1s and −1s are your reports, not detections. Only \"missed\" and \"not a "
+                                                                "chest\" say anything about the detector.")
+        self.detected = StatTile("DETECTED")
+        self.broken = StatTile("BROKEN (YOURS)")
+        self.broken.setToolTip("Chests you added with +1 as broken chests. You reported them: the app did not detect them.")
+        self.missed = StatTile("MISSED (YOURS)")
+        self.missed.setToolTip("Visible chests you said the counter missed.")
+        self.other_added = StatTile("OTHER +1s")
+        self.other_added.setToolTip("+1s with no reason or \"Fortnite counted it, nothing to see\".")
+        self.removed = StatTile("YOUR −1s")
+        sources = [self.detected, self.broken, self.missed, self.other_added, self.removed]
+        for tile in sources:
+            tile.compact()
+        box_layout.addLayout(tile_grid(sources, 3))
+        layout.addWidget(box)
+
+        self.rate_hint = label(rate_hint_text(bool(load_cfg()[0]["app"]["analytics_include_manual"])), "hint", wrap=True)
+        layout.addWidget(self.rate_hint)
+        self.include_manual = QCheckBox("Count my +1s from the Game view in chests per minute and per match")
+        self.include_manual.setToolTip("A +1 made for a match is a chest the detector did not see, a broken chest say. Off: the rates stay what the detector measured. "
+                                       "A -1 always counts, because it takes off a chest that should not have been counted. Chests per hour and per day "
+                                       "always include them, like your total.")
+        self.include_manual.setChecked(bool(load_cfg()[0]["app"]["analytics_include_manual"]))
+        self.include_manual.toggled.connect(self._include_manual_toggled)
+        layout.addWidget(self.include_manual)
+        self.notes = label("", "hint", wrap=True)
+        layout.addWidget(self.notes)
+        layout.addStretch(1)
+
+    def _build_days(self):
+        tab, layout = scroll_tab()
+        self.views.addWidget(tab)
+        self.today = StatTile("TODAY")
+        self.yesterday = StatTile("YESTERDAY")
+        self.this_week = StatTile("THIS WEEK")
+        self.last7 = StatTile("LAST 7 DAYS")
+        self.last30 = StatTile("LAST 30 DAYS")
+        layout.addLayout(tile_grid([self.today, self.yesterday, self.this_week, self.last7, self.last30], 5))
+        layout.addWidget(label("Last 30 days", "cardTitle"))
+        self.day_chart = charts.BarChart()
+        layout.addWidget(self.day_chart)
+        layout.addWidget(label("Bars: chests.   A short line: counted, none found.   A ring: not counted that day, so nothing is known.", "hint", wrap=True))
+        self.per_monitored = StatTile("PER DAY COUNTED")
+        self.per_monitored.setToolTip("Your chests on the days the app was counting, divided by those days. A counted day with no chest counts as a zero.")
+        self.per_active = StatTile("PER DAY WITH CHESTS")
+        self.per_active.setToolTip("Your chests divided by the days on which you got some.")
+        self.per_calendar = StatTile("PER CALENDAR DAY")
+        self.per_calendar.setToolTip("Your chests divided by every day since your first recorded day, counted or not. The honest pace for planning, "
+                                     "but days that were not counted are not known to be zero.")
+        self.per_week = StatTile("PER WEEK")
+        self.per_week.setToolTip("The per-calendar-day average times seven, over completed weeks.")
+        self.best_day = StatTile("BEST DAY")
+        self.best_week = StatTile("BEST WEEK")
+        averages = [self.per_monitored, self.per_active, self.per_calendar, self.per_week, self.best_day, self.best_week]
+        for tile in averages:
+            tile.compact()
+        layout.addLayout(tile_grid(averages, 3))
+        layout.addWidget(label("Last 12 weeks", "cardTitle"))
+        self.week_chart = charts.BarChart()
+        layout.addWidget(self.week_chart)
+        self.days_note = label("Averages use completed days and weeks: today and this week are still going.", "hint", wrap=True)
+        layout.addWidget(self.days_note)
+        layout.addStretch(1)
+
+    def _build_bests(self):
+        tab, layout = scroll_tab()
+        self.views.addWidget(tab)
+        layout.addWidget(label("Your best results, worked out again from your history every time, so excluding a match or undoing a correction "
+                               "updates them. Match bests use Complete matches only.", "hint", wrap=True))
+        self.best_cards = {key: BestCard(key) for key, _ in records.BESTS}
+        layout.addLayout(tile_grid(list(self.best_cards.values()), 2))
+        layout.addStretch(1)
+
+    def _build_history(self):
+        tab = QWidget()
+        tab.setObjectName("page")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+        self.views.addWidget(tab)
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        self.history_buttons = QButtonGroup(self)
+        for index, text in enumerate(("Matches", "Sessions")):
+            choice = button(text, "toggle")
+            choice.setCheckable(True)
+            self.history_buttons.addButton(choice, index)
+            row.addWidget(choice)
+        self.history_buttons.button(0).setChecked(True)
+        row.addSpacing(10)
+        self.recent_title = label("Recent matches, newest first", "hint")
+        row.addWidget(self.recent_title)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.history_views = QStackedWidget()
+        layout.addWidget(self.history_views, 1)
+        self.history_buttons.idClicked.connect(self._history_choice)
+
+        self.table = self._table(self.COLUMNS)
+        self.table.horizontalHeaderItem(4).setToolTip("Detected APPROX chests per minute of active play in that match. \"seen\" means only part of the match was seen. A dash means there is not enough to go on.")
+        self.table.viewport().installEventFilter(self)
+        self.history_views.addWidget(self.table)
+        self.sessions_table = self._table(self.SESSION_COLUMNS)
+        self.sessions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.sessions_table.horizontalHeader().setStretchLastSection(True)
+        self.history_views.addWidget(self.sessions_table)
+
+    def _history_choice(self, index):
+        self.history_views.setCurrentIndex(index)
+        self.recent_title.setText("Sessions: counting runs less than 30 minutes apart, newest first" if index else "Recent matches, newest first")
+
+    @staticmethod
+    def _table(columns):
+        table = QTableWidget(0, len(columns))
+        table.setHorizontalHeaderLabels(columns)
+        table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        table.verticalHeader().hide()
+        table.setShowGrid(False)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.NoSelection)
+        table.setFocusPolicy(Qt.NoFocus)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)     # sized by _fit_columns
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setMinimumHeight(170)
+        table.setStyleSheet("QHeaderView::section { padding: 6px 4px; } QTableWidget::item { padding: 4px 4px; }")   # fits 920 x 640 (UX-08)
+        return table
+
+    def show_view(self, index):
+        """Only changes what is on screen."""
+        self.views.setCurrentIndex(index)
+        self.view_buttons.button(index).setChecked(True)
+
+    @property
+    def period_key(self):
+        return progression.PERIODS[max(self.period_buttons.checkedId(), 0)][0]
+
+    # ------------------------------------------------------------------ reading
     def refresh(self):
         cfg, _ = load_cfg()
         profile = cfg["profile"]
         self.profile_line.setText(f"Profile: {profile['name']}")
-        self.status.setText("Reading your match history...")
+        self.status.setText("Reading your history...")
+        self.status.show()
         self._generation += 1
         folder = paths.APP_DIR / profiles.history_folder(profile["state_base"], profile["id"])
-        self._thread = threading.Thread(target=self._read, args=(self._generation, folder, self.include_manual.isChecked()), daemon=True, name="analytics")
+        counting = self.win.mode in ("counting", "stopping")
+        self._thread = threading.Thread(target=self._read, args=(self._generation, folder, self.include_manual.isChecked(), counting), daemon=True, name="analytics")
         self._thread.start()
         self._collector.start(40)
+
+    def match_ended(self):
+        """A match just closed. If this page is open, read the history again shortly, once the detector's last chests are saved."""
+        if self.win.pages.currentWidget() is self:
+            self._auto_refresh.start(AUTO_REFRESH_MS)
+
+    def _refresh_if_open(self):
+        if self.win.pages.currentWidget() is self:
+            self.refresh()
 
     def _include_manual_toggled(self, on):
         try:
@@ -2088,9 +2404,9 @@ class AnalyticsPage(QWidget):
             show_error(self, f"The setting could not be saved ({error}).")
         self.refresh()
 
-    def _read(self, generation, folder, include_manual):
+    def _read(self, generation, folder, include_manual, counting):
         try:
-            self._done.put((generation, match_analytics.load(folder, include_manual)))
+            self._done.put((generation, records.load(folder, counting_now=counting, include_manual=include_manual)))
         except Exception as error:
             self._done.put((generation, error))
 
@@ -2104,28 +2420,52 @@ class AnalyticsPage(QWidget):
                 continue
             self._collector.stop()
             if isinstance(result, Exception):
-                self.status.setText(f"The match history could not be read ({result}). Your counts are not affected.")
-            else:
+                self.status.setText(f"The history could not be read ({result}). Your counts are not affected.")
+                self.status.show()
+            elif isinstance(result, match_analytics.Summary):  # match statistics alone
+                self.status.hide()
                 self.status.setText("")
                 self.show_summary(result)
+            else:
+                self.status.hide()
+                self.status.setText("")
+                self.show_analytics(result)
 
-    def show_summary(self, s):
-        duration = match_analytics.duration_text
-        self.empty.setVisible(s.empty)
-        self.recent_title.setVisible(not s.empty)
-        self.table.setVisible(not s.empty)
-        if s.empty:
+    # ------------------------------------------------------------------ showing
+    def show_analytics(self, a):
+        self._analytics = a
+        self.show_summary(a.summary, matches=a.summary.all_matches[:HISTORY_MATCHES])
+        self._show_period()
+        self._show_days(a.snapshot, a.bests)
+        for key, card_widget in self.best_cards.items():
+            card_widget.show_best(a.bests.get(key))
+        self._fill_sessions(a.snapshot)
+
+    def _has_data(self):
+        a = self._analytics
+        return a is not None and bool(a.snapshot.runs or a.snapshot.events or not a.summary.empty)
+
+    def show_summary(self, s, matches=None):
+        """The match statistics, the empty state, the notes and the match list."""
+        empty = s.empty and not self._has_data()
+        self.empty.setVisible(empty)
+        self.recent_title.setVisible(not empty)
+        self.table.setVisible(not empty)
+        if empty:
             tracking = load_cfg()[0]["match"]["mode"] == "on"
-            self.empty_hint.setText("Matches appear here after you count with match tracking on." if tracking else
-                                    "Turn on match tracking in Settings, then count a game. Your matches and statistics will appear here.")
+            self.empty_hint.setText("Count a game and your chests, sessions and matches appear here." if tracking else
+                                    "Your chests per hour and per day are recorded whenever you count. Turn on match tracking in Settings to "
+                                    "see your matches and chests per minute too.")
             self.empty_settings.setVisible(not tracking)
+        self._show_match_tiles(s)
+        self.notes.setText(analytics_notes(s))
+        self.notes.setVisible(bool(self.notes.text()))
+        self._fill_table(s.recent if matches is None else matches)
+
+    def _show_match_tiles(self, s):
+        duration = match_analytics.duration_text
         self.matches.set_value(fmt(s.matches), f"{fmt(s.complete)} complete · {fmt(s.partial)} partial · {fmt(s.unconfirmed)} unconfirmed")
         self.observed.set_value(duration(s.observed_seconds))
-        self.confirmed.set_value(duration(s.confirmed_seconds))
-        known = duration(s.session_seconds)
-        self.session.set_value(known, ("At least: " if s.sessions_cut_short and known else "") + plural(s.sessions, "session") + ", in or out of matches")
-        self.certain.set_value(fmt(s.certain_chests) if not s.empty else None)
-        self.approx.set_value(fmt(s.approx_chests) if not s.empty else None)
         per = s.per_complete_match
         self.per_match.set_value(f"{per.approx:.1f}" if per else None, f"APPROX  ·  {per.certain:.1f} CERTAIN  ·  {plural(per.matches, 'match')}" if per else "No complete matches yet")
         rate_tile(self.complete_rate, s.complete_rate, lambda r: f"{plural(r.matches, 'complete match')}, {duration(r.minutes * 60)} of active play",
@@ -2134,33 +2474,169 @@ class AnalyticsPage(QWidget):
                   f"Needs at least {match_analytics.MIN_OBSERVED_RATE_SECONDS // 60} minutes of active play")
         self.rate_hint.setText(rate_hint_text(s.include_manual))
         self.complete_rate.title.setText("AVERAGE CHESTS / MIN WITH YOUR +1s" if s.include_manual else "AVERAGE DETECTED CHESTS / MIN")
-        broken = s.broken_per_complete_match
-        self.broken.set_value(fmt(s.broken_chests) if not s.empty else None,
-                              f"{broken:.1f} per complete match, as you reported them" if broken is not None else "Added by you in the Game view")
-        self.notes.setText(analytics_notes(s))
-        self.notes.setVisible(bool(self.notes.text()))
+
+    def _show_period(self):
+        a = self._analytics
+        if a is None:
+            return
+        key = self.period_key
+        p = a.periods[key]
+        self._show_match_tiles(a.summary if key == "all" else p.match_summary)
+        duration = match_analytics.duration_text
+        t = p.totals
+        watched = p.counting_seconds > 0 or t.recorded or t.detected or t.manual_added or t.manual_removed
+        least = "at least " if p.cut_short else ""
+        rate = p.per_hour
+        self.hour_rate.value.setText(UNKNOWN_VALUE if rate is None else f"{rate:.1f}")
+        self.hour_rate.sub.setText(f"{fmt(p.in_sessions)} chests in {duration(p.session_seconds)} of sessions, breaks included" if rate is not None else
+                                   f"Needs {progression.MIN_HOURLY_SECONDS // 60} minutes of session time in this period" if watched else "Not counted in this period")
+        if not watched:
+            for tile in (self.approx, self.certain, self.session_time, self.session, self.confirmed, self.between, self.detected, self.broken,
+                         self.missed, self.other_added, self.removed):
+                tile.set_value(None, "")
+        else:
+            extra = [f"{fmt(t.detected)} detected"] + ([f"{manual_text(t.manual_added, t.manual_removed)}"] if t.manual_added or t.manual_removed else [])
+            if p.spectating_left_out:
+                extra.append(f"{fmt(p.spectating_left_out)} spectated left out")
+            self.approx.set_value(fmt(t.recorded), "  ·  ".join(extra))
+            self.certain.set_value(fmt(t.certain), "Detected with the strongest evidence")
+            self.session_time.set_value(duration(p.session_seconds), f"{plural(p.sessions, 'session')}, breaks included")
+            self.session.set_value(least + duration(p.counting_seconds) if p.counting_seconds else duration(0),
+                                   f"{duration(p.gap_seconds)} between runs not watched" if p.gap_seconds >= 1 else "In or out of matches")
+            if p.active_seconds is None:
+                self.confirmed.set_value(None, "No recognised match in this period")
+                self.between.set_value(None, "Needs recognised matches")
+            else:
+                low = p.active_is_lower_bound
+                self.confirmed.set_value(("at least " if low else "") + duration(p.active_seconds),
+                                         "Some play was not recognised" if low else "Alive on the bus or the map")
+                self.between.set_value(("at most " if low else "") + duration(p.between_matches_seconds), "Lobby, queues, island, breaks")
+            self._show_sources(p)
+        self._show_buildup(a.snapshot, p)
+
+    def _show_sources(self, p):
+        t, hours = p.totals, p.counting_seconds / 3600
+        events = [e for e in self._analytics.snapshot.events if p.start <= e.at < p.end and e.manual]
+        added = [e for e in events if e.delta > 0]
+
+        def share(count):
+            parts = [f"{100 * count / t.recorded:.0f}% of your chests"] if t.recorded > 0 else []
+            if hours >= 0.5:
+                parts.append(f"{count / hours:.1f} per hour counting")
+            return "  ·  ".join(parts)
+
+        broken = sum(e.reason == match_history.BROKEN_CHEST for e in added)
+        missed = sum(e.reason == match_history.MISSED for e in added)
+        self.detected.set_value(fmt(t.detected), share(t.detected))
+        self.broken.set_value(fmt(broken), share(broken))
+        self.missed.set_value(fmt(missed), share(missed))
+        self.other_added.set_value(fmt(len(added) - broken - missed), share(len(added) - broken - missed))
+        removed = [e for e in events if e.delta < 0]
+        wrong = sum(e.reason == match_history.FALSE_POSITIVE for e in removed)
+        self.removed.set_value(fmt(len(removed)), f"{fmt(wrong)} said not a chest" if removed else "")
+
+    def _show_buildup(self, snapshot, p):
+        start, end = p.start, min(p.end, snapshot.now)
+        span = max(timeline.seconds_between(start, end), 1)
+        total, points = 0, []
+        for event in snapshot.events:
+            if start <= event.at < p.end:
+                total += event.delta
+                points.append((timeline.seconds_between(start, event.at), total))
+        counted = [(timeline.seconds_between(start, a), timeline.seconds_between(start, b))
+                   for a, b in timeline.clip(timeline.merged((run.start, run.end) for run in snapshot.runs), start, end)]
+        first = day_text(timeline.local(start).date()) if p.key != "today" else "Midnight"
+        self.buildup.set_series(points, counted, span, (first, "Now"))
+
+    def _show_days(self, snap, bests):
+        def day_tile(tile, day, missing):
+            if day is None or not (day.monitored or day.totals.recorded):
+                tile.set_value(None, missing)
+            else:
+                tile.set_value(fmt(day.totals.recorded), f"Counted {match_analytics.duration_text(day.counted_seconds)}" if day.monitored else "Your corrections only")
+
+        day_tile(self.today, snap.day(0), "Not counted yet today")
+        day_tile(self.yesterday, snap.day(-1), "Not counted")
+        week = snap.this_week()
+        week_days = week.days if week else []
+        self.this_week.set_value(fmt(week.recorded) if week and (week.monitored or week.recorded) else None,
+                                 counted_text(week_days) if week_days else "Not counted this week")
+        for tile, count in ((self.last7, 7), (self.last30, 30)):
+            days = snap.last_days(count)
+            seen = [day for day in days if day.monitored or day.totals.recorded]
+            tile.set_value(fmt(sum(day.totals.recorded for day in days)) if seen else None,
+                           (counted_text(days) + ("" if len(days) == count else f", since {day_text(days[0].day)}")) if seen else "Not counted")
+        a = snap.day_averages()
+        self.per_monitored.set_value(average_text(a.per_monitored), f"Over {plural(a.monitored, 'day')} counted" if a.monitored else "After your first full day")
+        self.per_active.set_value(average_text(a.per_active), f"Over {plural(a.active, 'day')} with chests" if a.active else "After your first full day")
+        self.per_calendar.set_value(average_text(a.per_calendar), f"Over {plural(a.calendar, 'day')}, {fmt(a.not_counted)} not counted" if a.calendar else "After your first full day")
+        w = snap.week_averages()
+        self.per_week.set_value(average_text(w.per_calendar), f"Over {plural(w.calendar, 'week')}" if w.calendar else "After your first full week")
+        best = bests.get("day")
+        self.best_day.set_value(fmt(best.value) if best else None, day_text(best.start) if best else "A day with chests")
+        best = bests.get("week")
+        self.best_week.set_value(fmt(best.value) if best else None, f"Week of {best.start.day} {best.start:%b}" if best else "A week with chests")
+        self.day_chart.set_bars([charts.Bar(str(day.day.day), day.totals.recorded, day.status, self._day_tip(day)) for day in snap.last_days(30)])
+        weeks = snap.weeks()[-12:]
+        self.week_chart.set_bars([charts.Bar(f"{w.start.day} {w.start:%b}", w.recorded,
+                                             charts.CHESTS if w.active else charts.ZERO if w.monitored else charts.NOT_COUNTED,
+                                             f"Week of {day_text(w.start)}: {fmt(w.recorded)} chests, {counted_text(w.days)}") for w in weeks])
+
+    @staticmethod
+    def _day_tip(day):
+        if day.status == charts.NOT_COUNTED:
+            return f"{day_text(day.day)}: not counted"
+        return f"{day_text(day.day)}: {fmt(day.totals.recorded)} chests, counted {match_analytics.duration_text(day.counted_seconds)}"
+
+    def _fill_sessions(self, snap):
+        duration = match_analytics.duration_text
+        rows = snap.session_rows()
+        self.sessions_table.setRowCount(len(rows))
+        for row, item in enumerate(rows):
+            s, t = item.session, item.totals
+            cells = (when_text(s.start), ("at least " if s.cut_short else "") + duration(s.span_seconds) + (" (now)" if s.in_progress else ""),
+                     duration(s.counted_seconds), fmt(t.recorded), UNKNOWN_VALUE if item.per_hour is None else f"{item.per_hour:.1f}",
+                     manual_text(t.manual_added, t.manual_removed) or UNKNOWN_VALUE)
+            for column, text in enumerate(cells):
+                self.sessions_table.setItem(row, column, QTableWidgetItem(text))
+
+    def _fill_table(self, matches):
+        newest = (matches[0].run_id, matches[0].match_number) if matches else None
+        bar = self.table.verticalScrollBar()
+        position = bar.value()
         for row in range(self.table.rowCount()):                # replaced buttons wait to be deleted: they must not stay on screen until then
             old = self.table.cellWidget(row, len(self.COLUMNS) - 1)
             if old is not None:
                 old.hide()
-        self.table.setRowCount(len(s.recent))
-        for row, match in enumerate(s.recent):
-            seen = duration(match.duration_seconds)
+        self.table.setRowCount(len(matches))
+        for row, match in enumerate(matches):
+            seen = minutes_text(match.duration_seconds)
             more = "+" if match.chests_may_be_missing else ""
+            net = match.manual_added - match.manual_removed
+            mine = f" ({'+' if net > 0 else '−' if net < 0 else '±'}{abs(net)})" if match.manual_added or match.manual_removed else ""
             quality, color = ("Not a match", theme.DIM) if match.excluded else QUALITY_LOOK[match.quality]
             cells = (match.started_at.strftime("%b %d, %H:%M") if match.started_at else UNKNOWN_VALUE,
                      UNKNOWN_VALUE if seen is None else seen if match.duration_is_full else f"{seen} seen",
-                     f"{fmt(match.certain)}{more}", f"{fmt(match.approx)}{more}" + manual_part(match.manual_added, match.manual_removed, match.broken_chests), rate_cell(match), quality + (" (interrupted)" if match.interrupted else ""), match.ending)
+                     f"{fmt(match.certain)}{more}", f"{fmt(match.approx)}{more}{mine}", rate_cell(match), quality, match.ending)
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)
+                if column == 3 and mine:
+                    item.setToolTip(f"Includes your corrections:{manual_part(match.manual_added, match.manual_removed, match.broken_chests)}")
                 if column == 5:
                     item.setForeground(QColor(color))
+                    if match.interrupted:
+                        item.setToolTip("The app closed unexpectedly during this match: only what was saved is shown")
                 self.table.setItem(row, column, item)
             action = button("Restore" if match.excluded else "Not a match", "link",
                             tip="Put this match back in your statistics" if match.excluded else "Leave this out of your statistics. Nothing is deleted, and you can restore it.",
                             on_click=lambda _checked=False, m=match: self.set_not_a_match(m, not m.excluded))
             self.table.setCellWidget(row, len(self.COLUMNS) - 1, action)
         self._fit_columns()
+        if self._newest is not None and newest != self._newest:
+            self.table.scrollToTop()                            # a new match: show it (UX-06)
+        else:
+            bar.setValue(position)                              # a refresh, a correction or a setting: stay where the reader was
+        self._newest = newest
 
     def _fit_columns(self):
         """Every column as wide as its widest text and the buttons fully visible, with spare room shared out. Qt's Stretch mode squeezes columns
@@ -2408,6 +2884,7 @@ class MainWindow(QMainWindow):
         self.recording = None                   # the worker's current capture ("capture" message), None = not recording
         self.stream_state = None                # Livestream URL connection state ("stream" messages), None = not a stream
         self.match_seen_at = None               # when the last match status arrived, while one is being reported
+        self.last_closed_match = None           # the number of the match that closed last in this session, so Analytics hears of a new one
         self.session_match_mode = "off"         # [match] mode when counting started: a change only applies to the next session
         self.last_correction = None             # the newest correction still standing, which Undo and "Why?" act on
         self.correction_memory = {1: "manual", -1: "manual"}      # the reason last chosen for each direction
@@ -2797,6 +3274,7 @@ class MainWindow(QMainWindow):
         self.connected = None
         self.last_status = None
         self.session_match_mode = cfg["match"]["mode"]
+        self.last_closed_match = None           # match numbers start again in every session
         try:
             self.worker.start(argv)
         except OSError as error:
@@ -3131,6 +3609,10 @@ class MainWindow(QMainWindow):
         d.match.setStyleSheet(f"color: {color};")
         d.match_row.show()
         d.show_game(message, text, color)
+        closed = (message.get("last_match") or {}).get("match_number")
+        if closed is not None and closed != self.last_closed_match:     # a match just ended: Analytics shows it without a Refresh (UX-07)
+            self.last_closed_match = closed
+            self.analytics.match_ended()
         self.match_seen_at = None if message.get("failed") or message.get("unavailable") else time.monotonic()
 
     def _check_match_video(self):
