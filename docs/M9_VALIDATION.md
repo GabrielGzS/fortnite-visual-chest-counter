@@ -484,6 +484,66 @@ footage, so its real accuracy could not be measured on held-out footage; left fo
 | Cue evaluation | unchanged (the bar search was reverted) |
 | English and PS5 full videos | not rerun: covered by the measurement above |
 
+## M9I: after the rc6 test on Replays' stream
+
+**rc7:** `build_out\v0.3.0-rc7\Fortnite-Visual-Chest-Counter-v0.3.0.zip`, 155.9 MB, unsigned, SHA-256
+`03d375f99f434c48276349180ed7f6fab5193063f8d90b652749542080f465b6`, built from `b7a931d` (commits `5982c83`, `b7a931d`). Package checks
+only: Defender found nothing; from a clean folder the packaged program counted the retained 720p clip (2 chests, as rc6), and its own
+window rendered the new Game view and Analytics page at 920 x 640 with nothing cut off. The chest detector is unchanged since rc6.
+
+Chest counting and match tracking held up on a second streamer at normal HUD, 1080p. Two things remained, both about what the history
+claims rather than what the detector sees.
+
+### A 38 s "match" between two real ones
+
+**Cause (confirmed from the session log):** WAITING FOR PLAYERS was read once (565.9 s), then the island's text went unread for 36 s
+(the known weakness of white text over bright sky). After 15 s with no countdown the bus was *guessed* to have left, and a match was
+opened. At 602.4 s LAUNCHING IN proved the bus had not left; the record was closed as Partial and the real match began after it.
+**Fix:** a match whose start was only guessed by the 15 s fallback (the bus never seen leaving), that a countdown then closes with no
+chest and no ending, was the waiting island: the rule M9G already had for a late join after a loading screen. Such a record stays in
+history, but Analytics leaves it out of the match count, the list and every statistic, and its time is no one's play time. No minimum
+duration and no chest count decide it: a match with a chest, or whose bus was seen leaving, is never second-guessed.
+
+### Manual chests in the Game view
+
+The Game view has −1, +1 and Undo for the match on screen (or, between matches, the one that just ended). They are Overview's own
+correction: the running session applies it, APPROX changes, CERTAIN never does, Undo and reasons work the same, and the history row
+now also names the match. In that match a manual chest is shown as manual ("incl. +2 manual"), never as a detected type.
+
+| | Count shown (Game, Recent matches) | Statistics (chests per minute, per match) |
+|---|---|---|
+| Detected chest | yes | yes |
+| Your −1 for a match | yes | yes: it takes off a chest that should not have counted |
+| Your +1 for a match | yes | only with "Count my +1s" ticked on Analytics (off by default) |
+| A correction on Overview | your total only | no |
+| A correction for what turned out to be the island | your total only | no |
+
+### Why a chest was added: broken chests
+
+Every +1 keeps its reason as a fixed id, so later wording never changes history: `manual` (not sure / balance fix, the default),
+`broken_chest`, `missed` (a visible chest the counter missed) and `not_visible` (Fortnite counted it, nothing else to see). The Game
+view chooses it next to +1; the default claims nothing, because these records will feed later statistics, and a chosen reason stays
+chosen for the next chest. Only `missed` and `false_positive` are claims about the detector. Analytics shows **Broken chests (yours)**:
+the broken-chest +1s made for complete and partial matches, and their average per complete match, labelled as reported by you. No
+estimate or correction factor is derived from them yet (v0.4.0 material).
+
+Rendered at 920 x 640 and 1120 x 800: the first version of the Game row and a fourth tile on the Analytics row pushed both pages wider
+than the window; the row was shortened and the tile given its own row, and nothing is cut off now. At the maintainer's request the
+Game view was also rearranged to make room: the match status (on its title's line; its fixed explanation is the card's tooltip, idle
+messages still show) and the five details in a 3 + 2 grid now sit beside the live preview, which no longer takes a row of its own;
+the counts, the correction row and the last match follow. With the preview off its column shrinks to the toggle. Cards and tiles there
+have less padding. Other pages are unchanged, and every view still fits 920 x 640 without sideways scrolling (the existing check).
+
+### Tests run (development only)
+
+| Check | Result |
+|---|---:|
+| Match state (incl. the rc6 sequence and its two counter-cases) | 119/119 |
+| Analytics (island, counts, rates with and without +1s, island correction, broken chests) | 61/61 |
+| Corrections, counter and window (match kept and undone, bad match refused, Game view, targeting between matches and after a restart, rate, checkbox, reasons) | 82/82 |
+| App, Dashboard views (incl. fit at 920 x 640), match UI, live match, release, update window, history, tracker | 30, 27, 50, 88, 78, 70, 98, 68: all pass |
+| Mutations: corrections, Analytics, match UI, live match, Dashboard, match state | 58/58, 51/51, 41/41, 59/59, 25/25, 36/36 |
+
 ## Known issues
 
 | Severity | Issue |
