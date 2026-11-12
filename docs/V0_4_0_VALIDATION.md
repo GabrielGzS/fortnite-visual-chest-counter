@@ -204,3 +204,31 @@ screen. Performance > Today shows the same figures. Deferred, as the decision al
 
 Six mutation anchors moved to the new page code with the same intent. The analytics and corrections runners now also swap the module the
 page reads through (`records`, `progression`); without that, one mutation could not reach the page.
+
+## M8 — Update notice, Updates card and release notes (UX-01 to UX-03)
+
+Presentation only. `git diff v0.3.0 -- src/fortnite_chest_counter/update/` is empty: download, signature checks, staging, installation and
+rollback are byte for byte what v0.3.0 shipped, and a test keeps it that way while v0.4.0 is developed.
+
+**Why no notice appeared on PC B (UX-01).** By design in v0.2.3 and v0.3.0, an automatic check never opens anything: a found update shows
+only the small sidebar link, and a check that fails says nothing and logs nothing. Whether PC B's check ran and failed, or succeeded and
+showed only the link, cannot be told afterwards. v0.3.0 behaves the same, so the v0.3.0 to v0.4.0 update will again be found through the
+sidebar link or Settings; these changes help from v0.4.0's own next update.
+
+| ID | Change |
+|---|---|
+| UX-01 | Every automatic check writes one quiet Console line (up to date, available, did not finish, or did not verify). A verified update shows a one-line notice on the Dashboard with **What's new** and **Later** (put away for that version, never a pop-up). Help & diagnostics has an **Updates** card: your version, the last check and its result, Check for updates, Open the update, Update settings |
+| UX-02 | Release notes are Markdown (headings, lists, bold, tables) with raw HTML switched off, nothing fetched (an image in the notes stays empty), and a link followed only if it is one of this project's GitHub pages (`gui/release_notes.link_allowed`) |
+| UX-03 | The window opens on the highlights: the notes up to `<!-- highlights end -->` (invisible on GitHub), else up to the second section heading, at most 40 lines. **Show all the notes** shows the rest |
+
+For the v0.4.0 release body: put a short, plain-text-friendly summary first and `<!-- highlights end -->` after it, because v0.3.0's window
+will show the body as plain text, and v0.4.0's will show what comes before the marker.
+
+| Check | Result |
+|---|---:|
+| `test_release_notes` (new) | 6/6 |
+| `test_update_notice` (new: logging, notice, Later, Updates card, highlights, raw HTML as text, nothing fetched, links, update path unchanged) | 8/8 |
+| `test_update_gui` (the notes check now expects safe Markdown) | 70/70 |
+| `test_app`, `test_dashboard_views` | 30/30, 27/27 |
+
+The notice, the Updates card and the update window with v0.3.0's real notes were rendered with real fonts at 920 × 640 and reviewed.

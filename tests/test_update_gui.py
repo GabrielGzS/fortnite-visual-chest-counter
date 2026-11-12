@@ -574,14 +574,16 @@ def test_gui_manual_check_gives_feedback():
                 assert w.win.settings_page.update_status.text() == expected and w.win.update_link.isHidden()
 
 
-def test_gui_manual_check_opens_the_update_window_with_notes_as_plain_text():
+def test_gui_manual_check_opens_the_update_window_with_notes_as_safe_markdown():
     with window(available()) as w:
         if w:
             w.win.check_for_updates()
             poll(w)
             dialog = w.win.update_dialog
             assert dialog.isVisible() and dialog.title.text() == f"Version v{NEW} is available"
-            assert dialog.notes.toPlainText() == "Better things.\n<b>not bold</b>" and dialog.notes.isReadOnly()
+            # v0.4.0 (UX-02): Markdown, so the two lines are one paragraph; raw HTML stays text, never formatting
+            assert dialog.notes.toPlainText() == "Better things. <b>not bold</b>" and dialog.notes.isReadOnly()
+            assert "font-weight:700" not in dialog.notes.document().toHtml()          # nothing bold
             assert dialog.primary.text() == "Download && Install" and not dialog.later.isHidden() and not dialog.page.isHidden()
 
 

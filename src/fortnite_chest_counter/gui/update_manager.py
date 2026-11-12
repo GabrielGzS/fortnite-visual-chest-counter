@@ -7,6 +7,7 @@ work, and the window calls start_preparing() only after the user asks: nothing i
 """
 
 import threading
+from datetime import datetime
 
 from fortnite_chest_counter import paths
 from fortnite_chest_counter.update import check as update_check
@@ -75,6 +76,8 @@ class UpdateManager:
         self.update = None
         self.status = prepare.PreparationStatus()
         self.check_message = ""                # feedback for a manual check; automatic checks never set it
+        self.last_check = None                 # (local time, status, message) of the last check that finished, manual or automatic
+        self._report = None                    # an automatic check's (status, message), until the window takes it
         self.last_problem_kind = None
         self.error = ""
         self.error_detail = ""
@@ -139,8 +142,16 @@ class UpdateManager:
         self.state = CHECKING
         return True
 
+    def take_report(self):
+        """(status, message) once after an automatic check finished, else None: the window logs it, so a check is never silent."""
+        report, self._report = self._report, None
+        return report
+
     def _finish_check(self, result):
         self._job = None
+        self.last_check = (datetime.now(), result.status, result.message)
+        if not self._manual:
+            self._report = (result.status, result.message)
         self.last_problem_kind = result.kind
         if result.status == "available":
             self.update, self.state, self.error, self.notice = result.update, AVAILABLE, "", ""

@@ -24,17 +24,17 @@ from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap, QTextDocument
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
+                               QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QTextBrowser,
                                QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
 from fortnite_chest_counter.console import CHEST_LABELS
 from fortnite_chest_counter import match_analytics, match_history, paths, profiles, progression, records, settings, timeline
 from fortnite_chest_counter.detection import chest_types
-from fortnite_chest_counter.gui import charts, theme
+from fortnite_chest_counter.gui import charts, release_notes, theme
 from fortnite_chest_counter.gui import update_manager as UM
 from fortnite_chest_counter.gui.worker import Worker, run_command
 from fortnite_chest_counter.obs import credentials as obs_credentials
@@ -949,6 +949,19 @@ class Dashboard(QWidget):
         notice_layout.addWidget(button("Dismiss", on_click=self.notice.hide), 0, Qt.AlignTop)
         self.notice.hide()
         layout.addWidget(self.notice)
+
+        # a verified update is available (v0.4.0, UX-01): one quiet line, never a dialog, gone for this version with Later
+        self.update_notice = QFrame()
+        self.update_notice.setObjectName("notice")
+        update_row = QHBoxLayout(self.update_notice)
+        update_row.setContentsMargins(14, 8, 10, 8)
+        self.update_notice_text = label("", wrap=True)
+        update_row.addWidget(self.update_notice_text, 1)
+        update_row.addWidget(button("What's new", on_click=lambda: win.open_update_dialog()), 0, Qt.AlignVCenter)
+        self.update_later = button("Later", on_click=lambda: win.dismiss_update_notice())
+        update_row.addWidget(self.update_later, 0, Qt.AlignVCenter)
+        self.update_notice.hide()
+        layout.addWidget(self.update_notice)
 
         # three views of one session (v0.3.0). The status pill, banner and notice above stay visible in all of them.
         segments = QHBoxLayout()
@@ -2707,6 +2720,20 @@ class HelpPage(QWidget):
         box_layout.addWidget(self.report)
         layout.addWidget(box)
 
+        box, box_layout = card("Updates", "Nothing is downloaded or installed unless you choose to. Your counts, profiles and settings are kept.")
+        self.update_line = label("", "hint", wrap=True)
+        box_layout.addWidget(self.update_line)
+        row = QHBoxLayout()
+        self.update_check = button("Check for updates", on_click=lambda: win.check_for_updates())
+        row.addWidget(self.update_check)
+        self.update_open = button("Open the update", "primary", on_click=lambda: win.open_update_dialog())
+        self.update_open.hide()
+        row.addWidget(self.update_open)
+        row.addWidget(button("Update settings", "link", on_click=lambda: win.show_page(win.settings_page)))
+        row.addStretch(1)
+        box_layout.addLayout(row)
+        layout.addWidget(box)
+
         box, box_layout = card("About")
         box_layout.addWidget(label(f"{APP_NAME} v{__version__} ({RELEASE_CHANNEL}). {TAGLINE}.", wrap=True))
         box_layout.addWidget(label("Free and open source (MIT licence). Independent and unofficial: not affiliated with, "
@@ -2723,6 +2750,24 @@ class HelpPage(QWidget):
         self._result = None
         self._poll = QTimer(self)
         self._poll.timeout.connect(self._check)
+
+    def show_updates(self, m):
+        """The Updates card (v0.4.0, UX-01): this version, the last check, and the update when there is one."""
+        lines = [f"You have v{__version__}."]
+        if not m.packaged:
+            lines.append(UM.NOT_PACKAGED)
+        elif m.state == UM.CHECKING:
+            lines.append("Checking for updates...")
+        elif m.state in (UM.AVAILABLE, UM.PREPARING, UM.READY, UM.INSTALLING):
+            lines.append(m.indicator_text() + ".")
+        elif m.last_check is not None:
+            when, _, message = m.last_check
+            lines.append(f"Last checked at {when:%H:%M}: {message}")
+        else:
+            lines.append("Not checked since the app opened.")
+        self.update_line.setText(" ".join(lines))
+        self.update_check.setEnabled(not m.busy())
+        self.update_open.setVisible(m.state in (UM.AVAILABLE, UM.PREPARING, UM.READY))
 
     def _guide(self):
         guide = paths.APP_DIR / "README.html"
@@ -2764,6 +2809,32 @@ class HelpPage(QWidget):
 # main window
 # ==================================================================
 
+class NotesView(QTextBrowser):
+    """Release notes as Markdown (v0.4.0, UX-02). They come from outside the app, so raw HTML is switched off, nothing is ever fetched (an
+    image named in the notes stays empty), and a link opens only if it is one of this project's own GitHub pages."""
+
+    FEATURES = QTextDocument.MarkdownFeature.MarkdownDialectGitHub | QTextDocument.MarkdownFeature.MarkdownNoHTML
+
+    def __init__(self):
+        super().__init__()
+        self.setOpenLinks(False)
+        self.setOpenExternalLinks(False)
+        self.anchorClicked.connect(self._follow)
+        self.source_text = None
+
+    def show_markdown(self, text):
+        if text != self.source_text:
+            self.source_text = text
+            self.document().setMarkdown(text, self.FEATURES)
+
+    def loadResource(self, kind, url):
+        return None
+
+    def _follow(self, url):
+        if release_notes.link_allowed(url.toString()):
+            QDesktopServices.openUrl(url)
+
+
 class UpdateDialog(QDialog):
     """Not modal: counting and the rest of the app stay usable while an update is prepared, and closing this only hides it."""
 
@@ -2779,10 +2850,12 @@ class UpdateDialog(QDialog):
         layout.addWidget(self.title)
         self.body = label("", "hint", wrap=True)
         layout.addWidget(self.body)
-        self.notes = QPlainTextEdit()                    # plain text on purpose: release notes come from outside the app
-        self.notes.setReadOnly(True)
-        self.notes.setMinimumHeight(170)
+        self.notes = NotesView()                         # Markdown with raw HTML off: release notes come from outside the app
+        self.notes.setMinimumHeight(190)
         layout.addWidget(self.notes)
+        self.more = button("", "link", on_click=self._toggle_notes)  # highlights first, the whole text one click away (UX-03)
+        layout.addWidget(self.more, 0, Qt.AlignLeft)
+        self._full_notes = False
         self.stage = label("", wrap=True)
         layout.addWidget(self.stage)
         self.progress = QProgressBar()
@@ -2815,6 +2888,10 @@ class UpdateDialog(QDialog):
         self.win.updates.cancel()
         self.refresh()
 
+    def _toggle_notes(self):
+        self._full_notes = not self._full_notes
+        self.refresh()
+
     def _primary(self):
         if self.win.updates.state == UM.AVAILABLE:
             self.win.download_update()
@@ -2835,8 +2912,11 @@ class UpdateDialog(QDialog):
         release = m.update.release if m.update is not None else None
         show_notes = state in (UM.AVAILABLE, UM.READY) and release is not None
         self.notes.setVisible(show_notes)
-        if show_notes and self.notes.toPlainText() != release.notes:
-            self.notes.setPlainText(release.notes)
+        short, more = release_notes.highlights(release.notes if release is not None else "")
+        if show_notes:
+            self.notes.show_markdown(release.notes if self._full_notes and more else short)
+        self.more.setVisible(show_notes and more)
+        self.more.setText("Show only the highlights" if self._full_notes else "Show all the notes")
         preparing = state == UM.PREPARING
         downloading = preparing and m.status.stage == "downloading" and m.status.total > 0
         self.stage.setVisible(preparing)
@@ -2870,6 +2950,7 @@ class MainWindow(QMainWindow):
         self.worker = Worker()
         self.updates = UM.UpdateManager(is_counting=lambda: self.worker.running())
         self.update_dialog = None
+        self._update_notice_dismissed = None     # the version whose Dashboard notice was put away with Later
         self._update_ticks = 0
         self._install_pending = False           # counting is being stopped so that an update can be installed
         self._result_watch_until = None         # started by the updater: wait for its verdict before saying anything
@@ -3404,6 +3485,12 @@ class MainWindow(QMainWindow):
         self.update_link.setText(text)
         self.update_link.setVisible(bool(text))
         self.settings_page.update_status.setText(m.check_message)
+        report = m.take_report()                     # an automatic check: one quiet line, so it is never silent (UX-01)
+        if report is not None:
+            level, line = release_notes.check_report(*report, __version__)
+            self.add_log({"type": level, "text": line})
+        self.help.show_updates(m)
+        self.show_update_notice()
         self.settings_page.check_button.setEnabled(not m.busy())
         self.dashboard.start.setEnabled(m.state != UM.INSTALLING and self.mode != "stopping")
         if self.update_dialog is not None:
@@ -3412,6 +3499,19 @@ class MainWindow(QMainWindow):
             self.open_update_dialog()
         if m.take_install_started():
             self.close()                               # the installer is waiting for this window to go
+
+    def show_update_notice(self):
+        m, d = self.updates, self.dashboard
+        version = m.version_text()
+        visible = m.state in (UM.AVAILABLE, UM.READY) and bool(version) and version != self._update_notice_dismissed
+        if visible:
+            d.update_notice_text.setText(f"Version v{version} is available. Your counts, profiles and settings are kept." if m.state == UM.AVAILABLE
+                                         else f"Version v{version} is ready to install.")
+        d.update_notice.setVisible(visible)
+
+    def dismiss_update_notice(self):
+        self._update_notice_dismissed = self.updates.version_text()
+        self.dashboard.update_notice.hide()
 
     def open_update_dialog(self):
         if self.update_dialog is None:
