@@ -396,11 +396,101 @@ bar, chest or text shows the game, and a box with too few edges is not compared.
   completes a match either way.
 - Short Complete matches now exist, so the per-match minimum for a rate in Recent matches (1 minute) matters more.
 
+## M9H: rc5 acceptance failures
+
+**rc6:** `build_out\v0.3.0-rc6\Fortnite-Visual-Chest-Counter-v0.3.0.zip`, 155.8 MB, unsigned, SHA-256
+`99e5ca5031e209165ea666a240a4ead19971916907777956451f65222905cb4e`, built from `f8e3251` (commits `e82453e`, `8d30c78`, `f8e3251`).
+Package checks only: Defender found nothing; extracted to a clean folder, the packaged program counted the retained 720p clip's two
+chests (rc5: none) and the 1080p clip's seven, two of them CERTAIN, with the corrected console wording. For hands-on acceptance.
+
+From the maintainer's rc5 test (`captures\20261111_231622`, desktop capture of a 1080p browser showing Thiefs' stream, read only) and
+two short captures of the same live stream through the URL input at 720p (15 min in all; only the verified windows were kept, in
+`samples\cases\`). Every chest below was checked frame by frame. Development tests only; no release validation was run.
+
+### A chest counted in the total but not in the match
+
+**Cause (confirmed):** the detector finishes a chest about 2 s after it appears. A chest that showed a match was being played opened
+it at the next sample, 2.3 s later, and both the Game view and Analytics credit a chest only from the match's opening time. So the
+very chest that opened the match was left out (E0001 at 0.48 s, match from 3.27 s; E0002 at 1.00 s, match from 3.33 s), while the
+match record itself counted it. **Fix:** a match opened by a chest is dated from that chest's own time, never back into a menu or
+loading screen or the previous match. Checked end to end through the live loop, history and attribution: chest at 1.08 s, match
+from 1.08 s, credited.
+
+### Lobby read as a short match
+
+**Cause (confirmed):** in a party, the lobby shows blue PARTY CHANNEL tiles exactly where a 0.78x HUD draws the health bar, and they
+pass the shield-colour test. After CONNECTING they gave 130-285 "bar" pixels for 26 s and 38 s (rc5) and opened a match. A third case
+came from the lobby itself in the stream capture. Over the M9H footage all 67 menu samples with a bar were blue only, while 123 of 126
+in play had the green health bar (the other 3: a thin shield bar at low health). **Fix:** only the green health bar may open a match;
+the shield bar alone still keeps an open match going. No minimum duration. Replayed on all three phantoms: none opens; real late
+joins, the waiting-island rule and the countdown start are unchanged.
+
+**Also found, not fixed:** the lobby menu is not recognised on the current lobby. A TREASURE tab (and PASSES while it loads) moves
+LOCKER, QUESTS and CAREER 100 px or more from where the words are looked for. Searching the whole bar finds them (0.81-0.93, other
+screens at most 0.34; 15 matchmaking frames of the M9G footage turned out to be unlabelled lobby frames), but costs 2.9 ms more per
+sample and broke the 10 ms budget, so it was reverted. Leaving still shows CONNECTING, which closes the match, so nothing depends on it now.
+
+### Small-HUD chests: CERTAIN never, and many missed at 720p
+
+| Verified chests (new pop-ups) | rc5 | Now |
+|---|---:|---:|
+| 1080p desktop capture, rc5 footage | 3/3, 0 CERTAIN | 3/3, 2 CERTAIN |
+| 720p stream, lossless recording | 1/7 | 6/7 |
+| 720p stream, standard-quality recording (replayed) | 4/27 | 25/29 |
+| Duplicates / counts on anything not a chest | 0 / 0 | 0 / 0 |
+| Existing cases (11, four streamers and HUD sizes) | 28/28, 0 duplicates, 0 false | the same |
+
+**Causes (confirmed):** CERTAIN was impossible by rule: every small-HUD pop-up was forced to MEDIUM. At 720p the 22 x 7 px word
+loses its exact shape (the stream's colour is stored at 640 x 360), so the exact match of real chests fell to 0.59-0.78, under the
+0.75 trigger, while the blurred match stayed 0.86-0.94.
+
+| Score of the small word | Real chests, 1080p | Real chests, 720p | Anything else, highest |
+|---|---:|---:|---:|
+| Exact | 0.81-0.92 | 0.59-0.78 | 0.62 (PS5), 0.61 (Thiefs) |
+| Blurred, at that place | 0.95-0.98 | 0.86-0.94 | 0.865 (PS5), 0.86 (Thiefs) |
+
+Anything else = every frame of the English and PS5 reference videos (25 min, normal HUD) and every frame of Thiefs' footage outside a
+verified chest. **Fixes:** the exact trigger is 0.60 and the blurred confirmation stays 0.90, so the blurred match now decides. A new
+small-HUD pop-up is HIGH (CERTAIN by default) when the exact match is at least 0.85 and the blurred at least 0.95, the normal word's
+own HIGH line with a second condition (non-chests: 0.62 / 0.865). Stacked steps stay APPROX only, as before. A lower trigger made one
+duplicate possible: a 0.6 s full-screen map hid a pop-up and it was counted again when it came back. A pop-up lasts about 2 s, and
+separate ones began 2.33 s or more apart, so the same word at the same place within 2 s of an onset is the same pop-up.
+
+New cases: `thiefs_720p_stream_chests` (0/3 before, 3/3), `thiefs_720p_map_flash` (counted twice without the 2 s rule, once with
+it) and `thiefs_1080p_small_hud` (7/7, CERTAIN 0 before, 2 now). Normal-HUD videos are unchanged by construction: no frame of them
+reaches 0.90 blurred, so the small channel can never fire there.
+
+The console described every scaled pop-up as "large-HUD ... drawn larger than usual (approx only)", small-HUD ones included; it now
+names the HUD size and says "approx only" only when it is true.
+
+**Limits:** one streamer and one HUD size. At 720p nothing reaches CERTAIN, so it stays APPROX. On the standard-quality recording,
+stacked steps were found 4 of 8 times (live, on the stream itself, 3 of 4). The capture tool's "standard" quality changes small-HUD
+scores enough to change decisions (11 counted live, 7 on replay with rc5's rules), so small-HUD evidence should be recorded lossless.
+
+### Not fixed: 720p match start
+
+On the 720p stream, WAITING FOR PLAYERS scored 0.61-0.64 and the bus countdown 0.55-0.60 (1080p: 0.92-0.98), so the start was read
+as joined late and that match can only be Partial. Counting is unaffected. A 720p template would come from the single island in this
+footage, so its real accuracy could not be measured on held-out footage; left for review.
+
+### Tests run (development only)
+
+| Check | Result |
+|---|---:|
+| Match state, tracker, defects, cues, live match, recording, replay (incl. new tests and a real-footage party-lobby fixture) | all pass |
+| Cases, unit (fixtures) | 16/16 |
+| Cases, full frames (14) | 39/39 found, 0 missed, 0 duplicates, 0 false |
+| Release, input stall, match history, Analytics | all pass |
+| Cue evaluation | unchanged (the bar search was reverted) |
+| English and PS5 full videos | not rerun: covered by the measurement above |
+
 ## Known issues
 
 | Severity | Issue |
 |---|---|
 | Medium | A switch away from the game is left out of play time but does not make the match Partial, until footage of the full-screen map and inventory exists |
+| Medium | At 720p the small-HUD start text is not read, so those matches are Partial (M9H) |
+| Low | The lobby menu is not recognised while the TREASURE tab is shown; leaving still ends the match through CONNECTING (M9H) |
 | Low | Small-HUD start text has been checked on one streamer only |
 | Medium | Real in-app update, rollback and retry never run; a defect in v0.2.3's installer may force a manual install |
 | Low | At the minimum window size, the Analytics table scrolls sideways when labels are long |
