@@ -32,6 +32,8 @@ What it will not claim:
     ending hides nothing about the match, so it does not count.
   * WAITING FOR PLAYERS and LAUNCHING IN only appear before a game. A match opened on a health bar straight after a loading screen, with no
     chest in it, that such text then closes was the waiting island, whose HUD can appear before its text can be read. It stays unconfirmed.
+    The same holds for a match whose start was only guessed because the countdown text stayed unread for 15 s while the health bar stayed:
+    the bus was never seen leaving, and a countdown coming back proves it had not (rc6: 36 s of island over bright sky read as a match).
   * A match is "unconfirmed" until English text or an English chest belongs to it. A health bar, a Portuguese chest and Victory Royale can
     never confirm one: the health bar and the word ROYALE look the same in other languages. Unconfirmed matches must stay out of statistics.
   * An elimination does not finish a match on its own. The record stays open through spectating. M1 cannot identify the original player's
@@ -164,6 +166,7 @@ class _Match:
     evidence: list = field(default_factory=list)
     seen: set = field(default_factory=set)
     after_loading: bool = False            # joined on a health bar straight after a loading screen
+    start_guessed: bool = False            # opened because the countdown text was gone 15 s, with no sign of the bus
     chest_counted: bool = False
 
 
@@ -446,7 +449,7 @@ class MatchStateMachine:
         if self.state != PRE_GAME:
             if self._match is not None:
                 match = self._match
-                if match.after_loading and not match.chest_counted and match.ended_by is None:
+                if (match.after_loading or match.start_guessed) and not match.chest_counted and match.ended_by is None:
                     match.english.clear()              # the countdown proves play had not begun, so what confirmed it proves nothing
                     match.reasons.append(WAITING_ISLAND)
                 self._close(t, match.ended_by or LEFT_OR_UNKNOWN, ["next match countdown seen"], events)
@@ -472,6 +475,7 @@ class MatchStateMachine:
         match.uncertain = countdown.uncertain
         match.active = max(t - match.played_from_t - (unseen_after_countdown if played_from == countdown.last_t else 0.0), 0.0)
         match.discontinuity = countdown.broken
+        match.start_guessed = not (gone >= COUNTDOWN_GONE_ON_BUS and no_hud_lately)      # only the 15 s fallback: nothing showed the bus
         match.reasons.append("started: countdown ended")
         self._countdown = None
         self._go(t, IN_MATCH, "bus_departed" if gone < COUNTDOWN_GONE_ANYWAY else "countdown_timed_out", events)

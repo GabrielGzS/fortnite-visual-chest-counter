@@ -14,7 +14,7 @@ import test_match_state as T
 
 SOURCE = (ROOT / "src/fortnite_chest_counter/match_state.py").read_text(encoding="utf-8")
 COMPLETE_RULE = "elif match.observed_from_start and (finished or play_ended) and not match.discontinuity and not match.ambiguous_recovery:"
-ISLAND_RULE = "if match.after_loading and not match.chest_counted and match.ended_by is None:"
+ISLAND_RULE = "if (match.after_loading or match.start_guessed) and not match.chest_counted and match.ended_by is None:"
 
 MUTATIONS = [
     (COMPLETE_RULE, COMPLETE_RULE.replace("(finished or play_ended)", "finished"), "test_leaving_after_a_seen_start_is_complete_and_the_outcome_stays_unknown"),
@@ -25,7 +25,7 @@ MUTATIONS = [
     ('self._close(t, match.ended_by or LEFT_OR_UNKNOWN, ["next match countdown seen"], events)', 'self._close(t, match.ended_by or LEFT_OR_UNKNOWN, ["next match countdown seen"], events, play_ended=True)', "test_a_countdown_without_leaving_does_not_complete_a_match"),
     ("duration = round((match.ended_t if finished else t) - match.played_from_t, 3) if completion == COMPLETE else None", "duration = round((match.ended_t if finished else match.opened_t) - match.played_from_t, 3) if completion == COMPLETE else None", "test_leaving_after_a_seen_start_is_complete_and_the_outcome_stays_unknown"),
     ("match.ended_t if finished else None, t, round(match.observed, 3)", "match.ended_t if finished else t, t, round(match.observed, 3)", "test_leaving_after_a_seen_start_is_complete_and_the_outcome_stays_unknown"),
-    (ISLAND_RULE, ISLAND_RULE.replace("match.after_loading and ", ""), "test_a_late_join_without_a_loading_screen_is_not_called_the_island"),
+    (ISLAND_RULE, ISLAND_RULE.replace("(match.after_loading or match.start_guessed) and ", ""), "test_a_late_join_without_a_loading_screen_is_not_called_the_island"),
     (ISLAND_RULE, ISLAND_RULE.replace(" and not match.chest_counted", ""), "test_a_counted_chest_means_it_was_not_the_island"),
     ("                    match.english.clear()              # the countdown proves play had not begun, so what confirmed it proves nothing\n", "", "test_the_countdown_retroactively_marks_the_waiting_island"),
     ("                    match.reasons.append(WAITING_ISLAND)\n", "", "test_the_countdown_retroactively_marks_the_waiting_island"),
@@ -52,6 +52,9 @@ MUTATIONS = [
     ("        if chest and observation.first_chest_t is not None:", "        if False:", "test_the_chest_that_shows_a_match_is_being_played_belongs_to_it"),
     ("first = max(min(first, observation.first_chest_t), self._last_screen_text_t)", "first = min(first, observation.first_chest_t)", "test_a_chest_never_dates_a_match_back_into_a_menu"),
     ("        if screen_text:\n            self._last_screen_text_t = t\n", "", "test_a_chest_never_dates_a_match_back_into_a_menu"),
+    (ISLAND_RULE, ISLAND_RULE.replace(" or match.start_guessed", ""), "test_an_island_guessed_to_be_a_match_is_corrected_by_the_next_countdown"),
+    ("        match.start_guessed = not (gone >= COUNTDOWN_GONE_ON_BUS and no_hud_lately)", "        match.start_guessed = True", "test_a_seen_bus_departure_is_not_second_guessed"),
+    ("        match.start_guessed = not (gone >= COUNTDOWN_GONE_ON_BUS and no_hud_lately)", "        match.start_guessed = False", "test_an_island_guessed_to_be_a_match_is_corrected_by_the_next_countdown"),
 ]
 
 

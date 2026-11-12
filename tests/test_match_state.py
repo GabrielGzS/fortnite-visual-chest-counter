@@ -443,6 +443,28 @@ def test_the_countdown_retroactively_marks_the_waiting_island():
     assert match.completion == S.COMPLETE and match.observed_from_start and S.WAITING_ISLAND not in match.reasons
 
 
+def test_an_island_guessed_to_be_a_match_is_corrected_by_the_next_countdown():
+    """rc6 on Replays' stream: WAITING FOR PLAYERS read once, then 36 s of island with the text unread over bright sky; after 15 s the bus was
+    guessed to have left, until LAUNCHING IN proved otherwise. That stretch is the island, not a 38 s match between two real ones."""
+    s = Script().show(5, "connecting").show(2, "waiting_for_players", health=HP).show(36, health=HP).show(10, "bus_launching", health=HP)
+    s.show(6).show(60, health=HP).show(6, "you_placed").show(4, "connecting").finish()
+    island, match = s.records
+    assert island.completion == S.UNCONFIRMED and S.WAITING_ISLAND in island.reasons and not island.english_confirmed
+    assert match.completion == S.COMPLETE and match.observed_from_start and S.WAITING_ISLAND not in match.reasons
+
+
+def test_a_guessed_start_with_a_chest_is_a_real_match():
+    s = Script().show(5, "connecting").show(2, "waiting_for_players", health=HP).show(20, health=HP).show(1, health=HP, chests=("en",))
+    s.show(10, health=HP).show(10, "bus_launching", health=HP).finish()
+    assert S.WAITING_ISLAND not in s.records[0].reasons and s.records[0].english_confirmed
+
+
+def test_a_seen_bus_departure_is_not_second_guessed():
+    """A match whose bus was seen leaving keeps its record when a countdown follows, as before (the next match's island)."""
+    s = played_match().show(10, "waiting_for_players", health=HP).finish()
+    assert S.WAITING_ISLAND not in s.records[0].reasons and s.records[0].completion != S.UNCONFIRMED
+
+
 def test_the_real_small_hud_clip_finds_the_island_and_the_bus():
     """A streamer whose HUD is drawn about 0.78x. Before the small templates this start read as joined late, with 20 s of island counted as play."""
     events = replay("small")
