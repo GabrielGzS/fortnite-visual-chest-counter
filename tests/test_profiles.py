@@ -227,6 +227,55 @@ def _qt():
     return QApplication.instance() or QApplication([])
 
 
+def test_each_profile_keeps_its_own_hud_scale():
+    """v0.4.1: the Fortnite HUD Scale belongs to the person a profile counts (your own games at 75%, a streamer's at Standard)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = _cfg(tmp)
+        profiles.apply(cfg)
+        assert cfg["detector"]["hud"] == "standard"                         # no registry: the config default, as before v0.4.1
+        _quiet(profiles.create, _base(tmp), "Me")
+        me = profiles.find(profiles.load(_base(tmp)), "Me")["id"]
+        profiles.set_hud(_base(tmp), me, "75")
+        cfg = _cfg(tmp)
+        profiles.apply(cfg)
+        assert cfg["detector"]["hud"] == "75"                               # the active profile's own
+        profiles.set_active(_base(tmp), "default")
+        cfg = _cfg(tmp)
+        profiles.apply(cfg)
+        assert cfg["detector"]["hud"] == "standard"                         # the other profile is unaffected
+        try:
+            profiles.set_hud(_base(tmp), me, "80")
+            raise AssertionError("an unknown HUD Scale must be refused")
+        except profiles.ProfileError:
+            pass
+        reg = json.loads(profiles.registry_path(_base(tmp)).read_text(encoding="utf-8"))
+        next(p for p in reg["profiles"] if p["id"] == me)["hud"] = "80"      # a damaged value in the file is dropped, not used
+        profiles.registry_path(_base(tmp)).write_text(json.dumps(reg), encoding="utf-8")
+        cfg = _cfg(tmp)
+        profiles.apply(cfg, me)
+        assert cfg["detector"]["hud"] == "standard" and "hud" not in profiles.get(profiles.load(_base(tmp)), me)
+
+
+def test_the_hud_flag_wins_over_the_profile():
+    """counter.make_config: the active profile's HUD Scale configures the detector (and goes to the match tracker); --hud overrides it."""
+    from fortnite_chest_counter import estimator
+    here = os.getcwd()
+    with tempfile.TemporaryDirectory() as cwd:
+        os.chdir(cwd)                                                        # config.toml / state/ are read from the current folder
+        try:
+            base = Path("state") / "chest_state.json"
+            _quiet(profiles.create, base, "Me")
+            profiles.set_hud(base, profiles.find(profiles.load(base), "Me")["id"], "75")
+            for flag, want in ((None, "75"), ("standard", "standard")):
+                args = SimpleNamespace(config=None, state=None, obs_dir="o", log_dir="l", process_fps=None, source=None, device=None,
+                                       monitor=None, window=None, url=None, match_mode=None, profile=None, hud=flag)
+                cfg, _ = _quiet(C.make_config, args)
+                assert cfg["detector"]["hud"] == want and estimator.HUD == want, (flag, want)
+        finally:
+            os.chdir(here)
+            estimator.configure(settings.DEFAULTS["detector"])
+
+
 def test_app_profile_row_switches_counts_obs_text_and_source():
     qt = _qt()
     if qt is None:

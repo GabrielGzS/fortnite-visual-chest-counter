@@ -18,6 +18,11 @@ languages = ["en", "pt"]
 # 10 found the same chests but added a few extra APPROX counts, and 5 missed some chests.
 process_fps = 15
 
+# The Fortnite HUD Scale the counter's templates are cut for (v0.4.1). "standard" = every HUD supported before v0.4.1.
+# "75" = Fortnite's HUD Scale at 75% (experimental: tested on one player's game). The app keeps this per profile
+# (Settings > Fortnite HUD Scale), so a profile for your own games and one for a streamer can differ; this is the default.
+hud = "standard"
+
 # Which strong detections go into the CERTAIN count:
 #   "HIGH"    = high and very-high confidence (default)
 #   "CERTAIN" = only the very-high ones (stricter; CERTAIN will be lower)

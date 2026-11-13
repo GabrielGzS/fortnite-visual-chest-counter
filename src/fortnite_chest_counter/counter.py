@@ -586,6 +586,8 @@ def make_config(args):
     for w in warnings:
         CONSOLE.warn(w)
     use_profiles(cfg, args)
+    if getattr(args, "hud", None):                     # --hud wins over the profile's own HUD Scale (tests, research)
+        cfg["detector"]["hud"] = args.hud
     from fortnite_chest_counter import estimator
     estimator.configure(cfg["detector"])
     estimator.SAVE_SNAPSHOTS = cfg["logging"]["enabled"] and cfg["logging"]["save_snapshots"]
@@ -1305,7 +1307,8 @@ def _open_tracker(cfg, session, history=None, source=None):
         from fortnite_chest_counter.match_tracker import MatchTracker
         return MatchTracker(lambda record: session.log.write({**record, "logged_at": now_iso()}), CONSOLE.warn, history=history,
                             heartbeat_seconds=cfg["match"].get("heartbeat_seconds"), frames=(lambda: (source.frames_processed, source.frames_dropped)) if source is not None else None,
-                            status=(lambda **fields: CONSOLE.emit("match", **fields)) if history is not None else None)
+                            status=(lambda **fields: CONSOLE.emit("match", **fields)) if history is not None else None,
+                            hud=cfg["detector"]["hud"])
     except Exception as error:
         CONSOLE.warn(f"match tracking could not start ({error}); counting is not affected")
         if history is not None:
@@ -2174,6 +2177,7 @@ def build_parser():
     p.add_argument("--reset", action="store_true")
     p.add_argument("--no-evaluate", dest="evaluate", action="store_false")
     p.add_argument("--match-mode", help="override [match] mode: off, shadow or on")
+    p.add_argument("--hud", choices=settings.HUD_VALUES, help="Fortnite HUD Scale templates for this run (over the profile's own)")
     p.set_defaults(func=cmd_simulate)
 
     p = sub.add_parser("live", parents=[common], help="count chests from a live video source (the default)")
@@ -2188,6 +2192,7 @@ def build_parser():
     p.add_argument("--duration", type=float, help="stop after this many seconds (default: run until Ctrl+C)")
     p.add_argument("--reset", action="store_true", help="zero the counts first (counts are otherwise kept)")
     p.add_argument("--match-mode", help="override [match] mode: off, shadow or on")
+    p.add_argument("--hud", choices=settings.HUD_VALUES, help="Fortnite HUD Scale templates for this run (over the profile's own)")
     p.add_argument("--gui", action="store_true", help=argparse.SUPPRESS)        # desktop-app worker: JSON lines, stdin stop
     p.add_argument("--preview", help=argparse.SUPPRESS)                         # desktop-app preview block name
     p.set_defaults(func=cmd_live)

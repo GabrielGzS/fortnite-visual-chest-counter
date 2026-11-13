@@ -1738,6 +1738,19 @@ class SettingsPage(QWidget):
         box_layout.addWidget(self.language)
         layout.addWidget(box)
 
+        box, box_layout = card("Fortnite HUD Scale (this profile)",
+                               "The HUD Scale set in Fortnite (Settings > Game UI > HUD Scale) changes the size of the chest pop-up and "
+                               "of the match text, and the counter reads them best at the size it was made for. Standard covers every "
+                               "HUD the counter supported before. 75% is tested on one player's game so far (experimental). Each profile "
+                               "keeps its own, for example 75% for your own games and Standard for a streamer.")
+        self.hud = QComboBox()
+        for key, text in settings.HUD_CHOICES:
+            self.hud.addItem(text, key)
+        box_layout.addWidget(self.hud)
+        self.hud_profile = label("", "hint", wrap=True)
+        box_layout.addWidget(self.hud_profile)
+        layout.addWidget(box)
+
         box, box_layout = card("Pictures analysed per second",
                                "How many pictures of your gameplay the counter checks every second. A chest pop-up is "
                                "on screen only briefly, so fewer pictures save work on this PC but can miss chests. "
@@ -1844,6 +1857,8 @@ class SettingsPage(QWidget):
     def load(self):
         cfg, _ = load_cfg()
         self.language.setCurrentIndex(settings.language_choice(cfg["detector"]["languages"]))
+        self.hud.setCurrentIndex(max(self.hud.findData(cfg["detector"]["hud"]), 0))
+        self.hud_profile.setText(f"Saved for the profile \"{cfg['profile']['name']}\" (switch profiles on the Dashboard).")
         fps = cfg["detector"]["process_fps"]
         self.fps.blockSignals(True)
         self.fps.clear()
@@ -1899,6 +1914,8 @@ class SettingsPage(QWidget):
         langs = self.language.currentData()
         try:
             C.update_config_file(config_file(), "detector", {"languages": langs, "process_fps": self.fps.currentData()})
+            cfg, _ = load_cfg()                                    # the HUD Scale belongs to the active profile, not to config.toml
+            profiles.set_hud(cfg["profile"]["state_base"], cfg["profile"]["id"], self.hud.currentData())
             C.update_config_file(config_file(), "logging", {"enabled": self.logging.isChecked(),
                                                             "save_snapshots": self.snapshots.isChecked()})
             C.update_config_file(config_file(), "capture", {"quality": "lossless" if self.lossless.isChecked() else "standard"})
@@ -1912,7 +1929,7 @@ class SettingsPage(QWidget):
                                                            "custom_limit_kb_per_second": self.update_limit.value() * self.update_unit.currentData()})
             if not self.remember_window.isChecked():
                 window_file().unlink(missing_ok=True)   # off = back to the default layout, also if switched on again later
-        except (C.UserError, OSError) as error:
+        except (C.UserError, OSError, profiles.ProfileError) as error:
             show_error(self, str(error))
             return
         self.saved.setText("Saved." + (" Stop and start counting to use the new settings."

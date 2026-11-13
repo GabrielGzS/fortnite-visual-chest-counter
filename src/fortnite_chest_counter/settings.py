@@ -26,6 +26,7 @@ DEFAULTS = {
         "count_supported_medium_as_approx": True,       # MEDIUM popup + prompt + chest-like object
         "count_interaction_object_as_approx": True,     # prompt + chest-like object without a popup
         "medium_counts_alone_languages": ["en"],        # languages whose MEDIUM popups count as approx by themselves
+        "hud": "standard",                      # the Fortnite HUD Scale the templates are cut for (HUD_CHOICES); a profile may set its own
     },
     "display": {
         "show": "both",                         # what obs_output/chest_counter.txt shows: both | certain | approx
@@ -123,6 +124,12 @@ HEARTBEAT_CHOICES = ((30, "30 seconds"), (60, "1 minute   (recommended)"), (300,
 # The app's language choice -> [detector] languages. "Both" is not automatic detection: it checks both words all the time.
 # (Real "Auto" - identify the language per match - needs match recognition first; see docs/ROADMAP.md.)
 LANGUAGE_CHOICES = (("English", ["en"]), ("Portuguese (Brazil)", ["pt"]), ("Both (English + Portuguese (Brazil))", ["en", "pt"]))
+# [detector] hud (v0.4.1): which native templates the detector uses. "standard" is every release before v0.4.1, unchanged. "75" adds the
+# templates of Fortnite HUD Scale 75% (cut from the maintainer's game: 2560x1440, OBS 1280x720), for that profile only. A HUD size is a
+# property of the player, so each count profile keeps its own (profiles.py); this key is the default for runs without one.
+HUD_CHOICES = (("standard", "Standard (every HUD the counter supported before)"),
+               ("75", "Fortnite HUD Scale 75% (experimental)"))
+HUD_VALUES = tuple(key for key, _ in HUD_CHOICES)
 
 
 # The app's "Pictures analysed per second" choice -> [detector] process_fps (config.toml still accepts any 5-30).
@@ -176,6 +183,8 @@ def _check(section, key, value):
         return (isinstance(value, bool), "must be true or false")
     if key == "process_fps":
         return (isinstance(value, int) and not isinstance(value, bool) and 5 <= value <= 30, "must be a whole number from 5 to 30")
+    if section == "detector" and key == "hud":
+        return (value in HUD_VALUES, f"must be one of {list(HUD_VALUES)}")
     if section == "live" and key in ("window", "url"):
         return (isinstance(value, str), "must be text in quotes")
     if section == "live" and key == "stream_quality":

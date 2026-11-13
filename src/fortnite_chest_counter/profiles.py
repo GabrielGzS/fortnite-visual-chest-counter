@@ -1,11 +1,14 @@
 """
 Count profiles (v0.2.2): separate saved counts per person - one profile counts at a time.
 
-A profile is a display name, its own counter file (CERTAIN / APPROX / last chest) and the video source it last counted
-from (for example a streamer's Twitch link). Everything else - detector, overlay wording, diagnostic recording, OBS
-WebSocket - is shared. The OBS text files always show the ACTIVE profile, so OBS needs no change after a switch.
+A profile is a display name, its own counter file (CERTAIN / APPROX / last chest), the video source it last counted
+from (for example a streamer's Twitch link) and, since v0.4.1, optionally the Fortnite HUD Scale of the person it counts ("hud", see
+settings.HUD_CHOICES): your own games and a streamer's can differ. Everything else - the rest of the detector, overlay wording,
+diagnostic recording, OBS WebSocket - is shared. The OBS text files always show the ACTIVE profile, so OBS needs no change after a switch.
 
-    state/profiles.json         {"version": 1, "active": "<id>", "profiles": [{"id", "name", "created_at", "source"}]}
+    state/profiles.json         {"version": 1, "active": "<id>", "profiles": [{"id", "name", "created_at", "source", "hud"?}]}
+
+A profile without "hud" uses [detector] hud of config.toml ("standard" unless changed). Versions before v0.4.1 ignore the field.
     the Default profile         the [state] path of config.toml (state/chest_state.json): an update keeps its counts
     every other profile         state/profiles/<id>.json, next to the Default counter file
 
@@ -20,6 +23,8 @@ import re
 import time
 import unicodedata
 from pathlib import Path
+
+from fortnite_chest_counter.settings import HUD_VALUES
 
 DEFAULT_ID = "default"
 DEFAULT_NAME = "Default"
@@ -123,8 +128,10 @@ def _validate(data):
             raise ValueError(f"duplicate profile {pid!r}")
         seen.add(pid)
         names.add(name.casefold())
-        profiles.append({"id": pid, "name": name, "created_at": p.get("created_at"),
-                         "source": _clean_source(p.get("source"))})
+        entry = {"id": pid, "name": name, "created_at": p.get("created_at"), "source": _clean_source(p.get("source"))}
+        if p.get("hud") in HUD_VALUES:                   # an unknown value is dropped: the profile then uses [detector] hud
+            entry["hud"] = p["hud"]
+        profiles.append(entry)
     if DEFAULT_ID not in seen:
         profiles.insert(0, _default_entry())
     active = data.get("active") if data.get("active") in seen else DEFAULT_ID
@@ -288,6 +295,18 @@ def remember_source(base_state_path, profile_id, source):
     save(base_state_path, reg)
 
 
+def set_hud(base_state_path, profile_id, hud):
+    """The Fortnite HUD Scale of the person this profile counts (settings.HUD_CHOICES). Writes only on a change."""
+    if hud not in HUD_VALUES:
+        raise ProfileError(f"unknown HUD Scale {hud!r}; choose one of {list(HUD_VALUES)}")
+    reg = load(base_state_path)
+    entry = get(reg, profile_id)
+    if entry.get("hud") == hud and registry_path(base_state_path).exists():
+        return
+    entry["hud"] = hud
+    save(base_state_path, reg)
+
+
 def apply(cfg, choice=None, warn=None):
     """Point cfg's counter file at the active profile (or `choice`: a name or id, for this run only). Adds
     cfg["profile"] = {"id", "name", "state_base"}. Idempotent. -> the profile entry."""
@@ -299,4 +318,6 @@ def apply(cfg, choice=None, warn=None):
     entry = find(reg, choice) if choice else active(reg)
     cfg["state"]["path"] = str(profile_state_path(base, entry["id"]))
     cfg["profile"] = {"id": entry["id"], "name": entry["name"], "state_base": str(base)}
+    if entry.get("hud") in HUD_VALUES:                   # this person's HUD Scale, over the config default
+        cfg["detector"]["hud"] = entry["hud"]
     return entry
