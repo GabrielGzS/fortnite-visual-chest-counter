@@ -64,9 +64,10 @@ stored, so a corrected or re-read history recalculates everything (the v0.3.0 pr
 - **Rate:** real-life chests per hour from v0.4.0 (`progression.Snapshot.progress`): session time, breaks and queues included, which is
   what "hours of my life" means. Default period: last 7 days, falling back to all time; "Not enough counting yet" under 30 minutes of
   session time (the existing `MIN_HOURLY_SECONDS`), with an optional manual rate.
-- **Solo / Duo / Trio / Squad:** a selector that multiplies the future rate by 1-4 ("if each teammate opens as many chests as you and
-  rewards are shared"). It changes only the forecast, never the chance so far, and is labelled a scenario: sharing within a team is a
-  community belief, not confirmed by Epic.
+- **Solo / Duo / Trio / Squad:** a selector that multiplies the future rate by 1 + 0.8(N-1): each teammate opens 80% as many chests as
+  you (maintainer, 2026-11-13: a safe average; never detected). Duo 1.8x, Trio 2.6x, Squad 3.4x. It changes only the forecast and the
+  What If? time and finder, never the chance so far, and is labelled a scenario: sharing within a team is a community belief, not
+  confirmed by Epic.
 
 ### 0.6 What the audit found (read-only, 2026-11-13)
 

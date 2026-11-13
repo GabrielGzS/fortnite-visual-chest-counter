@@ -57,6 +57,7 @@ KINDS = (REPEATABLE, WEEKLY, POOL)
 CYCLE_MILESTONE = 0.90                     # a repeatable reward's automatic cycle, and the bar's target
 MILESTONES = (0.50, 0.90)
 TEAMS = (("Solo", 1), ("Duo", 2), ("Trio", 3), ("Squad", 4))
+TEAMMATE_SHARE = 0.8                       # a teammate is assumed to open 80% as many chests as you: a safe average, never detected
 RESTART, OBTAINED, UNDO, ADJUST = "prediction_restart", "prediction_obtained", "prediction_undo", "prediction_chests"
 ACTION_KINDS = (RESTART, OBTAINED, UNDO, ADJUST)
 SEASON, WEEK = "season", "week"            # an ADJUST row's period
@@ -110,9 +111,14 @@ def percent(x):
     return f"{100 * x:.1f}%"
 
 
+def team_factor(team):
+    """How many of your chests a team opens in the same time: you, plus each teammate at TEAMMATE_SHARE (Duo 1.8, Trio 2.6, Squad 3.4)."""
+    return 1.0 + TEAMMATE_SHARE * (max(int(team), 1) - 1)
+
+
 def hours(chests, rate, team=1):
-    """Hours of real life for `chests` at `rate` chests per hour per player, with `team` players opening chests. None without a rate."""
-    return None if not rate or rate <= 0 else chests / (rate * team)
+    """Hours of real life for `chests` at your `rate` chests per hour, with `team` players opening chests. None without a rate."""
+    return None if not rate or rate <= 0 else chests / (rate * team_factor(team))
 
 
 def duration(h):
@@ -445,31 +451,45 @@ def progress(pool, log, actions, now):
 
 
 # ------------------------------------------------------------------ what it means (fixed wording, never generated)
+EARLY, TYPICAL, BEHIND, UNCOMMON, UNLUCKY, TERRIBLE, LUCKY, VERY_LUCKY, LATE, CYCLE = (
+    "early", "typical", "behind", "uncommon", "unlucky", "terrible", "lucky", "very_lucky", "late", "cycle")
+
+
+@dataclass(frozen=True)
+class Insight:
+    level: str                             # one of the levels above: the page colours it
+    heading: str
+    text: str
+
+
 def insight(state):
-    """One sentence on how unusual this is. Without a report it is conditional: the app does not know what dropped."""
+    """How unusual this is, in fixed words. Without a report it is conditional ("if you are still waiting"): the app does not know what
+    dropped, so it never calls anyone unlucky as a fact. After a report, how early or late it came."""
     if state.obtained is not None:
         q = state.obtained_chance
+        if q < 0.05:
+            return Insight(VERY_LUCKY, "Incredibly lucky!", f"Only {percent(q)} of players find it this early.")
         if q < 0.25:
-            return f"Lucky find: only {percent(q)} of players find it this early."
+            return Insight(LUCKY, "Lucky find!", f"Only {percent(q)} of players find it this early.")
         if q <= 0.75:
-            return f"Right around the typical point: about {percent(q)} of players have found it by then."
-        return f"A long hunt that paid off: {percent(1 - q)} of players would still have been waiting."
+            return Insight(TYPICAL, "Typical luck", f"About {percent(q)} of players have found it by then.")
+        return Insight(LATE, "A long hunt that paid off", f"{percent(1 - q)} of players would still have been waiting.")
     c = state.chance
     if state.reward.kind == REPEATABLE:
-        return f"In this cycle, {percent(c)} of players would have found at least one by now."
+        return Insight(CYCLE, "This cycle", f"{percent(c)} of players would have found at least one by now.")
     waiting = 1 - c
     if c < 0.25:
-        return f"Still early: {percent(waiting)} of players would still be waiting."
+        return Insight(EARLY, "Still early", f"{percent(waiting)} of players would still be waiting.")
     if c < 0.60:
-        return f"Perfectly normal: {percent(waiting)} of players would still be waiting."
+        return Insight(TYPICAL, "Perfectly normal", f"About {percent(waiting)} of players would still be waiting.")
     if c < 0.80:
-        return f"Behind the average, but common: {percent(waiting)} of players would still be waiting."
+        return Insight(BEHIND, "Behind the average, but common", f"{percent(waiting)} of players would still be waiting.")
     if c < 0.90:
-        return f"Uncommon territory: only {percent(waiting)} of players would still be waiting."
+        return Insight(UNCOMMON, "Uncommon territory", f"Only {percent(waiting)} of players would still be waiting.")
     if c < 0.99:
-        return (f"Unlucky, if you are still waiting: about 1 in {round(1 / waiting)} players would be too. Long droughts happen even when "
-                "every chest has the same chance.")
-    return "Terrible luck, if you are still waiting: fewer than 1 in 100 players would be. Rare, but statistically possible."
+        return Insight(UNLUCKY, "Unlucky streak, if you are still waiting",
+                       f"About 1 in {round(1 / waiting)} players would be too. Long droughts happen even when every chest has the same chance.")
+    return Insight(TERRIBLE, "Terrible luck, if you are still waiting", "Fewer than 1 in 100 players would be. Rare, but statistically possible.")
 
 
 # ------------------------------------------------------------------ pace
@@ -500,13 +520,22 @@ def roll(reward, team=1, rate=None, rng=None, multiplier=1.0):
     p = min(reward.p * multiplier, 0.5)
     u = 1.0 - rng.random()                                  # (0, 1]
     n = max(1, math.ceil(math.log(u) / math.log1p(-p)))
-    return Roll(n, rng.randrange(team), team, hours(n, rate, team), chance(n - 1, p), 1 - chance(n, p))
+    share = rng.random() * team_factor(team)                # whose chest it was: you 1, each teammate TEAMMATE_SHARE
+    finder = 0 if share < 1.0 else min(1 + int((share - 1.0) / TEAMMATE_SHARE), team - 1)
+    return Roll(n, finder, team, hours(n, rate, team), chance(n - 1, p), 1 - chance(n, p))
 
 
 def roll_verdict(result):
-    if result.earlier < 0.5:
-        return f"Luckier than {percent(result.later)} of first drops."
-    return f"Unluckier than {percent(result.earlier)} of first drops."
+    took = f"This time it took {result.chests:,} chests"
+    if result.later >= 0.9:
+        return Insight(VERY_LUCKY, "Incredibly lucky!", f"{took}: luckier than {percent(result.later)} of first drops.")
+    if result.later >= 0.6:
+        return Insight(LUCKY, "Lucky!", f"{took}: luckier than {percent(result.later)} of first drops.")
+    if result.earlier >= 0.9:
+        return Insight(TERRIBLE, "Terrible luck!", f"{took}. {percent(result.earlier)} of first drops happen sooner.")
+    if result.earlier >= 0.6:
+        return Insight(UNLUCKY, "Unlucky", f"{took}. {percent(result.earlier)} of first drops happen sooner.")
+    return Insight(TYPICAL, "Pretty average luck", f"{took}. About {percent(result.earlier)} of first drops happen sooner.")
 
 
 def finder_name(result):
@@ -523,6 +552,8 @@ class View:
     season_chests: int                     # recorded chests in the pool so far
     added: object                          # Added: chests you added with Edit counts
     first_chest: object                    # the first recorded chest in the pool, or None
+    week: int                              # the current reward week (0-based)
+    week_chests: int                       # chests this week's rewards use: recorded this week + added for this week
     now: datetime
     bad_lines: int
 
@@ -536,5 +567,8 @@ def load_view(folder, pool, now=None, counting_now=False):
     actions, bad = read_actions(folder)
     rate, period = pace(snapshot)
     inside = [e.at for e in snapshot.events if pool.start <= e.at < min(now, pool.end)]
-    return View(pool, progress(pool, log, actions, now), rate, period, log.count(pool.start, min(now, pool.end)), added(pool, effective(actions), now),
-                min(inside) if inside else None, now, bad)
+    extra = added(pool, effective(actions), now)
+    week = pool.week_of(now)
+    week_start, week_end = pool.weeks()[week]
+    return View(pool, progress(pool, log, actions, now), rate, period, log.count(pool.start, min(now, pool.end)), extra,
+                min(inside) if inside else None, week, log.count(week_start, min(now, week_end)) + extra.weeks.get(week, 0), now, bad)

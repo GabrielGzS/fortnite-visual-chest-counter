@@ -2770,6 +2770,17 @@ PREDICTION_VIEWS = (("My Progress", "What your counted chests mean for this pool
                     ("What If?", "Roll a random first drop and see how wild the odds are"))
 PREDICTIONS_REFRESH_MS = 3000              # after a counted chest, once it has been saved
 BAR_STEPS = 1000
+# Two colour systems that never mix: a reward's accent (its border, title, chance and bar) and a luck level's colour (its badge only).
+FEATURED_REWARDS = ("pirate_shop_access", "weekly_gold_outfit")                     # full width, first: the special and the rarest
+REWARD_ACCENTS = {"pirate_shop_access": "#f5c542", "weekly_gold_outfit": "#c084fc", "weekly_vehicle_decal": "#5b8cff",
+                  "weekly_pickaxe_backbling": "#fb923c", "weekly_jam_track": "#f472b6", "weekly_loading_screen": "#67c7e8", "gizmo": "#34d399"}
+FALLBACK_ACCENTS = ("#5b8cff", "#fb923c", "#f472b6", "#67c7e8", "#34d399", "#c084fc", "#f5c542")
+REWARD_GLYPHS = {"pirate_shop_access": "♛", "weekly_gold_outfit": "✦", "gizmo": "◆"}            # crown, star, diamond
+LUCK_STYLES = {predictions.EARLY: ("#5b8cff", "ⓘ"), predictions.TYPICAL: ("#34d399", "⚖"), predictions.BEHIND: ("#a3e635", "◔"),
+               predictions.UNCOMMON: ("#fbbf24", "◕"), predictions.UNLUCKY: ("#fb923c", "☂"), predictions.TERRIBLE: ("#f87171", "⚡"),
+               predictions.LUCKY: ("#c084fc", "☘"), predictions.VERY_LUCKY: ("#e879f9", "★"), predictions.LATE: ("#fbbf24", "⌛"),
+               predictions.CYCLE: ("#67c7e8", "↻")}
+BOOST_COLOR = "#fb923c"
 
 
 def local_time(moment):
@@ -2780,13 +2791,30 @@ def local_date(moment):
     return moment.astimezone().strftime("%d %b %Y")
 
 
+def rgba(color, alpha):
+    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def reward_order(pool):
+    """The featured rewards first, then the rest from the rarest to the most common."""
+    featured = [r for rid in FEATURED_REWARDS for r in pool.rewards if r.id == rid]
+    return featured + sorted((r for r in pool.rewards if r.id not in FEATURED_REWARDS), key=lambda r: -r.odds)
+
+
+def reward_accent(pool, reward):
+    return REWARD_ACCENTS.get(reward.id) or FALLBACK_ACCENTS[[r.id for r in pool.rewards].index(reward.id) % len(FALLBACK_ACCENTS)]
+
+
 def team_selector(parent, on_change):
     """Solo / Duo / Trio / Squad. -> (layout, button group); the group's checked id is the team size."""
     row = QHBoxLayout()
     row.setSpacing(4)
     group = QButtonGroup(parent)
     for name, size in predictions.TEAMS:
-        choice = button(name, "segment", tip=f"{size} player{'s' if size > 1 else ''} opening chests at your pace")
+        tip = "Your own pace" if size == 1 else f"You plus {size - 1} teammate{'s' if size > 2 else ''}, each opening 80% as many chests as you: " \
+                                                f"{predictions.team_factor(size):g}x your pace"
+        choice = button(name, "segment", tip=tip)
         choice.setCheckable(True)
         group.addButton(choice, size)
         row.addWidget(choice)
@@ -2796,39 +2824,114 @@ def team_selector(parent, on_change):
     return row, group
 
 
-class RewardCard(QFrame):
-    """One reward of the pool: its chance in this cycle, the way to the 90% mark, forecasts, and what it means."""
+def team_text(team):
+    if team == 1:
+        return "Solo: your own pace."
+    return (f"{dict((n, name) for name, n in predictions.TEAMS)[team]}: you plus {team - 1} teammate{'s' if team > 2 else ''}, each opening 80% "
+            f"as many chests as you ({predictions.team_factor(team):g}x your pace). A safe average, not your real team: only the time changes, "
+            "never the chance.")
 
-    def __init__(self, page, reward):
+
+class LuckBadge(QFrame):
+    """A luck insight in its level's colour, with an icon, a short heading and the sentence."""
+
+    def __init__(self):
         super().__init__()
-        self.page, self.reward, self.state = page, reward, None
-        self.setObjectName("card")
+        self.setObjectName("luckBadge")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 8, 12, 8)
+        row.setSpacing(10)
+        self.glyph = QLabel()
+        self.glyph.setFixedWidth(24)
+        self.glyph.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        row.addWidget(self.glyph)
+        column = QVBoxLayout()
+        column.setSpacing(1)
+        self.heading = QLabel()
+        self.heading.setWordWrap(True)
+        column.addWidget(self.heading)
+        self.text = QLabel()
+        self.text.setWordWrap(True)
+        self.text.setStyleSheet(f"color: {theme.MUTED}; font-size: 12px; background: transparent; border: none;")
+        column.addWidget(self.text)
+        row.addLayout(column, 1)
+        self.level = None
+
+    def show_insight(self, insight):
+        self.level = insight.level
+        color, glyph = LUCK_STYLES.get(insight.level, (theme.MUTED, "•"))
+        self.setStyleSheet(f"QFrame#luckBadge {{ background: {rgba(color, 0.10)}; border: 1px solid {rgba(color, 0.30)}; "
+                           f"border-left: 3px solid {color}; border-radius: 8px; }}")
+        self.glyph.setText(glyph)
+        self.glyph.setStyleSheet(f"color: {color}; font-size: 18px; background: transparent; border: none;")
+        self.heading.setText(insight.heading)
+        self.heading.setStyleSheet(f"color: {color}; font-size: 14px; font-weight: 600; background: transparent; border: none;")
+        self.text.setText(insight.text)
+
+
+class RewardCard(QFrame):
+    """One reward of the pool: its chance in this cycle, the way to the 90% mark, forecasts, and what it means. Featured cards (the
+    special and the rarest rewards) span the page with a tinted background; every card wears its reward's accent."""
+
+    def __init__(self, page, reward, accent, featured=False):
+        super().__init__()
+        self.page, self.reward, self.state, self.accent, self.featured = page, reward, None, accent, featured
+        self.setObjectName("rewardCard")
+        background = (f"qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {rgba(accent, 0.16)}, stop:0.55 {theme.SURFACE}, stop:1 {theme.SURFACE})"
+                      if featured else theme.SURFACE)
+        self.setStyleSheet(f"QFrame#rewardCard {{ background: {background}; border: 1px solid {rgba(accent, 0.6 if featured else 0.3)}; "
+                           f"border-radius: 12px; }}")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(18 if featured else 16, 14 if featured else 12, 18 if featured else 16, 14 if featured else 12)
         layout.setSpacing(4)
         top = QHBoxLayout()
-        top.addWidget(label(reward.name, "cardTitle"), 1)
-        top.addWidget(label(f"1 in {fmt(reward.odds)} per chest", "hint"), 0, Qt.AlignRight)
+        top.setSpacing(8)
+        glyph = QLabel(REWARD_GLYPHS.get(reward.id, "●"))
+        glyph.setStyleSheet(f"color: {accent}; font-size: {20 if featured else 14}px; background: transparent; border: none;")
+        top.addWidget(glyph, 0, Qt.AlignVCenter)
+        title = QLabel(reward.name)
+        title.setStyleSheet(f"color: {theme.TEXT}; font-size: {18 if featured else 15}px; font-weight: 600; background: transparent; border: none;")
+        top.addWidget(title, 1)
+        odds = QLabel(f"1 in {fmt(reward.odds)}")
+        odds.setStyleSheet(f"color: {accent}; font-size: 13px; font-weight: 600; background: transparent; border: none;")
+        top.addWidget(odds, 0, Qt.AlignRight | Qt.AlignVCenter)
         layout.addLayout(top)
-        self.chance = label("", "statValue")
-        layout.addWidget(self.chance)
-        self.chance_sub = label("", "countSub", wrap=True)
-        layout.addWidget(self.chance_sub)
+        body = QHBoxLayout() if featured else QVBoxLayout()
+        body.setSpacing(18 if featured else 4)
+        left = QVBoxLayout()
+        left.setSpacing(4)
+        self.chance_sub = label("", "countLabel", wrap=True)
+        left.addWidget(self.chance_sub)
+        self.chance = QLabel()
+        self.chance.setStyleSheet(f"color: {accent}; font-size: {36 if featured else 26}px; font-weight: 600; background: transparent; border: none;")
+        left.addWidget(self.chance)
         self.bar = QProgressBar()
         self.bar.setRange(0, BAR_STEPS)
         self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(8)
+        self.bar.setStyleSheet(f"QProgressBar {{ background: {theme.SURFACE_2}; border: none; border-radius: 4px; }} "
+                               f"QProgressBar::chunk {{ background: {accent}; border-radius: 4px; }}")
         self.bar.setToolTip("Chests toward the 90% mark, measured in chests: not the chance itself.")
-        layout.addWidget(self.bar)
+        left.addWidget(self.bar)
         self.bar_text = label("", "hint", wrap=True)
-        layout.addWidget(self.bar_text)
+        left.addWidget(self.bar_text)
         self.forecast = label("", "hint", wrap=True)
-        layout.addWidget(self.forecast)
+        left.addWidget(self.forecast)
         self.stats = label("", "hint", wrap=True)
-        layout.addWidget(self.stats)
+        left.addWidget(self.stats)
         self.status = label("", "hint", wrap=True)
-        layout.addWidget(self.status)
-        self.insight = label("", "countSub", wrap=True)
-        layout.addWidget(self.insight)
+        left.addWidget(self.status)
+        self.luck = LuckBadge()
+        if featured:
+            body.addLayout(left, 3)
+            right = QVBoxLayout()
+            right.addWidget(self.luck)
+            right.addStretch(1)
+            body.addLayout(right, 2)
+        else:
+            body.addLayout(left)
+            body.addWidget(self.luck)
+        layout.addLayout(body)
         actions = QHBoxLayout()
         actions.setSpacing(18)
         self.restart = button("Start new cycle", "link", tip="Start counting this reward's chance from now. Nothing is deleted: Undo brings it back.",
@@ -2846,9 +2949,8 @@ class RewardCard(QFrame):
         r = s.reward
         shown = s.obtained_chance if s.frozen else s.chance
         self.chance.setText(predictions.percent(shown))
-        self.chance_sub.setText("chance in its cycle when you reported it" if s.frozen else
-                                "chance of at least one in this cycle" if r.kind == predictions.REPEATABLE else
-                                "chance of having found it this week" if r.kind == predictions.WEEKLY else "chance of having found it this season")
+        self.chance_sub.setText("CHANCE WHEN YOU REPORTED IT" if s.frozen else "CHANCE OF AT LEAST ONE, THIS CYCLE" if r.kind == predictions.REPEATABLE
+                                else "CHANCE OF HAVING FOUND IT, THIS WEEK" if r.kind == predictions.WEEKLY else "CHANCE OF HAVING FOUND IT, THIS SEASON")
         done = min(s.cycle_effective / s.milestone_chests, 1.0)
         self.bar.setValue(round(done * BAR_STEPS))
         self.bar_text.setText(("90% mark reached" if s.cycle_effective >= s.milestone_chests else
@@ -2874,6 +2976,8 @@ class RewardCard(QFrame):
         expected = f"Statistically expected: {s.expected:.2f}" + (" across the season's weeks" if r.kind == predictions.WEEKLY else " this season")
         if r.kind == predictions.REPEATABLE:
             expected += f"   ·   {fmt(s.completed_cycles)} completed 90% cycle{'s' if s.completed_cycles != 1 else ''} (cycles, not Gizmos found)"
+        if s.added:
+            expected += f"   ·   includes {fmt(s.added)} chests you added"
         self.stats.setText(expected)
         status = []
         if r.kind == predictions.WEEKLY:
@@ -2884,7 +2988,9 @@ class RewardCard(QFrame):
             status.append(f"New cycle since {local_time(s.last_action.at)}")
         self.status.setText("   ·   ".join(status))
         self.status.setVisible(bool(status))
-        self.insight.setText(predictions.insight(s) if s.started else "")
+        self.luck.setVisible(s.started)
+        if s.started:
+            self.luck.show_insight(predictions.insight(s))
         live = s.started and not s.ended
         self.restart.setVisible(live)
         self.obtained.setVisible(live and r.kind != predictions.REPEATABLE and not s.frozen)
@@ -2964,6 +3070,14 @@ class PredictionsPage(QWidget):
         box_layout.addWidget(self.pool_line)
         self.chests_line = label("", "hint", wrap=True)
         box_layout.addWidget(self.chests_line)
+        self.recorded_tile = StatTile("RECORDED", "chests the app counted this season")
+        self.added_tile = StatTile("ADDED BY YOU", "with Edit counts, for Predictions only")
+        self.season_tile = StatTile("SEASON REWARDS", "chests they use: recorded + added")
+        self.week_tile = StatTile("THIS WEEK'S REWARDS", "chests they use")
+        tiles = [self.recorded_tile, self.added_tile, self.season_tile, self.week_tile]
+        for tile in tiles:
+            tile.compact()
+        box_layout.addLayout(tile_grid(tiles, 2))
         added_row = QHBoxLayout()
         self.added_line = label("", "hint", wrap=True)
         added_row.addWidget(self.added_line, 1)
@@ -2971,21 +3085,35 @@ class PredictionsPage(QWidget):
                                  on_click=self.undo_added)
         added_row.addWidget(self.added_undo, 0, Qt.AlignTop)
         box_layout.addLayout(added_row)
+        box_layout.addWidget(hline())
         self.pace_line = label("", "hint", wrap=True)
         box_layout.addWidget(self.pace_line)
+        box_layout.addWidget(label("FORECAST FOR", "countLabel"))
         row, self.team = team_selector(self, lambda _size: self._show())
-        box_layout.addWidget(label("Forecast for", "countLabel"))
         box_layout.addLayout(row)
-        box_layout.addWidget(label("Teammates are assumed to open as many chests as you, with rewards shared: a scenario, not something Epic has "
-                                   "confirmed. It changes only the time, never the chance per chest.", "hint", wrap=True))
+        self.team_line = label(team_text(1), "hint", wrap=True)
+        box_layout.addWidget(self.team_line)
         layout.addWidget(box)
         self.cards = {}
         if self.pool is not None:
-            self.cards = {reward.id: RewardCard(self, reward) for reward in self.pool.rewards}
-            layout.addLayout(tile_grid(list(self.cards.values()), 2))
+            ordered = reward_order(self.pool)
+            self.cards = {r.id: RewardCard(self, r, reward_accent(self.pool, r), featured=r.id in FEATURED_REWARDS) for r in ordered}
+            for r in ordered:
+                if r.id in FEATURED_REWARDS:
+                    layout.addWidget(self.cards[r.id])
+            rest = [self.cards[r.id] for r in ordered if r.id not in FEATURED_REWARDS]
+            grid = QGridLayout()
+            grid.setSpacing(10)
+            for index, reward_card in enumerate(rest):
+                last_alone = index == len(rest) - 1 and index % 2 == 0
+                grid.addWidget(reward_card, index // 2, index % 2, 1, 2 if last_alone else 1)
+            for column in range(2):
+                grid.setColumnStretch(column, 1)
+            layout.addLayout(grid)
         layout.addWidget(label("Every counted chest (normal, rare and sprite) is one try at the normal odds, the same for every player (Epic). "
-                               "Treasure Hours are not included. Chests the counter missed, or opened while it was not counting, are not in "
-                               "these numbers. A cycle reaching 90% is a statistical milestone, never a reward found.", "hint", wrap=True))
+                               "Treasure Hours count only when the pool lists them. Chests the counter missed, or opened while it was not counting, "
+                               "are not in these numbers unless you add them. A cycle reaching 90% is a statistical milestone, never a reward found.",
+                               "hint", wrap=True))
         layout.addStretch(1)
 
     def _build_what_if(self):
@@ -2994,37 +3122,47 @@ class PredictionsPage(QWidget):
         box, box_layout = card("Roll a prediction", "A random first drop from now, drawn with the real odds: each chest is an independent try. "
                                                      "Nothing here is saved or changes your progress.")
         self.roll_reward = QComboBox()
-        for reward in (self.pool.rewards if self.pool is not None else ()):
-            self.roll_reward.addItem(f"{reward.name}   (1 in {fmt(reward.odds)})", reward.id)
+        for reward in (reward_order(self.pool) if self.pool is not None else ()):
+            self.roll_reward.addItem(f"{REWARD_GLYPHS.get(reward.id, chr(0x25cf))}  {reward.name}   (1 in {fmt(reward.odds)})", reward.id)
         self.roll_reward.currentIndexChanged.connect(lambda _index: self._show_odds())
         box_layout.addWidget(self.roll_reward)
         self.roll_boost = QComboBox()
         for multiplier in predictions.MULTIPLIERS:
-            self.roll_boost.addItem("Normal odds" if multiplier == 1 else f"{multiplier:g}x odds, the whole hunt (what if)", multiplier)
+            self.roll_boost.addItem("Normal odds" if multiplier == 1 else f"⚡ Treasure Hour {multiplier:g}x, the whole hunt (what if)", multiplier)
         self.roll_boost.setToolTip("Epic has announced Treasure Hour boosts of 1.5x to 10x for some rewards (Pirate Shop Access, the gold outfit, "
                                    "vehicle & decal). Here a multiplier lasts the whole hunt, which no real event does: a hypothetical.")
         self.roll_boost.currentIndexChanged.connect(lambda _index: self._show_odds())
         box_layout.addWidget(self.roll_boost)
-        row, self.roll_team = team_selector(self, lambda _size: None)
+        self.boost_badge = QLabel()
+        self.boost_badge.setWordWrap(True)
+        self.boost_badge.setStyleSheet(f"color: {BOOST_COLOR}; background: {rgba(BOOST_COLOR, 0.10)}; border: 1px solid {rgba(BOOST_COLOR, 0.4)}; "
+                                       "border-radius: 8px; padding: 6px 10px; font-weight: 600;")
+        box_layout.addWidget(self.boost_badge)
+        row, self.roll_team = team_selector(self, lambda size: self.roll_team_line.setText(team_text(size)))
         box_layout.addLayout(row)
-        self.roll_button = button("Roll a prediction", "primary", on_click=self.roll)
+        self.roll_team_line = label(team_text(1), "hint", wrap=True)
+        box_layout.addWidget(self.roll_team_line)
+        self.roll_button = button("⚄   Roll a prediction", "primary", on_click=self.roll)
+        self.roll_button.setMinimumHeight(44)
+        self.roll_button.setStyleSheet("font-size: 15px;")
         roll_row = QHBoxLayout()
         roll_row.addWidget(self.roll_button)
         roll_row.addStretch(1)
         box_layout.addLayout(roll_row)
-        self.roll_result = label("", "statValue")
+        self.roll_result = QLabel()
         box_layout.addWidget(self.roll_result)
         self.roll_detail = label("Press Roll to see one possible future.", "hint", wrap=True)
         box_layout.addWidget(self.roll_detail)
-        self.roll_verdict = label("", "countSub", wrap=True)
+        self.roll_verdict = LuckBadge()
+        self.roll_verdict.hide()
         box_layout.addWidget(self.roll_verdict)
         self.roll_count = label("", "hint")
         box_layout.addWidget(self.roll_count)
         layout.addWidget(box)
         self.odds_facts = label("", "hint", wrap=True)
         layout.addWidget(self.odds_facts)
-        layout.addWidget(label("Who finds it is drawn at random among the team. Every roll is independent: a long wait in one roll, or in real "
-                               "life, never makes the next chest luckier.", "hint", wrap=True))
+        layout.addWidget(label("Who finds it is drawn among the team, weighted by how many chests each opens. Every roll is independent: a long wait "
+                               "in one roll, or in real life, never makes the next chest luckier.", "hint", wrap=True))
         layout.addStretch(1)
         self._show_odds()
 
@@ -3081,24 +3219,32 @@ class PredictionsPage(QWidget):
     # ------------------------------------------------------------------ showing
     def _show(self):
         v = self._view
+        team = self.team.checkedId()
+        self.team_line.setText(team_text(team))
         if v is None:
             return
-        pool = v.pool
+        pool, a = v.pool, v.added
         self.pool_line.setText(f"{pool.name}   ·   {local_date(pool.start)} to {local_date(pool.end)}" + (" (estimated end)" if pool.end_estimated else ""))
-        if v.season_chests or v.first_chest is not None:
-            self.chests_line.setText(f"{fmt(v.season_chests)} chests counted this season, from your saved history since {local_time(v.first_chest)}.")
+        self.chests_line.setText(f"From your saved history since {local_time(v.first_chest)}." if v.first_chest is not None else
+                                 "No chests counted in this pool yet. Your saved history is used as soon as you count.")
+        self.recorded_tile.set_value(fmt(v.season_chests))
+        self.added_tile.set_value(f"+{fmt(a.season)}" if a.season else "0")
+        self.season_tile.set_value(fmt(v.season_chests + a.season))
+        self.week_tile.set_value(fmt(v.week_chests), f"chests they use (reward week {v.week + 1} of {len(pool.weeks())})")
+        if a.unknown_week:
+            self.added_line.setText(f"The {fmt(a.unknown_week)} chests you added with the week not known count for season rewards (Pirate Shop Access, "
+                                    "Gizmo) but not for any week's rewards, which change every Sunday. Analytics and your pace never use added chests.")
+        elif a.season:
+            self.added_line.setText("Chests you added for a reward week count for that week's rewards and the season's. Analytics and your pace never "
+                                    "use added chests.")
         else:
-            self.chests_line.setText("No chests counted in this pool yet. Your saved history is used as soon as you count.")
-        a = v.added
-        self.added_line.setText(f"+{fmt(a.season)} chests you added with Edit counts" + (f" ({fmt(a.unknown_week)} with the week not known, for "
-                                "season rewards only)" if a.unknown_week and a.weeks else "") + f": {fmt(v.season_chests + a.season)} chests for "
-                                "season rewards. Analytics and your pace use only the chests the app counted." if a.season else
-                                "Chests from before you used the counter? Add them with Edit counts on the Dashboard: Predictions can use them, "
-                                "Analytics will not.")
+            self.added_line.setText("Chests from before you used the counter? Add them with Edit counts on the Dashboard: Predictions can use them, "
+                                    "Analytics will not.")
         self.added_undo.setVisible(a.last is not None)
-        team = self.team.checkedId()
         if v.rate:
-            self.pace_line.setText(f"Your pace: {v.rate:.0f} chests per hour of real life ({v.rate_period}), breaks and queues included.")
+            team_rate = v.rate * predictions.team_factor(team)
+            self.pace_line.setText(f"Your pace: {v.rate:.0f} chests per hour of real life ({v.rate_period}), breaks and queues included"
+                                   + ("." if team == 1 else f". Team forecast: {team_rate:.0f} per hour ({predictions.team_factor(team):g}x)."))
         else:
             self.pace_line.setText(f"Your pace: not enough counting yet ({progression.MIN_HOURLY_SECONDS // 60} minutes of sessions), so forecasts "
                                    "show chests only.")
@@ -3159,11 +3305,8 @@ class PredictionsPage(QWidget):
             return
         if kind == predictions.UNDO and s.last_action is None:
             return
-        cfg, _ = load_cfg()
-        profile = cfg["profile"]
-        folder = paths.APP_DIR / profiles.history_folder(profile["state_base"], profile["id"])
         try:
-            predictions.append_action(folder, kind, self.pool.id, s.reward.id, undoes=s.last_action.id if kind == predictions.UNDO else None,
+            predictions.append_action(self._folder(), kind, self.pool.id, s.reward.id, undoes=s.last_action.id if kind == predictions.UNDO else None,
                                       chests=s.cycle_chests, at=self.clock() if self.clock else None)
         except OSError as error:
             show_error(self, f"That could not be saved ({error}). Nothing changed.")
@@ -3177,14 +3320,25 @@ class PredictionsPage(QWidget):
 
     def _show_odds(self):
         reward = self._selected_reward()
+        multiplier = self.roll_boost.currentData() or 1.0
         if reward is None:
             self.odds_facts.setText("")
+            self.boost_badge.hide()
             return
-        multiplier = self.roll_boost.currentData() or 1.0
+        accent = reward_accent(self.pool, reward)
+        self.roll_result.setStyleSheet(f"color: {accent}; font-size: 40px; font-weight: 700; background: transparent; border: none;")
         p = reward.p * multiplier
+        half, most = predictions.chests_to(0.5, reward.p), predictions.chests_to(0.9, reward.p)
+        self.boost_badge.setVisible(multiplier != 1)
+        if multiplier != 1:
+            self.boost_badge.setText(f"⚡ Treasure Hour {multiplier:g}x, a what-if for the whole hunt.   Normal: 1 in {fmt(reward.odds)}, half "
+                                     f"within {fmt(half)} chests   →   {multiplier:g}x: about 1 in {fmt(round(1 / p))}, half within "
+                                     f"{fmt(predictions.chests_to(0.5, p))}")
         odds = f"1 in {fmt(reward.odds)}" if multiplier == 1 else f"about 1 in {fmt(round(1 / p))} at {multiplier:g}x (normally 1 in {fmt(reward.odds)})"
         self.odds_facts.setText(f"{reward.name}: {odds} per chest. Half of first drops come within {fmt(predictions.chests_to(0.5, p))} chests, "
-                                f"9 in 10 within {fmt(predictions.chests_to(0.9, p))}, and there is no upper limit.")
+                                f"9 in 10 within {fmt(predictions.chests_to(0.9, p))}, and there is no upper limit."
+                                if multiplier != 1 else f"{reward.name}: {odds} per chest. Half of first drops come within {fmt(half)} chests, "
+                                f"9 in 10 within {fmt(most)}, and there is no upper limit.")
 
     def roll(self):
         reward = self._selected_reward()
@@ -3198,10 +3352,11 @@ class PredictionsPage(QWidget):
         found = predictions.finder_name(result)
         detail = f"{found} found it" + (" on your own" if team == 1 else f", on the team's chest number {fmt(result.chests)}")
         time_text = predictions.duration(result.hours)
-        detail += (f". About {time_text} at your pace" + ("" if team == 1 else f" with {team} players")) if time_text else \
-            ". Count for half an hour to see the time at your pace"
+        detail += (f". About {time_text} at your pace" + ("" if team == 1 else f" with {team} players ({predictions.team_factor(team):g}x)")) \
+            if time_text else ". Count for half an hour to see the time at your pace"
         self.roll_detail.setText(detail + ".")
-        self.roll_verdict.setText(predictions.roll_verdict(result))
+        self.roll_verdict.show_insight(predictions.roll_verdict(result))
+        self.roll_verdict.show()
         self.roll_count.setText(f"Rolls: {self.rolls}")
 
 

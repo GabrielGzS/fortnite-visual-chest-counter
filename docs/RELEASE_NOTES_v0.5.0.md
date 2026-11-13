@@ -34,8 +34,11 @@ sentence on how unusual your wait is ("Perfectly normal: 41% of players would st
 - **Gizmos** start a new cycle by themselves at 90% (292 chests).
 - **Weekly rewards** start again at the Sunday rotation, 9 AM New York time. **Pirate Shop Access** runs for the whole season.
 - **Start new cycle** counts from now (to help a friend, say); **Mark obtained** stops that reward's chance with the date. Both have Undo.
-- **Solo / Duo / Trio / Squad** changes only the time, assuming teammates open as many chests as you and rewards are shared (not confirmed
-  by Epic). It never changes the chance per chest.
+- **Solo / Duo / Trio / Squad** changes only the time: you plus teammates who each open 80% as many chests as you (Duo 1.8x, Trio 2.6x,
+  Squad 3.4x your pace), a safe average, with rewards shared (not confirmed by Epic). The app never tries to detect your team, and the
+  chance per chest never changes.
+- **Pirate Shop Access** and the **Weekly Gold Outfit** get their own full-width cards, the rest follow from the rarest; every reward has
+  its colour, and how normal or unusual your wait is shows as a coloured badge.
 
 ### Chests from before the counter
 

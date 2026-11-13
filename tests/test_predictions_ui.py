@@ -70,22 +70,27 @@ def test_predictions_is_its_own_page_after_analytics_with_two_tabs():
         assert [w.win.nav.item(i).text() for i in range(w.win.nav.count())][:3] == ["Dashboard", "Analytics", "Predictions"]
         page = w.win.predictions
         assert w.win.pages.widget(2) is page and [page.view_buttons.button(i).text() for i in range(2)] == ["My Progress", "What If?"]
-        assert list(page.cards) == [r.id for r in POOL.rewards]
+        # Pirate Shop Access and the gold outfit first and full width, then the rest from the rarest down
+        assert list(page.cards) == ["pirate_shop_access", "weekly_gold_outfit", "weekly_vehicle_decal", "weekly_pickaxe_backbling",
+                                    "weekly_jam_track", "weekly_loading_screen", "gizmo"]
+        assert page.cards["pirate_shop_access"].featured and page.cards["weekly_gold_outfit"].featured and not page.cards["gizmo"].featured
+        assert len({c.accent for c in page.cards.values()}) == 7                                  # every reward its own colour
 
 
 def test_my_progress_shows_the_profiles_chests_pace_and_odds():
     with G.window() as w:
         play(w)
         page = opened(w)
-        assert "70 chests counted this season" in page.chests_line.text() and "60 chests per hour" in page.pace_line.text()
+        assert page.recorded_tile.value.text() == "70" and page.season_tile.value.text() == "70" and page.week_tile.value.text() == "70"
+        assert page.added_tile.value.text() == "0" and "60 chests per hour" in page.pace_line.text()
         gizmo = card(page, "gizmo")
         assert gizmo.chance.text() == R.percent(R.chance(70, 1 / 127)) and "70 of 292 chests to the 90% mark" in gizmo.bar_text.text()
         assert "50% in 18 more chests" in gizmo.forecast.text() and "0 completed 90% cycles" in gizmo.stats.text()
-        assert gizmo.obtained.isHidden() and "In this cycle" in gizmo.insight.text()
+        assert gizmo.obtained.isHidden() and gizmo.luck.level == R.CYCLE
         pirate = card(page, "pirate_shop_access")
-        assert pirate.chance.text() == "0.05%" and "Still early" in pirate.insight.text() and "this season" in pirate.chance_sub.text()
+        assert pirate.chance.text() == "0.05%" and pirate.luck.heading.text() == "Still early" and "THIS SEASON" in pirate.chance_sub.text()
         weekly = card(page, "weekly_loading_screen")
-        assert "Week 1 of 5" in weekly.status.text() and "this week" in weekly.chance_sub.text()
+        assert "Week 1 of 5" in weekly.status.text() and "THIS WEEK" in weekly.chance_sub.text()
 
 
 def test_the_team_scenario_changes_only_the_time():
@@ -96,6 +101,9 @@ def test_the_team_scenario_changes_only_the_time():
         chance, solo = pirate.chance.text(), pirate.forecast.text()
         page.team.button(4).click()
         assert pirate.chance.text() == chance and pirate.forecast.text() != solo and "more chests" in pirate.forecast.text()
+        assert "3.4x your pace" in page.team_line.text() and "204 per hour (3.4x)" in page.pace_line.text()   # teammates at 80% of your pace
+        page.team.button(2).click()
+        assert "1.8x" in page.team_line.text()
 
 
 def test_start_new_cycle_mark_obtained_and_undo_are_saved_to_this_profile_only():
@@ -109,7 +117,7 @@ def test_start_new_cycle_mark_obtained_and_undo_are_saved_to_this_profile_only()
         actions, _ = R.read_actions(folder(w))
         assert [a.kind for a in actions] == [R.OBTAINED] and not (folder(w, other) / R.ACTIONS_FILE).exists()
         assert "Reported obtained" in weekly.status.text() and weekly.obtained.isHidden() and not weekly.undo.isHidden()
-        assert weekly.insight.text().startswith(("Lucky find", "Right around", "A long hunt"))
+        assert weekly.luck.level in (R.VERY_LUCKY, R.LUCKY, R.TYPICAL, R.LATE)
         weekly.undo.click()
         settle(page)
         assert "Reported obtained" not in weekly.status.text() and not weekly.obtained.isHidden() and weekly.undo.isHidden()
@@ -142,10 +150,11 @@ def test_what_if_rolls_are_random_first_drops_and_never_saved():
         page.roll_button.click()
         assert page.roll_result.text().endswith(" chests") and page.roll_count.text() == "Rolls: 1"
         assert "You found it on your own" in page.roll_detail.text() and "at your pace" in page.roll_detail.text()
-        assert page.roll_verdict.text().startswith(("Luckier", "Unluckier"))
+        assert not page.roll_verdict.isHidden() and page.roll_verdict.level in (R.VERY_LUCKY, R.LUCKY, R.TYPICAL, R.UNLUCKY, R.TERRIBLE)
+        assert page.roll_verdict.text.text().startswith("This time it took ")
         page.roll_team.button(4).click()
         page.roll_boost.setCurrentIndex(page.roll_boost.findData(2.0))
-        assert "about 1 in 68,750 at 2x" in page.odds_facts.text()
+        assert "about 1 in 68,750 at 2x" in page.odds_facts.text() and not page.boost_badge.isHidden() and "47,654" in page.boost_badge.text()
         page.roll_button.click()
         assert page.roll_count.text() == "Rolls: 2" and "with 4 players" in page.roll_detail.text()
         assert not (folder(w) / R.ACTIONS_FILE).exists()
@@ -175,7 +184,8 @@ def test_edit_counts_adds_the_difference_to_predictions_only_and_undo_takes_it_b
         assert [(a.kind, a.delta, a.scope) for a in rows] == [(R.ADJUST, 5000, R.SEASON)]
         after = P.load(folder(w), now=NOW).progress("all")
         assert (before.totals, before.in_sessions, before.per_hour) == (after.totals, after.in_sessions, after.per_hour)   # Analytics: unchanged
-        assert "+5,000 chests you added" in page.added_line.text() and "5,070 chests for season rewards" in page.added_line.text()
+        assert page.added_tile.value.text() == "+5,000" and page.season_tile.value.text() == "5,070" and page.week_tile.value.text() == "70"
+        assert "count for season rewards" in page.added_line.text() and "not for any week's rewards" in page.added_line.text()
         assert card(page, "pirate_shop_access").chance.text() == R.percent(R.chance(5070, 1 / 137500))
         assert card(page, "weekly_jam_track").chance.text() == R.percent(R.chance(70, 1 / 391))                # no week known: not this week's
         assert "60 chests per hour" in page.pace_line.text()                                                    # pace: counted chests only

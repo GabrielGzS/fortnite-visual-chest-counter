@@ -78,7 +78,9 @@ def test_chance_is_exact_for_tiny_odds_and_never_shown_as_certain():
 
 
 def test_hours_and_durations():
-    assert R.hours(120, 60) == 2.0 and R.hours(120, 60, team=4) == 0.5 and R.hours(120, None) is None and R.hours(5, 0) is None
+    assert R.hours(120, 60) == 2.0 and R.hours(120, None) is None and R.hours(5, 0) is None
+    # teammates open 80% as many chests as you: Duo 1.8x, Trio 2.6x, Squad 3.4x your pace
+    assert [round(R.team_factor(n), 6) for n in (1, 2, 3, 4)] == [1.0, 1.8, 2.6, 3.4] and abs(R.hours(340, 60, team=4) - 340 / 204) < 1e-12
     assert R.duration(0.25) == "15 min" and R.duration(2.0) == "2.0 h" and R.duration(5277) == "5,277 h (about 220 days nonstop)"
 
 
@@ -145,7 +147,7 @@ def test_mark_obtained_stops_the_chance_records_how_lucky_it_was_and_a_new_cycle
     s = state("weekly_jam_track", log, [got])
     assert 95 < by_then < 110 and s.frozen and s.obtained is got and s.remaining is None and s.cycle_chests == by_then
     assert abs(s.obtained_chance - R.chance(by_then, 1 / 391)) < 1e-12 and s.pool_chests == 400
-    assert R.insight(s).startswith("Lucky find")
+    assert R.insight(s).heading in ("Lucky find!", "Incredibly lucky!") and R.insight(s).level in (R.LUCKY, R.VERY_LUCKY)
     again = state("weekly_jam_track", log, [got, action(R.RESTART, "weekly_jam_track", START + timedelta(hours=21), aid="r2")])
     assert not again.frozen and again.obtained is got and 0 < again.cycle_chests < 300                # still reported; a new cycle counts
     back = state("weekly_jam_track", log, [got, action(R.UNDO, "weekly_jam_track", START + timedelta(hours=12), undoes="o1")])
@@ -322,12 +324,12 @@ def test_repeated_edits_never_count_the_same_chests_twice():
 def test_luck_wording_follows_the_chance_and_is_conditional_without_a_report():
     log_n = lambda n: log_of(*spread(n, timedelta(hours=1), timedelta(hours=30)))
     pirate = lambda n: R.insight(state("pirate_shop_access", log_n(n)))
-    assert pirate(10).startswith("Still early") and ">99.99%" in pirate(10)
-    texts = {n: R.insight(state("weekly_loading_screen", log_n(n))) for n in (30, 189, 350, 500, 700, 1300)}
-    assert [t.split(":")[0].split(",")[0] for t in texts.values()] == ["Still early", "Perfectly normal", "Behind the average", "Uncommon territory",
-                                                                       "Unlucky", "Terrible luck"]
-    assert "if you are still waiting" in texts[700] and "same chance" in texts[700]
-    assert R.insight(state("gizmo", log_n(100))).startswith("In this cycle")
+    assert pirate(10).heading == "Still early" and pirate(10).level == R.EARLY and ">99.99%" in pirate(10).text
+    found = {n: R.insight(state("weekly_loading_screen", log_n(n))) for n in (30, 189, 350, 500, 700, 1300)}
+    assert [i.level for i in found.values()] == [R.EARLY, R.TYPICAL, R.BEHIND, R.UNCOMMON, R.UNLUCKY, R.TERRIBLE]
+    assert "if you are still waiting" in found[700].heading and "same chance" in found[700].text        # never a fact without a report
+    assert "if you are still waiting" in found[1300].heading
+    assert R.insight(state("gizmo", log_n(100))).level == R.CYCLE
 
 
 # ------------------------------------------------------------------ What If?
@@ -337,11 +339,14 @@ def test_the_roll_is_a_geometric_draw():
     draws = [R.roll(gizmo, rng=rng).chests for _ in range(20_000)]
     assert min(draws) >= 1 and abs(statistics.median(draws) - 88) <= 4 and abs(statistics.fmean(draws) - 127) <= 4
     r = R.roll(reward("pirate_shop_access"), team=4, rate=60, rng=random.Random(1))
-    assert 0 <= r.finder < 4 and r.team == 4 and abs(r.hours - r.chests / 240) < 1e-9 and abs(r.earlier + r.later + (1 / 137500) * (1 - 1 / 137500) ** (r.chests - 1) - 1) < 1e-9
+    assert 0 <= r.finder < 4 and r.team == 4 and abs(r.hours - r.chests / 204) < 1e-9 and abs(r.earlier + r.later + (1 / 137500) * (1 - 1 / 137500) ** (r.chests - 1) - 1) < 1e-9
+    finders = [R.roll(gizmo, team=4, rng=rng).finder for _ in range(20_000)]
+    assert abs(finders.count(0) / 20_000 - 1 / 3.4) < 0.02 and all(abs(finders.count(k) / 20_000 - 0.8 / 3.4) < 0.02 for k in (1, 2, 3))
     assert R.roll(gizmo, rate=None, rng=random.Random(2)).hours is None
     assert R.finder_name(R.Roll(5, 0, 1, None, 0.1, 0.8)) == "You" and R.finder_name(R.Roll(5, 2, 4, None, 0.1, 0.8)) == "Teammate 2"
-    assert R.roll_verdict(R.Roll(5, 0, 1, None, 0.1, 0.85)).startswith("Luckier than 85.0%")
-    assert R.roll_verdict(R.Roll(5, 0, 1, None, 0.97, 0.02)).startswith("Unluckier than 97.0%")
+    assert [R.roll_verdict(R.Roll(5, 0, 1, None, e, l)).level for e, l in ((0.02, 0.95), (0.1, 0.85), (0.4, 0.55), (0.7, 0.25), (0.97, 0.02))] ==         [R.VERY_LUCKY, R.LUCKY, R.TYPICAL, R.UNLUCKY, R.TERRIBLE]
+    v = R.roll_verdict(R.Roll(112528, 0, 1, None, 0.559, 0.44))
+    assert v.heading == "Pretty average luck" and v.text == "This time it took 112,528 chests. About 55.9% of first drops happen sooner."
 
 
 # ------------------------------------------------------------------ storage and the real history

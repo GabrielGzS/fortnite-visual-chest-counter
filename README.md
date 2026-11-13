@@ -171,7 +171,10 @@ odds per chest, the same for every player.
   - **Gizmos** start a new cycle by themselves at 90% (292 chests). A completed cycle is a statistical milestone, not a Gizmo found.
   - **Weekly rewards** start again at the Sunday rotation (9 AM New York time). **Pirate Shop Access** runs for the whole season.
   - **Start new cycle** (to help a friend, say) and **Mark obtained** (with its date, marked as your report) are separate; both have
-    **Undo** and never delete anything. Solo/Duo/Trio/Squad changes only the time, assuming teammates open as many chests as you.
+    **Undo** and never delete anything. Solo/Duo/Trio/Squad changes only the time: you plus teammates who each open 80% as many
+    chests as you (Duo 1.8x, Trio 2.6x, Squad 3.4x your pace), a safe average; the app never tries to detect your team.
+  - Pirate Shop Access and the Weekly Gold Outfit have their own full-width cards; each reward has its own colour, and the luck sentence
+    is a coloured badge ("Still early", "Perfectly normal" ... "Terrible luck, if you are still waiting").
 - **What If?**: **Roll a prediction** draws one random first drop with the real odds (team, finder, hours, how lucky it was), with
   optional Treasure Hour multipliers as a what-if. Nothing there is saved.
 
