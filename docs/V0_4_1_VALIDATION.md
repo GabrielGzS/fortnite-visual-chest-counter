@@ -149,7 +149,7 @@ evidence that B can work; templates built from several pop-ups have to be measur
 |---|---|---|
 | Maintainer's Fortnite HUD Scale | **75%** | read in Fortnite (Game UI, HUD Options), and `HUDScale = 0.75` in `%LOCALAPPDATA%\FortniteGame\Saved\Config\ClientSettings.Sav` |
 | Maintainer's game resolution | 2560x1440, resolution quality 100%, no dynamic resolution | `GameUserSettings.ini` |
-| The audit recording | 1280x720, 30 fps, NVENC 4 Mbps: OBS downscaled the 1440p game by 2 | the file itself |
+| The audit recording | 1280x720, 30 fps, NVENC 4 Mbps: the 1440p game through a 1080p canvas | the file itself, the OBS profile |
 | Replays' HUD Scale | **82%** | the maintainer |
 | Thiefs' HUD Scale | unknown (predicted about 64%, below) | |
 
@@ -170,31 +170,57 @@ to 720p, which a 1440p master reproduces far more closely; that is the key test.
 input), and the stream encoding. So the same play is recorded twice at once: the game at full 1440p locally, and the 720p SRT feed exactly
 as the app on PC B receives it.
 
+### The maintainer's capture pipeline (OBS profile, read 2026-11-13)
+
+| OBS setting | Value |
+|---|---|
+| Canvas (base) | 1920x1080 |
+| Output (scaled) | 1280x720, bicubic |
+| Frame rate | 30 fps |
+| Stream encoder (the SRT feed to PC B) | NVENC H.264, CBR 4,000 kbps, no extra rescale |
+| Recording | NVENC, no rescale (so 720p), about 4 Mbps in the audit file |
+
+So the game reaches PC B through two downscales: 2560x1440 to the 1920x1080 canvas (scene scaling), then to 1280x720 (bicubic). The audit
+recording has the same output, frame rate, encoder and bitrate as the SRT feed, so its measurements describe the live counter, apart from
+network loss. The SRT feed carries about 0.145 bits per pixel (4 Mbps / 1280x720 / 30 fps), about three times Twitch's 1080p60 at 6 Mbps
+(0.048): 720p at this quality is a mainstream input, not an edge case. The edge case seen in M9H was a heavily compressed YouTube 720p
+stream. Re-encoding the reference at these exact settings changed its scores very little (M1a); the size mismatch is what broke matching.
+
+HUD Scale slider: **25% to 125%** (the maintainer); step not yet confirmed.
+
 ### M1b recording checklist (replaces the earlier protocol)
 
-**Tell me first:** the HUD Scale slider's lowest and highest value and its step, and OBS's Settings > Video > Output (Scaled) Resolution
-(and Output > Streaming > Rescale, if set), so I know exactly what the SRT feed carries.
+**Do not change** Settings > Video (canvas, output, 30 fps, bicubic): those settings make the pixels PC B receives, and changing them
+would change what is being measured.
 
-**Setup (main PC, game at 2560x1440 as usual):**
-- Keep streaming to PC B over SRT as you normally do. On PC B, run the app's capture tool on that input in **lossless** mode.
-- Add a local OBS recording of the full game: Settings > Output (Advanced) > Recording: no rescale (2560x1440), 60 fps, NVENC, **CQP 18**,
-  MKV (remux to MP4 afterwards). About 5-8 GB per 10 minutes.
-- Keep overlays away from the centre-right of the screen and the top centre.
-- Every time you change HUD Scale, keep the settings page with the value on screen for 2 seconds: the recording documents itself.
+**Setup for every session:**
+- Stream to PC B over SRT as usual. On PC B, record that input with the app's capture tool in **lossless** mode: the exact pixels the
+  counter sees.
+- Local OBS recording of the canvas: Settings > Output > Recording: Rescale Output **1920x1080** (OBS cannot record beyond its canvas),
+  NVENC, rate control **CQP 18**, MKV (remux to MP4 afterwards). About 2-4 GB per 10 minutes. This sharper copy of the same moments is
+  for research only: it lets M1b separate the HUD slider from the downscaling.
+- Keep overlays away from the centre-right of the screen and the top centre. When you change HUD Scale, keep the settings page with the
+  value on screen for 2 seconds.
 
-**Session A: template source, 75% (one match, about 10-15 min).** The waiting island with its countdown and the bus launch; at least 6
-separate chests (wait until the previous pop-up is gone), a rare chest if one is near, one opened while another XP line is on screen if it
-happens naturally; the end screen, whatever it is; ready up from it (READY overlay).
+**Pilot first (about 5 minutes, at 75%).** Start a match and record from the waiting island: the countdown, the bus, landing, and 4-6
+chests. Afterwards, check OBS's stats for dropped or lagged frames (encoding two streams at once), and send me both files. I check that
+they line up in time, have the expected resolutions, and that native 75% templates cut from the PC B capture work on the rest of it.
+Only then the three sessions below.
 
-**Session B: held-out validation, 75% (another match, another time).** The same contents, but end with RETURN TO LOBBY. I will not cut
-anything from it; it only judges what A produced.
+**Session A: template source, 75% (one match).** The waiting island with its countdown and the bus launch; at least 6 separate chests
+(wait until the previous pop-up is gone), a rare chest if one is near, one opened while another XP line is on screen if it happens
+naturally; the end screen, whatever it is; ready up from it (READY overlay).
 
-**Session C: the slider sweep (one match).** On the waiting island, step HUD Scale through the slider's lowest value, 65, 70, 75, 80, 82, 85,
-90, 100 and the highest (5 seconds of countdown at each, shown on camera). In the match, open 2 chests each at 65, 75, 82 and 100 (70 and 80
-too if chests are easy to find). If the slider moves in 1% steps, also 2 chests each at 74 and 76.
+**Session B: held-out validation, 75% (another match, another time).** The same contents, but end with RETURN TO LOBBY. Nothing is cut
+from it; it only judges what A produced.
 
-**Not needed:** Thiefs' value, other players, Creative, Portuguese. **Total:** 3 matches, roughly 35-45 minutes of play and 20-30 GB of
-local recordings, plus the PC B captures. Keep everything in `samples/video tests/` (not in Git); only short labelled windows become cases.
+**Session C: the slider sweep (one match).** On the waiting island, step HUD Scale through 25, 50, 65, 70, 75, 80, 82, 85, 90, 100 and 125
+(5 seconds of countdown at each, shown on camera). In the match, open 2 chests each at 65, 75, 82 and 100 (70 and 80 too if chests are
+easy to find); if the slider moves in 1% steps, also 2 chests each at 74 and 76.
+
+**Not needed:** Thiefs' value (the 64% estimate stays a prediction), other players, Creative, Portuguese. **Total after the pilot:** 3
+matches, roughly 35-45 minutes of play, 10-15 GB of local recordings plus the PC B captures. Everything stays in `samples/video tests/`
+(not in Git); only short labelled windows become cases.
 
 ## M4 (first batch) — HUD-independent fixes
 
