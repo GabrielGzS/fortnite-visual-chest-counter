@@ -10,7 +10,7 @@ signed, built for release or published without explicit approval.
 
 ## 1. Goals
 
-1. **HUD compatibility is a feature, not a patch.** The maintainer cannot use the app properly with their own Fortnite HUD: on his footage
+1. **HUD compatibility is a feature, not a patch.** The maintainer cannot use the app properly with their own Fortnite HUD: on their footage
    every chest is APPROX, 4 of 20 are missed, 1 is counted twice, and a fully observed match is Partial. Fix the architecture so supported
    HUD configurations work for every player, not one more size added by hand.
 2. **Keep CERTAIN meaningful.** No threshold is lowered to raise CERTAIN. A native-size match goes through the same evidence rules as the
@@ -96,6 +96,16 @@ Reference videos, the maintainer's recording, held-out footage at every supporte
 completeness and active time, 15 fps throughput, match budget, automated and mutation tests, a real SRT test, persistence/OBS/Analytics
 unchanged except where corrected detection legitimately changes results. No release preparation, signing or publication without approval.
 
+**README HUD compatibility matrix (M5).** A dedicated section of the project README.md (the repository page people hand to their AI
+assistant; not the release notes or the quick start): one structured table, a row per tested combination of HUD Scale, game resolution and
+the resolution the app receives, with chest detection, CERTAIN, chest types and match tracking, each **Verified** (end-to-end tested on
+held-out footage), **Partial** or **Untested**, plus known limits and what diagnostics to collect when recognition fails. It also says
+that the HUD Scale percentage and the detector's measured sizes are different things. Only end-to-end tested combinations are Verified;
+untested slider values are never advertised as compatible.
+
+**Compatibility contracts.** Every Verified row becomes a permanent regression gate, like the English, PS5, Replays and Thiefs footage
+today: no later change (v0.4.2, v0.5.0) may break it without that showing in the cases and the full-video regression.
+
 ## 5. Acceptance goals (targets, not guarantees)
 
 | Goal | Target |
@@ -119,6 +129,8 @@ unchanged except where corrected detection legitimately changes results. No rele
 | 2026-11-13 | M1 split into M1a (existing footage, done) and M1b (calibration footage); the architecture gate stays before M2 (maintainer). |
 | 2026-11-13 | HUD-independent fixes approved ahead of the gate, as small separately validated commits: duplicates after an overlay, short end screens, grey CONNECTING, the READY overlay, console wording, and a look at RARE typing. Backlog decisions confirmed. First supported intermediate configuration at the gate: the maintainer's own HUD. |
 | 2026-11-13 | RARE typing on the maintainer's footage is HUD-dependent (the scale-free length test reads RARE, 0.78-0.81; the exact 1.0x RARE template confirms at 0.22-0.36 against 0.50), so it moves to M3 with the native templates. Lowering the word threshold or a blurred confirmation stays rejected (random ink reached 0.65, v0.2.2). |
+| 2026-11-13 | Confirmed: the maintainer plays at HUD Scale 75%, 2560x1440; Replays at 82%; Thiefs unknown. Ordinary HUD Scale values are the app's compatibility responsibility: a player never has to change a comfortable HUD to use the counter. M1b refined to three matches (75% source, 75% held-out, a slider sweep), each recorded at 1440p and as the 720p SRT feed (V0_4_1_VALIDATION.md). |
+| 2026-11-13 | README HUD compatibility matrix (M5 deliverable): see section 4, M5. |
 
 ## 7. Backlog and research proposals (not v0.4.1 scope)
 
