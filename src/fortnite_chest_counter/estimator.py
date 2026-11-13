@@ -800,10 +800,12 @@ class ChestEstimator:
                       (f"HIGH: both at least {SMALL_HIGH_EXACT:.2f} / {SMALL_HIGH_BLUR:.2f}" if strong else
                        f"MEDIUM, counted approx only (CERTAIN needs {SMALL_HIGH_EXACT:.2f} / {SMALL_HIGH_BLUR:.2f})"))
         elif scaled is not None:
-            # HUD drawn larger: the exact score says nothing here, so the tier rules above do not apply. APPROX only.
+            # Found by the blurred match only: the exact score says nothing here, so the tier rules above do not apply. APPROX only. At x1.0
+            # the pop-up is about normal size but its exact shape did not match (v0.4.1: the maintainer's 0.95x pop-up), below 1.0 it is larger.
             adjusted, certain, approx = "MEDIUM", False, True
+            size = "HUD drawn larger" if scaled["scale"] < 1.0 else "near normal size, exact shape not matched"
             reason = (f"scale-aware pop-up: blurred {p['template']} match {scaled['blur']:.2f} at x{scaled['scale']} "
-                      f"(exact match {p['score']:.2f}; HUD drawn larger) -> MEDIUM, counted approx only (never CERTAIN)")
+                      f"(exact match {p['score']:.2f}; {size}) -> MEDIUM, counted approx only (never CERTAIN)")
         if inc is not None:
             step = {"new_line": "a chest line was added to the pop-up on screen",
                     "multiplier": "the chest line's multiplier " + ("appeared (X2)" if inc.get("change") == "appeared"

@@ -761,6 +761,15 @@ def test_console_names_the_hud_size_and_never_calls_a_certain_chest_approx_only(
     assert "large-HUD match 0.88" in lines[2] and "drawn larger than usual (approx only)" in lines[2]
 
 
+def test_console_does_not_call_a_normal_size_blurred_match_large():
+    """v0.4.1: the maintainer's 0.95x pop-ups were all found by the scale-aware channel at x1.0 and shown as "large-HUD ... drawn larger
+    than usual", the opposite of the truth. At x1.0 the pop-up is about normal size; only its exact shape did not match."""
+    near = dict(EV_APPROX, scaled_popup={"blur": 0.84, "scale": 1.0})
+    line = _printed(lambda: _console("normal").event(near, "3", "17")).splitlines()[0]
+    assert "blurred match 0.84" in line and "near-normal pop-up, shape not exact (approx only)" in line
+    assert "large-HUD" not in line and "larger" not in line
+
+
 def test_console_colours_use_one_meaning_per_colour():
     c = _console("normal", colors=True)
     green, yellow, red = (_printed(lambda e=e: c.event(e, "1", "2")) for e in (EV_CERTAIN, EV_APPROX, EV_REJECT))

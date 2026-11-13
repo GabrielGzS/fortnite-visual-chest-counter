@@ -63,8 +63,12 @@ def _why(ev):
     r = ev.get("reason", "")
     counted = ev.get("certain_counted") or ev.get("approx_counted")
     if ev.get("scaled_popup"):
-        size = "smaller" if ev["scaled_popup"].get("scale", 1.0) > 1.0 else "larger"
-        return f"pop-up drawn {size} than usual" + ("" if ev.get("certain_counted") else " (approx only)")
+        scale = ev["scaled_popup"].get("scale", 1.0)
+        # scale > 1: the small-HUD channel; < 1: the picture shrunk to find a larger pop-up; 1.0: about normal size, but the exact shape did
+        # not match (a slightly different HUD size or picture quality), so only the blurred match found it
+        what = ("pop-up drawn smaller than usual" if scale > 1.0 else "pop-up drawn larger than usual" if scale < 1.0
+                else "near-normal pop-up, shape not exact")
+        return what + ("" if ev.get("certain_counted") else " (approx only)")
     if "promoted to HIGH" in r:
         return "confirmed by compression check"
     if "adjusted to LOW" in r:
@@ -85,7 +89,8 @@ def _why(ev):
 def _evidence(ev):
     """What was measured, worded so it is not mistaken for a probability."""
     if ev.get("scaled_popup"):
-        hud = "small-HUD" if ev["scaled_popup"].get("scale", 1.0) > 1.0 else "large-HUD"
+        scale = ev["scaled_popup"].get("scale", 1.0)
+        hud = "small-HUD" if scale > 1.0 else "large-HUD" if scale < 1.0 else "blurred"
         return f"{hud} match {ev['scaled_popup']['blur']:.2f} ({ev.get('adjusted_tier', '?')})"
     if ev.get("popup_score") is not None:
         return f"match {ev['popup_score']:.2f} ({ev.get('adjusted_tier', '?')})"
