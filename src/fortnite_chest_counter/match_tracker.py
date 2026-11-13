@@ -41,14 +41,15 @@ SOURCE_LOST_REASONS = frozenset({"video source stopped"})
 
 
 class MatchTracker:
-    def __init__(self, write, warn, cues=M, machine=None, history=None, heartbeat_seconds=60, frames=None, status=None):
+    def __init__(self, write, warn, cues=M, machine=None, history=None, heartbeat_seconds=60, frames=None, status=None, hud="standard"):
         """`write` takes one dict for the session log, `warn` one message for the user. Raises if the templates cannot be loaded.
         `history` is a HistoryWriter in "on" mode; `frames` returns (frames processed, frames dropped) for its checkpoints.
-        `status` receives what the app's status line shows, once per sample. It is read-only reporting."""
+        `status` receives what the app's status line shows, once per sample. It is read-only reporting. `hud` is the profile's Fortnite
+        HUD Scale ([detector] hud): the cue reader also reads that HUD's own templates."""
         self._write, self._warn, self._cues, self._status = write, warn, cues, status
         self._history, self._beat_every, self._frames, self._last_beat_t = history, heartbeat_seconds, frames, None
         self._mode = MODE if history is None else "on"
-        self._reader = cues.CueReader()
+        self._reader = cues.CueReader() if hud == "standard" else cues.CueReader(hud=hud)
         self._machine = machine if machine is not None else S.MatchStateMachine()
         self._picture = None               # a small copy of the last sample's picture, never the frame itself
         self._pending = []                 # (language, own time) of the chests counted since the last sample

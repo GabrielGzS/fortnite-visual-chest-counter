@@ -30,7 +30,11 @@ SOURCES = {"you_placed_screen": (1, 9, (538, 98, 683, 128)), "you_placed_bar": (
            "waiting_for_players_small": ("seg_00169.mkv", 7.4, (592, 85, 712, 97)), "bus_launching_small": ("seg_00170.mkv", 5.4, (660, 67, 730, 77)),
            # v0.4.1: the grey shadow of CONNECTING on the white return-to-lobby splash, and the READY overlay's two lines
            "connecting_shadow": (MAINTAINER, 1464.5, (55, 640, 225, 670)), "ready_party": (MAINTAINER, 1446, (980, 605, 1265, 640)),
-           "ready_finding": (MAINTAINER, 440, (940, 588, 1140, 630))}
+           "ready_finding": (MAINTAINER, 440, (940, 588, 1140, 630)),
+           # v0.4.1: Fortnite HUD Scale 75% (the maintainer's game; research/hud75_templates.py evaluates them)
+           "waiting_for_players_75": (MAINTAINER, 500.0, (578, 90, 726, 105)), "bus_launching_75": (MAINTAINER, 512.0, (664, 67, 745, 80)),
+           "you_placed_screen_75": (MAINTAINER, 1433.0, (543, 91, 677, 122)), "you_placed_bar_75": (MAINTAINER, 1436.5, (555, 15, 655, 42)),
+           "victory_75": (MAINTAINER, 366.0, (585, 125, 705, 172))}
 
 
 def read_frame(ffmpeg, capture, source, seconds, small_capture=None):

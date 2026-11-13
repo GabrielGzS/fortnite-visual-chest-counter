@@ -141,7 +141,7 @@ def test_the_reader_keeps_nothing_about_a_frame():
     reader = M.CueReader()
     before = set(vars(reader))
     reader.read(FRAMES[0])
-    assert set(vars(reader)) == before == {"_templates", "_ink", "_hud", "_hud_edges"}
+    assert set(vars(reader)) == before == {"_templates", "_ink", "_hud", "_hud_edges"}       # (_hud: the HUD shapes, set once)
 
 
 def test_a_frame_of_the_wrong_shape_is_refused():
@@ -185,6 +185,51 @@ def test_v041_templates_on_the_maintainers_footage():
             assert abs(value - measured) < 1e-5, (where, value, measured)
             assert (value >= M.SCORE_THRESHOLD) if expected else (value <= 0.40), (where, value)
     assert sum(USER_CUES["expected"][:, 0]) == 4 and sum(USER_CUES["expected"][:, 1]) == 7
+
+
+CUES75 = np.load(HERE / "fixtures" / "match" / "user_20261112_cues75.npz")
+
+
+def frame75(row):
+    bits = np.unpackbits(CUES75["masks"][row])
+    frame = np.full((720, 1280, 3), BLANK, np.uint8)
+    offset = 0
+    for x0, y0, x1, y1 in CUES75["boxes"]:
+        size = (y1 - y0) * (x1 - x0)
+        mask = bits[offset:offset + size].reshape(y1 - y0, x1 - x0).astype(bool)
+        offset += size
+        frame[y0:y1, x0:x1] = np.where(mask[..., None], 255, BLANK).astype(np.uint8)
+    return frame
+
+
+def test_hud_75_match_text_on_the_maintainers_footage():
+    """v0.4.1, [detector] hud = "75": the countdown, LAUNCHING IN, YOU PLACED (death screen and recap bar) and Victory as the maintainer's
+    game draws them (research/user_cue_fixture.py). One waiting island, one launch, one death screen and one Victory exist, so those are
+    within the session the templates were cut from; the recap bar's second appearance is held out (0.97)."""
+    reader = M.CueReader(hud="75")
+    signals = [str(s) for s in CUES75["signals"]]
+    for i in range(len(CUES75["times"])):
+        scores = reader.read(frame75(i), signals)
+        where = str(CUES75["where"][i])
+        for j, signal in enumerate(signals):
+            assert abs(scores[signal] - CUES75["scores"][i][j]) < 1e-5, (where, signal)
+            assert (scores[signal] >= M.SCORE_THRESHOLD) if CUES75["expected"][i][j] else (scores[signal] <= 0.40), (where, signal, scores[signal])
+    assert all(CUES75["expected"][:, j].sum() >= 2 for j in range(len(signals)))
+
+
+def test_the_tracker_reads_the_profiles_hud_templates():
+    from fortnite_chest_counter.match_tracker import MatchTracker
+    for hud, has in (("standard", False), ("75", True)):
+        tracker = MatchTracker(lambda record: None, lambda message: None, hud=hud)
+        assert (M.HUD_SCALE_CUES["75"] <= set(tracker._reader._templates)) == has, hud
+
+
+def test_hud_75_templates_are_read_only_for_that_hud():
+    standard = M.CueReader()
+    assert not set(standard._templates) & set().union(*M.HUD_SCALE_CUES.values())     # every v0.4.0 reading stays as it was
+    assert M.HUD_SCALE_CUES["75"] <= set(M.CueReader(hud="75")._templates)
+    i = next(i for i in range(len(CUES75["times"])) if str(CUES75["where"][i]) == "waiting island")
+    assert standard.read(frame75(i), ["waiting_for_players"])["waiting_for_players"] < M.SCORE_THRESHOLD   # v0.4.0 missed it
 
 
 def test_only_the_cancel_button_is_dark_text():

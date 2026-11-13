@@ -72,6 +72,10 @@ CUES = (Cue("you_placed_screen", (514, 86, 707, 140)), Cue("you_placed_bar", (53
         Cue("connecting_shadow", (36, 632, 230, 679), SHADOW),
         # The READY overlay after a match (v0.4.1, the maintainer's ready-up): its two right-hand lines, at the same place in both overlays seen.
         Cue("ready_party", (978, 600, 1270, 646)), Cue("ready_finding", (946, 584, 1130, 630)),
+        # Fortnite HUD Scale 75% (v0.4.1): the same texts as the game draws them there, cut from the maintainer's recording (2560x1440 through
+        # OBS 1280x720), in the boxes of their normal-size versions. Read only for a profile with that HUD (HUD_SCALE_CUES).
+        Cue("waiting_for_players_75", (552, 80, 752, 120)), Cue("bus_launching_75", (600, 58, 800, 94)),
+        Cue("you_placed_screen_75", (514, 86, 707, 140)), Cue("you_placed_bar_75", (536, 6, 700, 56)), Cue("victory_75", (550, 121, 754, 188)),
         Cue("menu_locker", (304, 27, 414, 66)), Cue("menu_quests", (479, 27, 586, 66)), Cue("menu_career", (665, 27, 775, 66)),
         Cue("matchmaking_cancel", (101, 586, 246, 632), DARK), Cue("waiting_for_players", (552, 80, 752, 120)),
         Cue("bus_launching", (600, 58, 800, 94)),          # wider: the sentence is centred, and the bus's name changes each season
@@ -97,11 +101,13 @@ _HUD_CUE = {cue.name: cue for cue in HUD_CUES}
 
 _MENU = ("menu_locker", "menu_quests", "menu_career")
 # signal -> the templates behind it. The highest score wins, except the menu bar, where two of the three words must agree.
-SIGNALS = {"you_placed": ("you_placed_screen", "you_placed_bar"), "eliminated_by": ("eliminated_by",), "connecting": ("connecting", "connecting_shadow"),
-           "lobby_menu": _MENU, "matchmaking": ("matchmaking_cancel",), "waiting_for_players": ("waiting_for_players", "waiting_for_players_small"),
-           "bus_launching": ("bus_launching", "bus_launching_small"), "spectating": ("spectating",), "victory_royale": ("victory_large", "victory_small"),
+SIGNALS = {"you_placed": ("you_placed_screen", "you_placed_bar", "you_placed_screen_75", "you_placed_bar_75"), "eliminated_by": ("eliminated_by",), "connecting": ("connecting", "connecting_shadow"),
+           "lobby_menu": _MENU, "matchmaking": ("matchmaking_cancel",), "waiting_for_players": ("waiting_for_players", "waiting_for_players_small", "waiting_for_players_75"),
+           "bus_launching": ("bus_launching", "bus_launching_small", "bus_launching_75"), "spectating": ("spectating",), "victory_royale": ("victory_large", "victory_small", "victory_75"),
            "ready_overlay": ("ready_party", "ready_finding")}
 PROVISIONAL_SIGNALS = frozenset({"victory_royale"})          # too few examples to rely on by itself
+# Templates of one Fortnite HUD Scale, read only when the profile has that HUD ([detector] hud). Every other template is always read.
+HUD_SCALE_CUES = {"75": frozenset({"waiting_for_players_75", "bus_launching_75", "you_placed_screen_75", "you_placed_bar_75", "victory_75"})}
 NOT_ENGLISH_SPECIFIC = frozenset({"victory_royale"})         # the same word appears in the Portuguese game
 
 
@@ -119,9 +125,11 @@ def _check_frame(frame):
 class CueReader:
     """Loads the word templates once. `read` can then be called for each frame; it keeps nothing between calls."""
 
-    def __init__(self, folder=None):
+    def __init__(self, folder=None, hud="standard"):
+        """hud: the profile's Fortnite HUD Scale ([detector] hud). Its own templates are read too; an unknown value reads the standard ones."""
         folder = Path(folder) if folder is not None else TEMPLATE_DIR
-        self._templates = {cue.name: np.load(folder / f"{cue.name}.npy").astype(np.float32) for cue in CUES}
+        skip = set().union(*HUD_SCALE_CUES.values()) - HUD_SCALE_CUES.get(hud, frozenset())
+        self._templates = {cue.name: np.load(folder / f"{cue.name}.npy").astype(np.float32) for cue in CUES if cue.name not in skip}
         self._ink = {name: float(template.sum()) for name, template in self._templates.items()}
         self._hud = {cue.name: np.load(HUD_TEMPLATE_DIR / f"{cue.name}.npy").astype(np.float32) for cue in HUD_CUES}
         self._hud_edges = {name: float(template.sum()) for name, template in self._hud.items()}
@@ -141,14 +149,14 @@ class CueReader:
     def template_scores(self, frame, names=None):
         """{template name: score}, for debugging and research."""
         _check_frame(frame)
-        return {name: self._score(frame, name) for name in (names if names is not None else _CUE)}
+        return {name: self._score(frame, name) for name in (names if names is not None else self._templates)}
 
     def read(self, frame, signals=None):
         """{signal: score, 0 to 1} for every signal, or only the ones named. Never writes to `frame`."""
         _check_frame(frame)
         out = {}
         for signal in (signals if signals is not None else SIGNALS):
-            scores = [self._score(frame, name) for name in SIGNALS[signal]]
+            scores = [self._score(frame, name) for name in SIGNALS[signal] if name in self._templates]
             out[signal] = sorted(scores)[-2] if signal == "lobby_menu" else max(scores)
         return out
 
