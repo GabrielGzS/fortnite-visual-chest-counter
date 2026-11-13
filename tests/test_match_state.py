@@ -758,6 +758,23 @@ def test_an_english_chest_confirms_a_match():
     assert r.completion == S.PARTIAL and r.english_confirmed and r.english_chests == 1
 
 
+def test_a_brief_eliminated_by_screen_is_read_from_one_strong_sample():
+    """v0.4.1: the maintainer's ELIMINATED BY was on screen for 1.4 s and the live run sampled it once (0.88), so the ending was lost."""
+    s = played_match().show(1, "eliminated_by", health=40).show(5, health=40)
+    assert s.state == S.ELIMINATED
+    active = s.machine.snapshot()["active_seconds"]
+    s.show(20, health=40)
+    assert s.machine.snapshot()["active_seconds"] == active          # play time stops at the death screen
+    weak = played_match()
+    weak.events += weak.machine.update(S.Observation(weak.t, {"eliminated_by": 0.80}, 40))
+    weak.t += 1
+    assert weak.show(3, health=40).state == S.IN_MATCH                # one sample under the strong line is not enough
+    for signal in ("you_placed", "spectating", "victory_royale"):     # long screens keep 2 of 3
+        assert played_match().show(1, signal, health=40).show(3, health=40).state == S.IN_MATCH, signal
+    lobby = Script().show(5, "lobby_menu").show(1, "eliminated_by").show(3)  # outside a match in play, one sample changes nothing
+    assert lobby.state == S.LOBBY and lobby.machine.open_match_number is None
+
+
 def test_english_end_screens_confirm_a_match():
     for signal in ("you_placed", "spectating", "eliminated_by"):
         assert Script().show(30, health=HP).show(6, signal).finish().records[0].english_confirmed, signal

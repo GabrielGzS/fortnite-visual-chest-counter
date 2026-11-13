@@ -66,6 +66,11 @@ ENGLISH_SIGNALS = frozenset({"you_placed", "eliminated_by", "connecting", "lobby
 ALL_SIGNALS = ENGLISH_SIGNALS | {"victory_royale"}
 
 CONFIRM_HITS, CONFIRM_WINDOW = 2, 3
+# A signal that ONE strong sample confirms (v0.4.1). ELIMINATED BY can be on screen for only 1.4 s (the maintainer's death, 1433.4-1434.8 s),
+# so at one sample per second 2 of 3 is a matter of timing: the live run sampled it once, at 0.88, and missed the ending. On screen it scored
+# 0.86-0.99 in every recording; anywhere else at most 0.17 over about 4,000 samples. The longer screens (YOU PLACED, Victory, SPECTATING,
+# all several seconds) keep 2 of 3, and so does ELIMINATED BY outside a match in play (see _confirmed).
+STRONG_SINGLE = {"eliminated_by": 0.85}
 HUD_HITS, HUD_WINDOW = 5, 8
 AMBIGUOUS_HUD_HITS, AMBIGUOUS_HUD_WINDOW = 8, 10
 COUNTDOWN_GONE_ON_BUS, COUNTDOWN_GONE_ANYWAY = 3.0, 15.0
@@ -370,7 +375,14 @@ class MatchStateMachine:
             match.reasons.append(OUT_OF_VIEW_REASON)
 
     def _confirmed(self, signal):
-        return sum(1 for _, hit, _ in self._recent[signal] if hit) >= CONFIRM_HITS
+        recent = self._recent[signal]
+        if sum(1 for _, hit, _ in recent if hit) >= CONFIRM_HITS:
+            return True
+        # Only while a match is open and in play, where a missed ending costs time and the ending itself. Elsewhere a stray sample still
+        # changes nothing: from ELIMINATED a match could not open on the gameplay that follows.
+        strong = STRONG_SINGLE.get(signal)
+        return (strong is not None and self.state == IN_MATCH and self._match is not None
+                and any(score >= strong for _, _, score in recent))
 
     def _first_hit(self, signal):
         return next((t for t, hit, _ in self._recent[signal] if hit), self._last_t)

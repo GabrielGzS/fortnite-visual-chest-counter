@@ -49,10 +49,11 @@ def test_fixture_is_the_real_pipeline_input():
     assert sum(r["hud_in_view"] is not None for r in rows) > 50 and sum(r["health_green_pixels"] is not None for r in rows) > 1000
 
 
-def test_v040_records_are_reproduced_exactly():
+def test_records_are_reproduced_exactly():
+    """v0.4.0 gave match 2 974 s of play. v0.4.1: the 1.4 s ELIMINATED BY (one sample, 0.88) now ends play at 1434 s: 945 s."""
     records, _, _ = replay()
     got = [(r.match_number, r.completion, r.ended_by, r.opened_t, round(r.closed_t, 2), r.active_seconds) for r in records]
-    assert got == [(1, "partial", "left_or_unknown", 0.0, 484.0, 469.0), (2, "partial", "stopped", 489.0, 1478.53, 974.0)], got
+    assert got == [(1, "partial", "left_or_unknown", 0.0, 484.0, 469.0), (2, "partial", "stopped", 489.0, 1478.53, 945.0)], got
 
 
 def test_v041_gap_the_fully_observed_match_is_not_complete():
@@ -61,8 +62,10 @@ def test_v041_gap_the_fully_observed_match_is_not_complete():
     assert truth["m2-full-placed-3"]["completion"] == "complete"
     m2 = records[1]
     assert m2.completion == "partial" and not m2.observed_from_start            # the 0.90x countdown is never read
-    assert m2.ended_t is None                                                      # YOU PLACED (0.90x) and ELIMINATED BY are not read
-    assert not any(t.state in (S.PRE_GAME, S.ELIMINATED) for t in transitions)     # no countdown, no ending, no READY overlay
+    assert m2.ended_t is None                                                      # YOU PLACED (0.90x) is not read
+    assert not any(t.state == S.PRE_GAME for t in transitions)                     # the 0.90x countdown is not read
+    out = [t for t in transitions if t.state == S.ELIMINATED]
+    assert [round(t.t) for t in out] == [1434] and out[0].reason == "eliminated_by_seen"   # v0.4.1: the brief ELIMINATED BY is read
 
 
 def test_v041_gap_active_time_includes_screens_that_are_not_play():
@@ -70,7 +73,7 @@ def test_v041_gap_active_time_includes_screens_that_are_not_play():
     truth = {m["id"]: m for m in TRUTH["matches"]}
     true_m2 = truth["m2-full-placed-3"]["active"][1] - truth["m2-full-placed-3"]["active"][0]
     true_m1 = truth["m1-rebooted-win"]["active"][1] - truth["m1-rebooted-win"]["active"][0]
-    assert round(records[1].active_seconds - true_m2) == 62             # waiting island and time after death counted as play
+    assert round(records[1].active_seconds - true_m2) == 33             # the waiting island counted as play (v0.4.0: 62, after death too)
     assert round(records[0].active_seconds - true_m1) == 132            # waiting for a reboot, Victory, recap and READY overlay
 
 
