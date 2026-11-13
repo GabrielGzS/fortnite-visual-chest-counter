@@ -16,12 +16,13 @@
     {"id": "pirate_shop_access", "name": "Pirate Shop Access", "odds": 137500, "kind": "pool"},
     {"id": "weekly_gold_outfit", "name": "Weekly Gold Outfit", "odds": 1562500, "kind": "weekly"}
   ],
-  "treasure_hour_multipliers": {"pirate_shop_access": 1.5, "weekly_gold_outfit": 7.5, "weekly_vehicle_decal": 10},
+  "treasure_hours": [],
+  "reported_boosts": {"pirate_shop_access": [1.5, 2], "weekly_gold_outfit": [7.5, 10], "weekly_vehicle_decal": [10]},
   "about": [
     "Normal odds per chest as published by Epic Games for the Treasure Hunters mini-season (reported 2026-11-13); the same for every player, constant outside Treasure Hours. Except Gizmos, the same treasure cannot be obtained twice.",
     "Gizmo 1 in 127 is taken from Epic's table as the maintainer read it; the press coverage found on 2026-11-13 did not list it.",
     "Starts 2026-11-01 at 08:00 UTC (the previous season's downtime; no chests are opened between then and the launch). Weekly rewards rotate on Sundays at 9 AM America/New_York (14:00 UTC in November 2026), as the maintainer reported. The end, about 2026-12-05, is an estimate: Epic has not announced it.",
-    "Treasure Hour multipliers are reported figures and are not applied: every chest uses the normal odds.",
+    "treasure_hours lists only Treasure Hours whose exact times and multipliers are verified; a chest inside one counts at its boosted odds for the rewards it names. None is listed yet, so every chest uses the normal odds. reported_boosts are the multipliers Epic announced for some events (information only; What If? lets you try them).",
     "Every chest the counter counts (normal, rare and sprite chests) is one attempt."
   ],
   "sources": [

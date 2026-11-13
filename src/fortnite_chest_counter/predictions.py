@@ -21,6 +21,11 @@ out from the chests, never stored, so a corrected history recalculates everythin
 
 The odds are the same for every player and every chest (Epic), so a past drought never makes the next chest luckier: forecasts and the
 What If? roll start from now.
+
+Treasure Hours. A pool lists the verified ones (times and a multiplier per reward). A chest opened inside one counts at its boosted odds
+for that reward, so the chance is 1 - prod(1 - p_i), worked with "normal-odds chests": n chests at p*m are worth n*log(1-p*m)/log(1-p)
+chests at p. Nothing is boosted that the pool does not list, and forecasts use the normal odds (an event lasts hours, not the whole hunt).
+What If? can try any multiplier, labelled hypothetical.
 """
 
 import json
@@ -47,6 +52,7 @@ TEAMS = (("Solo", 1), ("Duo", 2), ("Trio", 3), ("Squad", 4))
 RESTART, OBTAINED, UNDO = "prediction_restart", "prediction_obtained", "prediction_undo"
 ACTION_KINDS = (RESTART, OBTAINED, UNDO)
 MANUAL = "manual"
+MULTIPLIERS = (1.0, 1.5, 2.0, 7.5, 10.0)   # What If? choices; Epic announced 1.5x-10x for some rewards
 RATE_PERIODS = (("last7", "last 7 days"), ("all", "all your history"))
 
 
@@ -58,6 +64,18 @@ class PoolError(ValueError):
 def chance(n, p):
     """The chance of at least one drop in n chests of chance p each. Exact for tiny p (expm1 / log1p)."""
     return 0.0 if n <= 0 else -math.expm1(n * math.log1p(-p))
+
+
+def more_to(milestone, p, have=0.0):
+    """Chests still needed at chance p, from `have` normal-odds chests, to reach `milestone`. 0 when reached."""
+    if chance(have, p) >= milestone:
+        return 0
+    k = max(1, math.ceil(math.log1p(-milestone) / math.log1p(-p) - have))
+    while k > 1 and chance(have + k - 1, p) >= milestone:
+        k -= 1
+    while chance(have + k, p) < milestone:
+        k += 1
+    return k
 
 
 def chests_to(milestone, p):
@@ -124,6 +142,7 @@ class Pool:
     rewards: tuple
     about: tuple
     sources: tuple
+    treasure_hours: tuple = ()             # verified boosts only: (start, end, {reward id: multiplier})
 
     def weeks(self):
         bounds = (self.start, *self.rotations, self.end)
@@ -163,8 +182,21 @@ def parse_pool(data):
         rewards.append(Reward(item["id"], item["name"], item["odds"], item["kind"]))
     if not rewards:
         raise PoolError("a pool needs at least one reward")
+    odds = {r.id: r.p for r in rewards}
+    hours_list = []
+    for item in data.get("treasure_hours", []):
+        if not isinstance(item, dict) or not isinstance(item.get("multipliers"), dict):
+            raise PoolError(f"a Treasure Hour needs a start, an end and multipliers: {item!r}")
+        a, b = _when(item.get("start"), "Treasure Hour start"), _when(item.get("end"), "Treasure Hour end")
+        boosts = item["multipliers"]
+        if not a < b or any(rid not in odds or type(m) not in (int, float) or not 1 <= m or m * odds[rid] >= 1 for rid, m in boosts.items()):
+            raise PoolError(f"a Treasure Hour needs start < end and a multiplier of at least 1 per known reward: {item!r}")
+        hours_list.append((a, b, {rid: float(m) for rid, m in boosts.items()}))
+    hours_list.sort(key=lambda h: h[0])
+    if any(x[1] > y[0] for x, y in zip(hours_list, hours_list[1:])):
+        raise PoolError("Treasure Hours must not overlap")
     return Pool(data["id"], int(data.get("revision", 1)), data["name"], start, end, bool(data.get("end_estimated")), rotations, tuple(rewards),
-                tuple(data.get("about", [])), tuple(data.get("sources", [])))
+                tuple(data.get("about", [])), tuple(data.get("sources", [])), tuple(hours_list))
 
 
 def load_pool(path=DEFAULT_POOL):
@@ -195,6 +227,32 @@ class ChestLog:
     @property
     def first(self):
         return self._times[0] if self._times else None
+
+    def _boosted(self, start, end, reward, treasure_hours):
+        """[(chests, multiplier)] of the Treasure Hours inside start..end that boost this reward."""
+        out = []
+        for a, b, boosts in treasure_hours:
+            m = boosts.get(reward.id, 1.0)
+            if m > 1.0:
+                n = self.count(max(start, a), min(end, b))
+                if n:
+                    out.append((n, m))
+        return out
+
+    def effective(self, start, end, reward, treasure_hours=()):
+        """The chests of start..end as normal-odds chests for this reward: a boosted chest is worth more than one."""
+        n = float(self.count(start, end))
+        base = math.log1p(-reward.p)
+        for boosted, m in self._boosted(start, end, reward, treasure_hours):
+            n += boosted * (math.log1p(-reward.p * m) / base - 1.0)
+        return n
+
+    def expected(self, start, end, reward, treasure_hours=()):
+        """Expected drops in start..end: the sum of each chest's own chance."""
+        return self.count(start, end) * reward.p + sum(n * reward.p * (m - 1.0) for n, m in self._boosted(start, end, reward, treasure_hours))
+
+    def boosted_count(self, start, end, reward, treasure_hours=()):
+        return sum(n for n, _ in self._boosted(start, end, reward, treasure_hours))
 
 
 # ------------------------------------------------------------------ your actions
@@ -269,10 +327,12 @@ class RewardState:
     started: bool                          # the pool has begun
     ended: bool                            # its week or the pool is over
     cycle_start: datetime
-    cycle_chests: int                      # chests in the current cycle (a repeatable reward: in its current automatic cycle)
+    cycle_chests: int                      # chests counted in the current cycle (a repeatable reward: in its current automatic cycle)
+    cycle_effective: float                 # the same as normal-odds chests (more than cycle_chests when Treasure Hours boosted some)
+    boosted: int                           # chests of the current cycle opened in a Treasure Hour that boosts this reward
     chance: float
-    milestone_chests: int                  # chests for CYCLE_MILESTONE
-    remaining: object                      # {milestone: chests still needed, 0 when reached}; None while obtained
+    milestone_chests: int                  # normal-odds chests for CYCLE_MILESTONE
+    remaining: object                      # {milestone: chests still needed at normal odds, 0 when reached}; None while obtained
     completed_cycles: int                  # repeatable only
     pool_chests: int
     expected: float
@@ -284,6 +344,7 @@ class RewardState:
 
 def reward_state(pool, reward, log, actions, now):
     now = now.astimezone(UTC)
+    hours_ = pool.treasure_hours
     weeks = pool.weeks()
     if reward.kind == WEEKLY:
         week = pool.week_of(now)
@@ -297,21 +358,25 @@ def reward_state(pool, reward, log, actions, now):
     report = obtained[-1] if obtained else None
     cycle_start = max([start, *restarts])
     frozen = report is not None and report.at >= cycle_start
-    n = log.count(cycle_start, report.at if frozen else end)
+    stop = report.at if frozen else end
+    n, e = log.count(cycle_start, stop), log.effective(cycle_start, stop, reward, hours_)
+    boosted = log.boosted_count(cycle_start, stop, reward, hours_)
     milestone = chests_to(CYCLE_MILESTONE, reward.p)
     completed = 0
     if reward.kind == REPEATABLE:
         bounds = [start, *restarts, end]
-        completed = sum(log.count(a, b) // milestone for a, b in zip(bounds, bounds[1:]))
-        n %= milestone
+        completed = sum(int(log.effective(a, b, reward, hours_) // milestone) for a, b in zip(bounds, bounds[1:]))
+        e %= milestone
+        n = int(e)
     report_chance = None
     if report is not None:
         began = max([start, *(t for t in restarts if t <= report.at)])
-        report_chance = chance(log.count(began, report.at), reward.p)
-    pool_chests = log.count(pool.start, min(now, pool.end))
-    remaining = None if frozen else {m: max(chests_to(m, reward.p) - n, 0) for m in MILESTONES}
-    return RewardState(reward, (start, finish), week, len(weeks), now >= pool.start, now >= finish, cycle_start, n, chance(n, reward.p), milestone,
-                       remaining, completed, pool_chests, pool_chests * reward.p, report, report_chance, frozen, mine[-1] if mine else None)
+        report_chance = chance(log.effective(began, report.at, reward, hours_), reward.p)
+    in_pool = (pool.start, min(now, pool.end))
+    remaining = None if frozen else {m: more_to(m, reward.p, e) for m in MILESTONES}
+    return RewardState(reward, (start, finish), week, len(weeks), now >= pool.start, now >= finish, cycle_start, n, e, boosted, chance(e, reward.p),
+                       milestone, remaining, completed, log.count(*in_pool), log.expected(*in_pool, reward, hours_), report, report_chance, frozen,
+                       mine[-1] if mine else None)
 
 
 def progress(pool, log, actions, now):
@@ -368,12 +433,14 @@ class Roll:
     later: float                           # the share that come later
 
 
-def roll(reward, team=1, rate=None, rng=None):
-    """One random first drop from now: a geometric draw (each chest independent, chance p), not a number picked between 1 and the odds."""
+def roll(reward, team=1, rate=None, rng=None, multiplier=1.0):
+    """One random first drop from now: a geometric draw (each chest independent, chance p x multiplier), not a number picked between 1 and
+    the odds. A multiplier is a what-if: the whole hunt at those odds."""
     rng = rng or random.Random()
+    p = min(reward.p * multiplier, 0.5)
     u = 1.0 - rng.random()                                  # (0, 1]
-    n = max(1, math.ceil(math.log(u) / math.log1p(-reward.p)))
-    return Roll(n, rng.randrange(team), team, hours(n, rate, team), chance(n - 1, reward.p), 1 - chance(n, reward.p))
+    n = max(1, math.ceil(math.log(u) / math.log1p(-p)))
+    return Roll(n, rng.randrange(team), team, hours(n, rate, team), chance(n - 1, p), 1 - chance(n, p))
 
 
 def roll_verdict(result):

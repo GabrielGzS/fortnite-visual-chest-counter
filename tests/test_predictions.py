@@ -175,6 +175,54 @@ def test_a_pool_that_ended_stops_counting():
     assert s.ended and s.pool_chests == 1
 
 
+# ------------------------------------------------------------------ Treasure Hours
+def with_hours(*hours):
+    data = json.loads(R.DEFAULT_POOL.read_text(encoding="utf-8"))
+    data["treasure_hours"] = [{"start": (START + a).isoformat(), "end": (START + b).isoformat(), "multipliers": m} for a, b, m in hours]
+    return R.parse_pool(data)
+
+
+def test_chests_in_a_treasure_hour_count_at_their_boosted_odds():
+    """800 chests at 1 in 137,500 and 200 during a 2x hour: 1 - (1-p)^800 (1-2p)^200, about 0.87%, not 0.72% and not 1.45%."""
+    pool = with_hours((timedelta(hours=10), timedelta(hours=12), {"pirate_shop_access": 2, "weekly_vehicle_decal": 10}))
+    log = log_of(*spread(800, timedelta(hours=1), timedelta(hours=9)), *spread(200, timedelta(hours=10), timedelta(hours=11, minutes=59)))
+    s = next(x for x in R.progress(pool, log, [], START + timedelta(days=1)) if x.reward.id == "pirate_shop_access")
+    p = 1 / 137500
+    exact = 1 - (1 - p) ** 800 * (1 - 2 * p) ** 200
+    assert abs(s.chance - exact) < 1e-12 and abs(exact - 0.00869) < 0.00001 and s.cycle_chests == 1000 and s.boosted == 200
+    assert abs(s.expected - (800 * p + 200 * 2 * p)) < 1e-12
+    assert s.remaining[0.9] == R.more_to(0.9, p, s.cycle_effective) and R.chance(s.cycle_effective + s.remaining[0.9], p) >= 0.9   # forecasts at normal odds
+    gizmo = next(x for x in R.progress(pool, log, [], START + timedelta(days=1)) if x.reward.id == "gizmo")
+    assert gizmo.boosted == 0 and gizmo.completed_cycles == 1000 // 292                 # a reward the hour does not name keeps its odds
+
+
+def test_a_treasure_hour_boosts_only_its_own_window():
+    pool = with_hours((timedelta(hours=10), timedelta(hours=11), {"weekly_vehicle_decal": 10}))
+    at = lambda h: R.progress(pool, log_of(timedelta(hours=h)), [], START + timedelta(days=1))
+    vehicle = lambda h: next(x for x in at(h) if x.reward.id == "weekly_vehicle_decal")
+    assert vehicle(10).boosted == 1 and vehicle(11).boosted == 0 and vehicle(9.99).boosted == 0      # start included, end excluded
+    assert abs(vehicle(10).chance - 10 / 7813) < 1e-12 and abs(vehicle(11).chance - 1 / 7813) < 1e-12
+
+
+def test_a_bad_treasure_hour_is_refused_and_the_shipped_pool_boosts_nothing():
+    assert R.load_pool().treasure_hours == ()
+    for hours in ([(timedelta(hours=2), timedelta(hours=1), {"gizmo": 2})], [(timedelta(hours=1), timedelta(hours=2), {"nope": 2})],
+                  [(timedelta(hours=1), timedelta(hours=2), {"gizmo": 0.5})], [(timedelta(hours=1), timedelta(hours=2), {"gizmo": 200})],
+                  [(timedelta(hours=1), timedelta(hours=3), {"gizmo": 2}), (timedelta(hours=2), timedelta(hours=4), {"gizmo": 2})]):
+        try:
+            with_hours(*hours)
+        except R.PoolError:
+            continue
+        raise AssertionError(f"accepted {hours}")
+
+
+def test_what_if_multipliers_shorten_the_hunt():
+    pirate = reward("pirate_shop_access")
+    normal = statistics.median(R.roll(pirate, rng=random.Random(3)).chests for _ in range(4000))
+    boosted = statistics.median(R.roll(pirate, rng=random.Random(3), multiplier=2.0).chests for _ in range(4000))
+    assert 0.4 < boosted / normal < 0.6 and R.MULTIPLIERS == (1.0, 1.5, 2.0, 7.5, 10.0)
+
+
 # ------------------------------------------------------------------ wording
 def test_luck_wording_follows_the_chance_and_is_conditional_without_a_report():
     log_n = lambda n: log_of(*spread(n, timedelta(hours=1), timedelta(hours=30)))
