@@ -50,10 +50,11 @@ def test_fixture_is_the_real_pipeline_input():
 
 
 def test_records_are_reproduced_exactly():
-    """v0.4.0 gave match 2 974 s of play. v0.4.1: the 1.4 s ELIMINATED BY (one sample, 0.88) now ends play at 1434 s: 945 s."""
+    """v0.4.0: match 1 469 s of play, match 2 974 s and open until the video stopped. v0.4.1: the READY overlay ends match 1's play
+    (377 s), the brief ELIMINATED BY ends match 2's (945 s), and the grey CONNECTING of the return-to-lobby splash closes it at 1465 s."""
     records, _, _ = replay()
     got = [(r.match_number, r.completion, r.ended_by, r.opened_t, round(r.closed_t, 2), r.active_seconds) for r in records]
-    assert got == [(1, "partial", "left_or_unknown", 0.0, 484.0, 469.0), (2, "partial", "stopped", 489.0, 1478.53, 945.0)], got
+    assert got == [(1, "partial", "left_or_unknown", 0.0, 484.0, 377.0), (2, "partial", "left_or_unknown", 489.0, 1465.0, 945.0)], got
 
 
 def test_v041_gap_the_fully_observed_match_is_not_complete():
@@ -64,8 +65,10 @@ def test_v041_gap_the_fully_observed_match_is_not_complete():
     assert m2.completion == "partial" and not m2.observed_from_start            # the 0.90x countdown is never read
     assert m2.ended_t is None                                                      # YOU PLACED (0.90x) is not read
     assert not any(t.state == S.PRE_GAME for t in transitions)                     # the 0.90x countdown is not read
-    out = [t for t in transitions if t.state == S.ELIMINATED]
-    assert [round(t.t) for t in out] == [1434] and out[0].reason == "eliminated_by_seen"   # v0.4.1: the brief ELIMINATED BY is read
+    out = [(round(t.t), t.reason) for t in transitions if t.state == S.ELIMINATED]
+    assert out == [(392, "ready_overlay_seen"), (1434, "eliminated_by_seen")], out        # v0.4.1: READY overlay, brief ELIMINATED BY
+    loading = [(round(t.t), t.reason) for t in transitions if t.state == S.LOADING]
+    assert loading == [(484, "connecting_seen"), (1465, "connecting_seen")], loading      # 1465: the grey CONNECTING
 
 
 def test_v041_gap_active_time_includes_screens_that_are_not_play():
@@ -74,7 +77,7 @@ def test_v041_gap_active_time_includes_screens_that_are_not_play():
     true_m2 = truth["m2-full-placed-3"]["active"][1] - truth["m2-full-placed-3"]["active"][0]
     true_m1 = truth["m1-rebooted-win"]["active"][1] - truth["m1-rebooted-win"]["active"][0]
     assert round(records[1].active_seconds - true_m2) == 33             # the waiting island counted as play (v0.4.0: 62, after death too)
-    assert round(records[0].active_seconds - true_m1) == 132            # waiting for a reboot, Victory, recap and READY overlay
+    assert round(records[0].active_seconds - true_m1) == 40             # waiting for a reboot, Victory and recap (v0.4.0: 132, the READY overlay too)
 
 
 if __name__ == "__main__":

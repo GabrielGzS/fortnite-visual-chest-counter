@@ -116,10 +116,9 @@ unchanged except where corrected detection legitimately changes results. No rele
 | 2026-11-12 | Self-service HUD calibration is a high-priority backlog item (section 7.1); v0.4.1's HUD profile must be able to take validated user templates later. |
 | 2026-11-12 | Spectator recognition and adaptive processing are a research proposal (section 7.2), not a state-machine rewrite; investigate during v0.4.1 if time allows. |
 
-### Proposed, awaiting review
-- **Split M1 into M1a and M1b** (above): the slider question cannot be answered from footage of three different sources.
-- **Let the scale-independent M4 fixes start after the M1 review**, in parallel with calibration recording: the duplicate rule, short end
-  screens, grey CONNECTING, the READY overlay and the console wording do not depend on the HUD architecture.
+| 2026-11-13 | M1 split into M1a (existing footage, done) and M1b (calibration footage); the architecture gate stays before M2 (maintainer). |
+| 2026-11-13 | HUD-independent fixes approved ahead of the gate, as small separately validated commits: duplicates after an overlay, short end screens, grey CONNECTING, the READY overlay, console wording, and a look at RARE typing. Backlog decisions confirmed. First supported intermediate configuration at the gate: the maintainer's own HUD. |
+| 2026-11-13 | RARE typing on the maintainer's footage is HUD-dependent (the scale-free length test reads RARE, 0.78-0.81; the exact 1.0x RARE template confirms at 0.22-0.36 against 0.50), so it moves to M3 with the native templates. Lowering the word threshold or a blurred confirmation stays rejected (random ink reached 0.65, v0.2.2). |
 
 ## 7. Backlog and research proposals (not v0.4.1 scope)
 

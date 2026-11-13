@@ -10,13 +10,16 @@ Nothing here writes to the frame, keeps it, or touches chest detection, counting
     signals             what each one means                                how sure the evidence is
     you_placed          "YOU PLACED #N": eliminated, placement shown       one match end, recorded twice
     eliminated_by       "ELIMINATED BY": killed by another player          one match end, recorded twice
-    connecting          "CONNECTING...": loading                           three artworks, two sessions
+    connecting          "CONNECTING...": loading                           three artworks, two sessions; on the white
+                                                                           return-to-lobby splash, its grey shadow (one splash)
     lobby_menu          the menu bar: at least two of three words          one lobby, two tabs
     matchmaking         "CANCEL": in the matchmaking queue                 one lobby
     waiting_for_players the pre-game island countdown                      one match start, and one on a smaller HUD
     bus_launching       "... LAUNCHING IN": the bus is about to leave      one match start, and one on a smaller HUD
     spectating          "SPECTATING:": watching another player             one match end, recorded twice
     victory_royale      PROVISIONAL, see below                             three wins, two banner sizes
+    ready_overlay       READY: "PARTY TO READY UP..." / "NEXT MATCH" after  two overlays of one session (v0.4.1)
+                        a match: the player readied up straight from it
 
 victory_royale is a template of the word ROYALE at the two banner sizes seen so far. A second English win from the same creator scored
 0.93 to 0.97 against the template cut from the first. A template from the English win found the Portuguese win (and the reverse, 0.83
@@ -38,8 +41,13 @@ from fortnite_chest_counter.detection.visual import NORMALIZED_HEIGHT, NORMALIZE
 
 TEMPLATE_DIR = paths.TEMPLATES_DIR / "match" / "en"
 SCORE_THRESHOLD = 0.70                     # a score at or above this means the text is there
-WHITE, DARK = "white", "dark"
+WHITE, DARK, SHADOW = "white", "dark", "shadow"
 WHITE_LEVEL, DARK_LEVEL = 200, 90          # white text: every channel at least this; dark text: every channel at most this
+# The shadow of white text on a near-white picture (v0.4.1): the white CONNECTING... on the return-to-lobby splash cannot be told from its
+# background, but its grey shadow can. Shadow ink is anything under near-white, so on ordinary frames the box is almost all "ink" and
+# MAX_BOX_INK makes it score 0; only a near-white box can match.
+SHADOW_LEVEL = 215
+SHADOW_MAX_INK = 0.25                      # shadow text is a thin outline on a near-white field: the splash box is 6% shadow ink, ordinary frames 30-100%
 MIN_INK_SHARE = 0.45                       # with under this share of a word's ink in the box, the correlation cannot reach 0.70 (see _score)
 MAX_BOX_INK = 0.70                         # a box this full of "ink" is bright sky or snow, not text: its correlation is meaningless (0.49 was seen)
 
@@ -61,6 +69,9 @@ class Cue:
 
 CUES = (Cue("you_placed_screen", (514, 86, 707, 140)), Cue("you_placed_bar", (536, 6, 700, 56)),
         Cue("eliminated_by", (488, 566, 720, 614)), Cue("connecting", (36, 632, 220, 679)),
+        Cue("connecting_shadow", (36, 632, 230, 679), SHADOW),
+        # The READY overlay after a match (v0.4.1, the maintainer's ready-up): its two right-hand lines, at the same place in both overlays seen.
+        Cue("ready_party", (978, 600, 1270, 646)), Cue("ready_finding", (946, 584, 1130, 630)),
         Cue("menu_locker", (304, 27, 414, 66)), Cue("menu_quests", (479, 27, 586, 66)), Cue("menu_career", (665, 27, 775, 66)),
         Cue("matchmaking_cancel", (101, 586, 246, 632), DARK), Cue("waiting_for_players", (552, 80, 752, 120)),
         Cue("bus_launching", (600, 58, 800, 94)),          # wider: the sentence is centred, and the bus's name changes each season
@@ -86,14 +97,17 @@ _HUD_CUE = {cue.name: cue for cue in HUD_CUES}
 
 _MENU = ("menu_locker", "menu_quests", "menu_career")
 # signal -> the templates behind it. The highest score wins, except the menu bar, where two of the three words must agree.
-SIGNALS = {"you_placed": ("you_placed_screen", "you_placed_bar"), "eliminated_by": ("eliminated_by",), "connecting": ("connecting",),
+SIGNALS = {"you_placed": ("you_placed_screen", "you_placed_bar"), "eliminated_by": ("eliminated_by",), "connecting": ("connecting", "connecting_shadow"),
            "lobby_menu": _MENU, "matchmaking": ("matchmaking_cancel",), "waiting_for_players": ("waiting_for_players", "waiting_for_players_small"),
-           "bus_launching": ("bus_launching", "bus_launching_small"), "spectating": ("spectating",), "victory_royale": ("victory_large", "victory_small")}
+           "bus_launching": ("bus_launching", "bus_launching_small"), "spectating": ("spectating",), "victory_royale": ("victory_large", "victory_small"),
+           "ready_overlay": ("ready_party", "ready_finding")}
 PROVISIONAL_SIGNALS = frozenset({"victory_royale"})          # too few examples to rely on by itself
 NOT_ENGLISH_SPECIFIC = frozenset({"victory_royale"})         # the same word appears in the Portuguese game
 
 
 def _ink_mask(region, ink):
+    if ink == SHADOW:
+        return region.max(axis=2) <= SHADOW_LEVEL
     return region.min(axis=2) >= WHITE_LEVEL if ink == WHITE else region.max(axis=2) <= DARK_LEVEL
 
 
@@ -120,7 +134,7 @@ class CueReader:
         x0, y0, x1, y1 = cue.box
         mask = _ink_mask(frame[y0:y1, x0:x1], cue.ink)
         ink = int(mask.sum())
-        if ink < MIN_INK_SHARE * self._ink[name] or ink > MAX_BOX_INK * mask.size:
+        if ink < MIN_INK_SHARE * self._ink[name] or ink > (SHADOW_MAX_INK if cue.ink == SHADOW else MAX_BOX_INK) * mask.size:
             return 0.0
         return float(np.clip(best_template_correlation(mask.astype(np.float32), self._templates[name])[0], 0.0, 1.0))
 

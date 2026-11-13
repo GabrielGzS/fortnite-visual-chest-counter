@@ -20,13 +20,17 @@ from fortnite_chest_counter import match_cues as M                              
 
 SAMPLES = ROOT / "samples" / "video tests"
 ENGLISH_WIN, PORTUGUESE_WIN = SAMPLES / "Fortnites-NEW-HD-No-Audio.mp4", SAMPLES / "Fortnite-PS5-Pro-HD-No-Audio.mp4"
+MAINTAINER = SAMPLES / "2026-11-12 12-52-32.mp4"      # v0.4.1: the maintainer's own recording (tests/cases/user_20261112.json)
 #          template               footage  seconds  box of the word in 1280x720 pixels
 SOURCES = {"you_placed_screen": (1, 9, (538, 98, 683, 128)), "you_placed_bar": (1, 17, (560, 18, 676, 44)), "eliminated_by": (1, 11, (512, 578, 696, 602)),
            "connecting": (1, 22, (60, 644, 196, 667)), "menu_locker": (1, 36, (328, 39, 390, 54)), "menu_quests": (1, 36, (503, 39, 562, 54)),
            "menu_career": (1, 36, (689, 39, 751, 54)), "matchmaking_cancel": (1, 36, (125, 598, 222, 620)), "waiting_for_players": (3, 24, (576, 92, 728, 108)),
            "bus_launching": (3, 38, (670, 68, 752, 84)), "spectating": (1, 17, (1036, 8, 1133, 24)),
            "victory_large": (ENGLISH_WIN, 260, (574, 135, 730, 174)), "victory_small": (PORTUGUESE_WIN, 1024, (585, 108, 712, 138)),
-           "waiting_for_players_small": ("seg_00169.mkv", 7.4, (592, 85, 712, 97)), "bus_launching_small": ("seg_00170.mkv", 5.4, (660, 67, 730, 77))}
+           "waiting_for_players_small": ("seg_00169.mkv", 7.4, (592, 85, 712, 97)), "bus_launching_small": ("seg_00170.mkv", 5.4, (660, 67, 730, 77)),
+           # v0.4.1: the grey shadow of CONNECTING on the white return-to-lobby splash, and the READY overlay's two lines
+           "connecting_shadow": (MAINTAINER, 1464.5, (55, 640, 225, 670)), "ready_party": (MAINTAINER, 1446, (980, 605, 1265, 640)),
+           "ready_finding": (MAINTAINER, 440, (940, 588, 1140, 630))}
 
 
 def read_frame(ffmpeg, capture, source, seconds, small_capture=None):

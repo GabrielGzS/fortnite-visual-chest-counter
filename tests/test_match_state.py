@@ -775,6 +775,31 @@ def test_a_brief_eliminated_by_screen_is_read_from_one_strong_sample():
     assert lobby.state == S.LOBBY and lobby.machine.open_match_number is None
 
 
+def test_the_ready_overlay_ends_play_and_the_match_closes_complete_at_loading():
+    """v0.4.1: readying up straight from a match (the maintainer's habit). The overlay keeps the health bar on screen, so v0.4.0 counted
+    it as play when the end screen was missed (110 s in the maintainer's first match)."""
+    s = played_match().show(8, "ready_overlay", health=HP)
+    assert s.state == S.ELIMINATED
+    active = s.machine.snapshot()["active_seconds"]
+    s.show(40, "ready_overlay", health=HP)
+    assert s.machine.snapshot()["active_seconds"] == active               # the overlay is not play
+    r = s.show(6, "connecting").show(20, "waiting_for_players", health=HP).finish().records[0]
+    assert r.completion == S.COMPLETE and r.ended_by == S.LEFT_OR_UNKNOWN    # how it ended is not guessed
+    assert "own-player recovery unconfirmed" not in " ".join(r.reasons)   # the overlay's health bar is not a reboot
+
+
+def test_the_ready_overlay_after_you_placed_is_not_a_recovery():
+    r = played_match().show(6, "you_placed", health=40).show(30, "ready_overlay", health=HP).show(6, "connecting").finish().records[0]
+    assert r.completion == S.COMPLETE and r.ended_by == S.PLACED and "own-player recovery unconfirmed" not in " ".join(r.reasons)
+
+
+def test_the_ready_overlay_outside_a_match_opens_nothing():
+    s = Script().show(5, "lobby_menu").show(10, "ready_overlay")
+    assert s.state == S.LOBBY and s.machine.open_match_number is None
+    s = Script().show(20, "ready_overlay", health=HP)                     # recording starts on the overlay: its health bar is not play
+    assert s.machine.open_match_number is None and s.records == []
+
+
 def test_english_end_screens_confirm_a_match():
     for signal in ("you_placed", "spectating", "eliminated_by"):
         assert Script().show(30, health=HP).show(6, signal).finish().records[0].english_confirmed, signal

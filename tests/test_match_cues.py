@@ -35,7 +35,8 @@ def frame_of(row):
     bits = np.unpackbits(DATA["masks"][row])
     frame = np.full((720, 1280, 3), BLANK, np.uint8)
     offset = 0
-    for cue in M.CUES:
+    for name in DATA["cues"]:                     # the cues the fixture was made with; a newer cue's box stays blank (it scores 0 there)
+        cue = M._CUE[str(name)]
         x0, y0, x1, y1 = cue.box
         size = (y1 - y0) * (x1 - x0)
         mask = bits[offset:offset + size].reshape(y1 - y0, x1 - x0).astype(bool)
@@ -61,15 +62,27 @@ def test_every_template_loads_and_fits_inside_its_box():
     for cue in M.CUES:
         x0, y0, x1, y1 = cue.box
         template = np.load(M.TEMPLATE_DIR / f"{cue.name}.npy")
-        assert template.dtype == bool and 0.2 < template.mean() < 0.8, cue.name
+        low = 0.1 if cue.ink == M.SHADOW else 0.2                       # a shadow is a thin outline (18% of its box), not solid text
+        assert template.dtype == bool and low < template.mean() < 0.8, cue.name
         assert template.shape[0] < y1 - y0 and template.shape[1] < x1 - x0, cue.name
         assert 0 <= x0 < x1 <= 1280 and 0 <= y0 < y1 <= 720, cue.name
+
+
+def test_every_template_ships_in_the_release():
+    """The release copies templates from an explicit list: a cue whose template is missing there would stop match tracking in the package."""
+    sys.path.insert(0, str(ROOT / "packaging"))
+    import build_release
+    shipped = set(build_release.TEMPLATE_FILES)
+    assert {f"match/en/{cue.name}.npy" for cue in M.CUES} <= shipped
+    assert {f"match/hud/{cue.name}.npy" for cue in M.HUD_CUES} <= shipped
 
 
 def test_signals_use_only_known_templates():
     assert {name for names in M.SIGNALS.values() for name in names} == {cue.name for cue in M.CUES}
     assert M.PROVISIONAL_SIGNALS <= set(M.SIGNALS) and M.NOT_ENGLISH_SPECIFIC <= set(M.SIGNALS)
-    assert list(M.SIGNALS) == SIGNALS, "the fixtures must be rebuilt when the signals change"
+    # frames.npz covers the v0.3.0 signals; a later signal is covered by its own real-footage fixture (USER_CUES below)
+    assert list(M.SIGNALS)[:len(SIGNALS)] == SIGNALS, "the fixtures must be rebuilt when the v0.3.0 signals change"
+    assert set(M.SIGNALS) - set(SIGNALS) == {"ready_overlay"}, "a new signal needs a real-footage fixture"
     assert M.SCORE_THRESHOLD == 0.70, "the agreed acceptance threshold"
 
 
@@ -140,9 +153,44 @@ def test_a_frame_of_the_wrong_shape_is_refused():
         raise AssertionError(f"{call} accepted a wrong size")
 
 
+USER_CUES = np.load(HERE / "fixtures" / "match" / "user_20261112_cues.npz")
+
+
+def user_frame(row):
+    """A frame rebuilt from user_20261112_cues.npz: white text as 255 on BLANK, the shadow cue as dark ink on a near-white field."""
+    bits = np.unpackbits(USER_CUES["masks"][row])
+    frame = np.full((720, 1280, 3), BLANK, np.uint8)
+    offset = 0
+    for name in USER_CUES["cues"]:
+        cue = M._CUE[str(name)]
+        x0, y0, x1, y1 = cue.box
+        size = (y1 - y0) * (x1 - x0)
+        mask = bits[offset:offset + size].reshape(y1 - y0, x1 - x0).astype(bool)
+        offset += size
+        ink, paper = (BLANK, 250) if cue.ink == M.SHADOW else (255, BLANK)
+        frame[y0:y1, x0:x1] = np.where(mask[..., None], ink, paper).astype(np.uint8)
+    return frame
+
+
+def test_v041_templates_on_the_maintainers_footage():
+    """The grey CONNECTING of the return-to-lobby splash and the READY overlay (research/user_cue_fixture.py): real screens reach the
+    threshold, the other screens of the recording (white CONNECTING, recap, Victory, island, bus, play, death screen, lobby) stay low.
+    The READY templates come from different matches, so each is held out on the other one's overlay."""
+    names = [str(n) for n in USER_CUES["cues"]]
+    for i in range(len(USER_CUES["times"])):
+        s = READER.template_scores(user_frame(i), names)
+        got = (s["connecting_shadow"], max(s["ready_party"], s["ready_finding"]))
+        where = str(USER_CUES["where"][i])
+        for value, expected, measured in zip(got, USER_CUES["expected"][i], USER_CUES["scores"][i]):
+            assert abs(value - measured) < 1e-5, (where, value, measured)
+            assert (value >= M.SCORE_THRESHOLD) if expected else (value <= 0.40), (where, value)
+    assert sum(USER_CUES["expected"][:, 0]) == 4 and sum(USER_CUES["expected"][:, 1]) == 7
+
+
 def test_only_the_cancel_button_is_dark_text():
     assert {cue.name for cue in M.CUES if cue.ink == M.DARK} == {"matchmaking_cancel"}
-    assert all(cue.ink == M.WHITE for cue in M.CUES if cue.name != "matchmaking_cancel")
+    assert {cue.name for cue in M.CUES if cue.ink == M.SHADOW} == {"connecting_shadow"}
+    assert all(cue.ink == M.WHITE for cue in M.CUES if cue.name not in ("matchmaking_cancel", "connecting_shadow"))
 
 
 def test_ink_is_decided_on_every_colour_channel():

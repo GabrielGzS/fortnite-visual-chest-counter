@@ -22,6 +22,8 @@ Each rule needs a signal in 2 of the last 3 samples, unless the table says other
     UNKNOWN, LOBBY, LOADING   IN_MATCH, joined late green health bar in 5 of 8 samples, or a counted chest (dated from the chest's
                                                     own time); no menu or loading text
     any                       ELIMINATED            YOU PLACED, Victory Royale, SPECTATING or ELIMINATED BY
+    IN_MATCH                  ELIMINATED            the READY overlay (v0.4.1): the player readied up, so their part is over. The
+                                                    match stays open until loading, the menus or a countdown, as after any ending
     ELIMINATED                stays non-active      a health bar cannot distinguish a reboot from watching another player
     IN_MATCH, ELIMINATED      UNKNOWN               no evidence of play or no picture for 60 s, or video time ran backwards
 
@@ -62,7 +64,8 @@ WAITING_ISLAND = "waiting island"
 
 SCORE_THRESHOLD = 0.70
 HEALTH_BAR_MIN_PIXELS = 30
-ENGLISH_SIGNALS = frozenset({"you_placed", "eliminated_by", "connecting", "lobby_menu", "matchmaking", "waiting_for_players", "bus_launching", "spectating"})
+ENGLISH_SIGNALS = frozenset({"you_placed", "eliminated_by", "connecting", "lobby_menu", "matchmaking", "waiting_for_players", "bus_launching", "spectating",
+                             "ready_overlay"})
 ALL_SIGNALS = ENGLISH_SIGNALS | {"victory_royale"}
 
 CONFIRM_HITS, CONFIRM_WINDOW = 2, 3
@@ -342,7 +345,8 @@ class MatchStateMachine:
         hit = {signal: scores.get(signal, 0.0) >= SCORE_THRESHOLD for signal in ALL_SIGNALS}
         for signal in ALL_SIGNALS:
             self._recent[signal].append((t, hit[signal], scores.get(signal, 0.0)))
-        screen_text = hit["connecting"] or hit["lobby_menu"] or hit["matchmaking"]          # loading artwork can imitate a health bar
+        # loading artwork can imitate a health bar, and the READY overlay keeps the player's bar on screen after the match (v0.4.1)
+        screen_text = hit["connecting"] or hit["lobby_menu"] or hit["matchmaking"] or hit["ready_overlay"]
         if screen_text:
             self._last_screen_text_t = t
         hud = observation.health_bar_pixels >= HEALTH_BAR_MIN_PIXELS and not screen_text
@@ -350,7 +354,7 @@ class MatchStateMachine:
         # read as a shield bar; a shield bar alone keeps a match going but never starts one.
         green = observation.health_green_pixels
         self._hud.append((t, hud, hud and (green is None or green >= HEALTH_BAR_MIN_PIXELS)))
-        self._after.append((hud, hit["you_placed"] or hit["eliminated_by"] or hit["spectating"]))
+        self._after.append((hud, hit["you_placed"] or hit["eliminated_by"] or hit["spectating"] or hit["ready_overlay"]))
         if hud or observation.hud_in_view or observation.chests or any(hit.values()):
             self._last_evidence_t = t
         return hit
@@ -422,6 +426,8 @@ class MatchStateMachine:
         for signal in ("spectating", "eliminated_by"):
             if self._confirmed(signal):
                 return self._player_out(t, None, signal, events)
+        if self._confirmed("ready_overlay") and self.state == IN_MATCH and self._match is not None:
+            return self._player_out(t, None, "ready_overlay", events)       # readied up for the next match: this one's play is over
         if self._confirmed("connecting"):
             return self._screen(t, LOADING, "connecting_seen", events)
         if self._confirmed("lobby_menu") or self._confirmed("matchmaking"):
@@ -493,7 +499,7 @@ class MatchStateMachine:
         self._go(t, IN_MATCH, "bus_departed" if gone < COUNTDOWN_GONE_ANYWAY else "countdown_timed_out", events)
 
     def _maybe_joined_late(self, t, observation, hit, events):
-        text_lately = any(any(seen for _, seen, _ in self._recent[signal]) for signal in ("connecting", "lobby_menu", "matchmaking"))
+        text_lately = any(any(seen for _, seen, _ in self._recent[signal]) for signal in ("connecting", "lobby_menu", "matchmaking", "ready_overlay"))
         sustained = sum(1 for _, _, own in self._hud if own) >= HUD_HITS
         chest = bool(observation.chests)
         if text_lately or not (sustained or chest):

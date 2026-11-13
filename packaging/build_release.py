@@ -64,7 +64,8 @@ TEMPLATE_FILES = ["chest/en/chest.npy", "chest/en/chest_small.npy", "chest/en/ra
                   "ui/interaction_disc.npy", "ui/interaction_ring.npy",                    # audio_fingerprint.npy is development-only
                   *(f"match/en/{name}.npy" for name in ("you_placed_screen", "you_placed_bar", "eliminated_by", "connecting", "menu_locker", "menu_quests", "menu_career",
                                                         "matchmaking_cancel", "waiting_for_players", "bus_launching", "spectating", "victory_large", "victory_small",
-                                                        "waiting_for_players_small", "bus_launching_small")),
+                                                        "waiting_for_players_small", "bus_launching_small",
+                                                        "connecting_shadow", "ready_party", "ready_finding")),          # v0.4.1
                   *(f"match/hud/{name}.npy" for name in ("stats", "stats_small", "compass", "compass_small"))]
 THIRD_PARTY = ["numpy", "scipy"]
 # Livestream URL input (v0.2.1): Streamlink and its complete dependency closure on Windows / Python 3.13 (BSD / MIT /

@@ -169,3 +169,45 @@ game received on PC B over SRT, captured by the app's capture tool in lossless m
 
 **Total:** 4 full matches plus about 36 chests, roughly 60-90 minutes of play, about 15-30 GB of footage. Keep the files in
 `samples/video tests/` (not in Git); I will cut only short labelled windows into cases, as with the existing ones.
+
+## M4 (first batch) — HUD-independent fixes
+
+Approved 2026-11-13 ahead of the architecture gate, one validated commit each. None of them changes a threshold that decides CERTAIN, and
+none depends on the HUD size.
+
+| Commit | Fix | Evidence | Result |
+|---|---|---|---|
+| A `d18b4c3` | A pop-up covered for a moment counts once, on every English channel (`estimator.PopupMemory`: where the word was last seen; same word, same place, within 2 s of the onset) | Real: the maintainer's inventory duplicate. Synthetic: real case fixtures with the pop-up box blanked 0.4 / 0.75 / 1.0 s (`research/occlusion_check.py`) | duplicates 11 / 10 / 9 -> 1 / 1 / 1; found 32 / 32 / 27 -> 34 / 35 / 33 of 37; uncovered footage identical |
+| B `55a6522` | The console and event reason say what was measured: a blurred match at x1.0 is "near-normal pop-up, shape not exact", not "drawn larger" | every chest on the maintainer's footage was described as larger, the opposite of the truth | same line length as the other scaled lines |
+| C `7278771` | One strong sample (>= 0.85) confirms ELIMINATED BY while a match is in play | on screen 0.86-0.99 in every recording; elsewhere at most 0.17 over ~4,000 samples; the maintainer's was readable for 1.4 s | play stops at the death screen |
+| D (this commit) | Grey CONNECTING on the white return-to-lobby splash (a shadow-ink template) and the READY overlay ("PARTY TO READY UP...", "NEXT MATCH") as "the player's part is over" | splash 0.97-1.00, elsewhere <= 0.20 over 6,022 samples (one splash: within the session); READY lines cut from different matches, each held out on the other (0.88-1.00), elsewhere <= 0.14 over 5,782 samples | match 2 closes at 1465 s instead of when the video stopped; the overlay is no longer play |
+
+**The maintainer's recording, end to end** (`tests/test_user_recording.py`, observations regenerated from the real pipeline):
+
+| | v0.4.0 | Now | True |
+|---|---:|---:|---:|
+| Chests found / duplicates / false | 16 / 1 / 0 of 20 | 16 / 0 / 0 | 20 |
+| Match 1 active play | 469 s | 377 s | 337 s (rebooted at 24 s, Victory at 361 s) |
+| Match 2 active play | 974 s | 945 s | 912 s (bus at 520 s, death at 1432 s) |
+| Match 2 closed | 1478.5 s, video stopped | 1465 s, grey CONNECTING | lobby at ~1466 s |
+| Fully observed matches Complete | 0 of 1 | 0 of 1 | 1 |
+
+What remains is HUD-dependent and waits for the gate: the 0.90x countdown (the island is still counted as play and match 2 cannot be
+Complete), YOU PLACED and Victory at the maintainer's size, CERTAIN, the 3 low-margin and stacked misses, and RARE typing.
+
+**Regression:** `regress.py compare --tag v0.4.0`: en and PS5 identical decisions; user1112 found 16 -> 16, duplicates 1 -> 0, false 0,
+CERTAIN 0 -> 0 (regress now judges a fully labelled clip by its scorecard: a removed duplicate is not a lost chest). Cases 19/19.
+Match suites: match_state 123, defects 26, replay 39, tracker 68, live 88, recording 50, cues 36, user recording 4. The tracker's HUD-check
+budget test failed once and passed on four reruns: a wall-clock check, with the packaged app capturing live on the same PC. Mutations: match state 36/36, tracker 43/43, live match 59/59, replay 14/14, recording 37/37 caught.
+
+**Packaging caught:** the release copies templates from an explicit list (`packaging/build_release.py` TEMPLATE_FILES), so the new
+templates would have been left out of the package and match tracking would have stopped there. They are added, and
+`test_every_template_ships_in_the_release` now guards every cue.
+
+**Occlusion limits (documented, not fixed):** a line change hidden by the overlay (a non-chest line pushing the word up one line, or an X2
+appearing just as the pop-up returns) can still give one duplicate or one missed step. Carrying the tracker's state across the gap would
+fix it; not attempted in this batch.
+
+**RARE typing (investigated, HUD-dependent):** the scale-free length test reads RARE on the maintainer's pop-ups (0.78-0.81 of the CHEST
+word), but the exact 1.0x RARE template confirms at 0.22-0.36 against its 0.50 line. A blurred confirmation was rejected in v0.2.2 (random
+ink 0.65) and the line is not lowered, so RARE typing comes with the native templates (M3). Types never change counts.
