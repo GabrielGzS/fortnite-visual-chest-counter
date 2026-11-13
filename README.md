@@ -18,7 +18,7 @@ without revealing hidden information or providing gameplay assistance. See
 
 > Independent, unofficial project: not affiliated with, endorsed by or approved by Epic Games. "Fortnite" is a trademark of
 > Epic Games, Inc.
-> Status: **v0.4.0 public beta** (desktop app). Developed and tested during Fortnite Chapter 7 Season 5 (November 2026) -
+> Status: **v0.5.0 public beta** (desktop app). Developed and tested during Fortnite Chapter 7 Season 5 (November 2026) -
 > see [Fortnite compatibility](#fortnite-compatibility). Windows 10 / 11. Nothing to install.
 
 **Contents:** [The two numbers](#the-two-numbers-read-this-first) · [Download](#download) · [Choose your setup](#choose-your-setup) ·
@@ -175,8 +175,9 @@ odds per chest, the same for every player.
 - **What If?**: **Roll a prediction** draws one random first drop with the real odds (team, finder, hours, how lucky it was), with
   optional Treasure Hour multipliers as a what-if. Nothing there is saved.
 
-Counted from the season's start (1 November 2026) wherever your history has the chests; chests opened while the app was not counting, or
-that it missed, are not in the numbers. Treasure Hours boost a chest only when the pool lists that event's exact times (none yet). The
+Counted from the season's start (1 November 2026) wherever your history has the chests. Chests opened before you used the counter: raise
+APPROX with **Edit counts** and tick **Count the difference in Predictions** (choose the season, this week or last week). Predictions then
+use them; Analytics, chests per hour and per minute never do, and Predictions never use more chests this season than your total. Treasure Hours boost a chest only when the pool lists that event's exact times (none yet). The
 season's end date is an estimate.
 
 ## Fair play and compatibility

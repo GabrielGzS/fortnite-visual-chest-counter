@@ -12,6 +12,7 @@ and Epic's published odds into chances, forecasts and a bit of perspective on ho
 - Gizmo cycles, weekly rewards that start again at the Sunday rotation, and a sentence on how normal (or unlucky) your wait is
 - **What If?**: roll a random first drop and see how many chests it could take
 - Start new cycle, Mark obtained and Undo, per profile; nothing is ever deleted
+- Chests from before you used the counter: add them with Edit counts, for Predictions only
 
 Your counts, profiles, settings and history are kept, and your history since the season began is used straight away.
 
@@ -36,6 +37,13 @@ sentence on how unusual your wait is ("Perfectly normal: 41% of players would st
 - **Solo / Duo / Trio / Squad** changes only the time, assuming teammates open as many chests as you and rewards are shared (not confirmed
   by Epic). It never changes the chance per chest.
 
+### Chests from before the counter
+
+Raise APPROX with **Edit counts** and tick **Count the difference in Predictions**, then say when they were opened: earlier this season
+(week not known), this reward week or last week. Predictions use them; Analytics, chests per hour and per minute, matches and your pace
+never do. Only the difference from your counter counts, Predictions never use more chests this season than your total (so a Reset and
+typing the total back in adds nothing), and a lower total takes back only what you added. Undo is on the Predictions page.
+
 ### What If?
 
 Pick a reward, a team and, if you like, a Treasure Hour multiplier (1.5x to 10x, for the whole hunt: a what-if), then **Roll a
@@ -48,7 +56,10 @@ independent, and nothing is saved.
   we checked. The season's end date (about 5 December) is an estimate.
 - Treasure Hours boost a chest only when the pool lists that event's exact times; none is listed yet, so every chest uses the normal odds.
 - Predictions use the chests in your saved history, which starts with v0.3.0 and only covers time the app was counting.
-- Match tracking still reads English screens only; Predictions work in any language.
+- Match tracking is still experimental and reads English screens only; Predictions work in any language.
+- The built-in updater's first real updates (v0.2.3 to v0.3.0, v0.4.0 to v0.4.1) worked. Its failure and rollback scenarios have not been
+  run on real packages; if an update does not work, install by hand: extract the new zip to its own folder and copy `state\` and
+  `config.toml`.
 
 ### Installing v0.5.0
 
