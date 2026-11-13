@@ -114,7 +114,9 @@ Exact match over the whole pop-up box: 2.0 ms per template on the main PC.
    0.72 on a 720p stream; the 1.00 word: 0.87 on the reference, 0.76 on Replays' stream captures). Blurred scores stay at 0.90-0.99. Native
    templates therefore need validating per source quality, and CERTAIN at a given size depends on the input.
 5. **Element families scale differently:** the maintainer's pop-up is 0.95x and HUD text 0.90x; Thiefs' are about 0.80x and 0.78x. A
-   single "HUD scale" number cannot select every template.
+   single "HUD scale" number cannot select every template. *Revised 2026-11-13:* the two sizes are relative to templates from different
+   streamers (match text: Replays, 82%; chest word: a streamer at about 79%). With the confirmed 75% both fit one rule, size proportional
+   to the slider (M1b section below). That is a hypothesis for M1b, not yet a finding.
 6. **One pop-up is a weak template source:** the two cuts from the maintainer's footage reach the trigger on 82% and 65% of the other
    pop-ups. Templates should be built from several confirmed pop-ups.
 7. **False alarms stay low at native size:** the maintainer's template never passes 0.59 exact on any non-chest frame of the three videos.
