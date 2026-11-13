@@ -180,7 +180,7 @@ none depends on the HUD size.
 | A `d18b4c3` | A pop-up covered for a moment counts once, on every English channel (`estimator.PopupMemory`: where the word was last seen; same word, same place, within 2 s of the onset) | Real: the maintainer's inventory duplicate. Synthetic: real case fixtures with the pop-up box blanked 0.4 / 0.75 / 1.0 s (`research/occlusion_check.py`) | duplicates 11 / 10 / 9 -> 1 / 1 / 1; found 32 / 32 / 27 -> 34 / 35 / 33 of 37; uncovered footage identical |
 | B `55a6522` | The console and event reason say what was measured: a blurred match at x1.0 is "near-normal pop-up, shape not exact", not "drawn larger" | every chest on the maintainer's footage was described as larger, the opposite of the truth | same line length as the other scaled lines |
 | C `7278771` | One strong sample (>= 0.85) confirms ELIMINATED BY while a match is in play | on screen 0.86-0.99 in every recording; elsewhere at most 0.17 over ~4,000 samples; the maintainer's was readable for 1.4 s | play stops at the death screen |
-| D (this commit) | Grey CONNECTING on the white return-to-lobby splash (a shadow-ink template) and the READY overlay ("PARTY TO READY UP...", "NEXT MATCH") as "the player's part is over" | splash 0.97-1.00, elsewhere <= 0.20 over 6,022 samples (one splash: within the session); READY lines cut from different matches, each held out on the other (0.88-1.00), elsewhere <= 0.14 over 5,782 samples | match 2 closes at 1465 s instead of when the video stopped; the overlay is no longer play |
+| D `aecd1ac` | Grey CONNECTING on the white return-to-lobby splash (a shadow-ink template) and the READY overlay ("PARTY TO READY UP...", "NEXT MATCH") as "the player's part is over" | splash 0.97-1.00, elsewhere <= 0.20 over 6,022 samples (one splash: within the session); READY lines cut from different matches, each held out on the other (0.88-1.00), elsewhere <= 0.14 over 5,782 samples | match 2 closes at 1465 s instead of when the video stopped; the overlay is no longer play |
 
 **The maintainer's recording, end to end** (`tests/test_user_recording.py`, observations regenerated from the real pipeline):
 
@@ -199,6 +199,12 @@ Complete), YOU PLACED and Victory at the maintainer's size, CERTAIN, the 3 low-m
 CERTAIN 0 -> 0 (regress now judges a fully labelled clip by its scorecard: a removed duplicate is not a lost chest). Cases 19/19.
 Match suites: match_state 123, defects 26, replay 39, tracker 68, live 88, recording 50, cues 36, user recording 4. The tracker's HUD-check
 budget test failed once and passed on four reruns: a wall-clock check, with the packaged app capturing live on the same PC. Mutations: match state 36/36, tracker 43/43, live match 59/59, replay 14/14, recording 37/37 caught.
+
+**Full suite after the batch (on `aecd1ac`):** 33 of 33 suites run, 1,441 of 1,442 checks pass. The one failure,
+`test_analytics_ui` `test_days_and_weeks_tell_counted_from_not_counted`, is pre-existing and depends on the clock: on untouched v0.4.0
+(`fa1747d`) at the same time (Friday 01:42) it fails too, together with `test_personal_bests_show_their_evidence_or_what_they_need`;
+both passed during M0 the previous evening. Analytics is not touched by v0.4.1; the test needs a fixed clock (reported, not fixed here).
+That runner also exits 0 on a failed check, so only its summary line shows it.
 
 **Packaging caught:** the release copies templates from an explicit list (`packaging/build_release.py` TEMPLATE_FILES), so the new
 templates would have been left out of the package and match tracking would have stopped there. They are added, and
