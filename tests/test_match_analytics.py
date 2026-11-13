@@ -611,7 +611,7 @@ def history_folder(w, profile="default"):
 
 def test_analytics_is_its_own_page_after_the_dashboard():
     with G.window() as w:
-        assert [w.win.nav.item(i).text() for i in range(w.win.nav.count())] == ["Dashboard", "Analytics", "Overlay", "Settings", "Help & diagnostics"]
+        assert [w.win.nav.item(i).text() for i in range(w.win.nav.count())] == ["Dashboard", "Analytics", "Predictions", "Overlay", "Settings", "Help & diagnostics"]
         assert w.win.pages.widget(1) is w.win.analytics
 
 

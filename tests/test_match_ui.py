@@ -368,7 +368,7 @@ def test_it_does_not_appear_in_the_activity_log():
 
 def test_the_layout_keeps_its_pages_and_order():
     with G.window() as w:
-        assert w.win.pages.count() == 5 and w.win.nav.count() == 5
+        assert w.win.pages.count() == 6 and w.win.nav.count() == 6            # v0.5.0: Predictions after Analytics
         layout = w.win.dashboard.match_row.parentWidget().layout()
         order = [layout.itemAt(i) for i in range(layout.count())]
         position = next(i for i, item in enumerate(order) if item.widget() is w.win.dashboard.match_row)

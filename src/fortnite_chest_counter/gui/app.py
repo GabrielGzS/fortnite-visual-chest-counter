@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
 
 from fortnite_chest_counter import counter as C
 from fortnite_chest_counter.console import CHEST_LABELS
-from fortnite_chest_counter import match_analytics, match_history, paths, profiles, progression, records, settings, timeline
+from fortnite_chest_counter import match_analytics, match_history, paths, predictions, profiles, progression, records, settings, timeline
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import charts, release_notes, theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -2695,6 +2695,382 @@ class AnalyticsPage(QWidget):
         self.refresh()
 
 
+PREDICTION_VIEWS = (("My Progress", "What your counted chests mean for this pool's rewards"),
+                    ("What If?", "Roll a random first drop and see how wild the odds are"))
+PREDICTIONS_REFRESH_MS = 3000              # after a counted chest, once it has been saved
+BAR_STEPS = 1000
+
+
+def local_time(moment):
+    return moment.astimezone().strftime("%a %d %b, %H:%M")
+
+
+def local_date(moment):
+    return moment.astimezone().strftime("%d %b %Y")
+
+
+def team_selector(parent, on_change):
+    """Solo / Duo / Trio / Squad. -> (layout, button group); the group's checked id is the team size."""
+    row = QHBoxLayout()
+    row.setSpacing(4)
+    group = QButtonGroup(parent)
+    for name, size in predictions.TEAMS:
+        choice = button(name, "segment", tip=f"{size} player{'s' if size > 1 else ''} opening chests at your pace")
+        choice.setCheckable(True)
+        group.addButton(choice, size)
+        row.addWidget(choice)
+    group.button(1).setChecked(True)
+    group.idClicked.connect(on_change)
+    row.addStretch(1)
+    return row, group
+
+
+class RewardCard(QFrame):
+    """One reward of the pool: its chance in this cycle, the way to the 90% mark, forecasts, and what it means."""
+
+    def __init__(self, page, reward):
+        super().__init__()
+        self.page, self.reward, self.state = page, reward, None
+        self.setObjectName("card")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(4)
+        top = QHBoxLayout()
+        top.addWidget(label(reward.name, "cardTitle"), 1)
+        top.addWidget(label(f"1 in {fmt(reward.odds)} per chest", "hint"), 0, Qt.AlignRight)
+        layout.addLayout(top)
+        self.chance = label("", "statValue")
+        layout.addWidget(self.chance)
+        self.chance_sub = label("", "countSub", wrap=True)
+        layout.addWidget(self.chance_sub)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, BAR_STEPS)
+        self.bar.setTextVisible(False)
+        self.bar.setToolTip("Chests toward the 90% mark, measured in chests: not the chance itself.")
+        layout.addWidget(self.bar)
+        self.bar_text = label("", "hint", wrap=True)
+        layout.addWidget(self.bar_text)
+        self.forecast = label("", "hint", wrap=True)
+        layout.addWidget(self.forecast)
+        self.stats = label("", "hint", wrap=True)
+        layout.addWidget(self.stats)
+        self.status = label("", "hint", wrap=True)
+        layout.addWidget(self.status)
+        self.insight = label("", "countSub", wrap=True)
+        layout.addWidget(self.insight)
+        actions = QHBoxLayout()
+        self.restart = button("Start new cycle", "link", tip="Start counting this reward's chance from now. Nothing is deleted: Undo brings it back.",
+                              on_click=lambda: page.act(predictions.RESTART, self))
+        self.obtained = button("Mark obtained", "link", tip="You got it: the chance stops here, with the date. A report from you, not a detection.",
+                               on_click=lambda: page.act(predictions.OBTAINED, self))
+        self.undo = button("Undo", "link", on_click=lambda: page.act(predictions.UNDO, self))
+        for widget in (self.restart, self.obtained, self.undo):
+            actions.addWidget(widget)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+
+    def fill(self, s, rate, team):
+        self.state = s
+        r = s.reward
+        shown = s.obtained_chance if s.frozen else s.chance
+        self.chance.setText(predictions.percent(shown))
+        self.chance_sub.setText("chance in its cycle when you reported it" if s.frozen else
+                                "chance of at least one in this cycle" if r.kind == predictions.REPEATABLE else
+                                "chance of having found it this week" if r.kind == predictions.WEEKLY else "chance of having found it this season")
+        done = min(s.cycle_effective / s.milestone_chests, 1.0)
+        self.bar.setValue(round(done * BAR_STEPS))
+        self.bar_text.setText(("90% mark reached" if s.cycle_effective >= s.milestone_chests else
+                               f"{fmt(int(s.cycle_effective))} of {fmt(s.milestone_chests)} chests to the 90% mark")
+                              + (f" ({fmt(s.boosted)} opened in Treasure Hours count at their boosted odds)" if s.boosted else ""))
+        if not s.started:
+            self.forecast.setText(f"The pool starts on {local_time(s.window[0])}.")
+        elif s.ended:
+            self.forecast.setText("This week is over." if r.kind == predictions.WEEKLY else "This pool is over.")
+        elif s.frozen:
+            self.forecast.setText("Not counting: you reported it. Start a new cycle to count again (to help a friend, say).")
+        else:
+            parts = []
+            for milestone in predictions.MILESTONES:
+                left = s.remaining[milestone]
+                mark = f"{round(milestone * 100)}%"
+                if left == 0:
+                    parts.append(f"{mark}: reached")
+                else:
+                    time_left = predictions.duration(predictions.hours(left, rate, team))
+                    parts.append(f"{mark} in {fmt(left)} more chests" + (f", about {time_left}" if time_left else ""))
+            self.forecast.setText("   ·   ".join(parts))
+        expected = f"Statistically expected: {s.expected:.2f}" + (" across the season's weeks" if r.kind == predictions.WEEKLY else " this season")
+        if r.kind == predictions.REPEATABLE:
+            expected += f"   ·   {fmt(s.completed_cycles)} completed 90% cycle{'s' if s.completed_cycles != 1 else ''} (cycles, not Gizmos found)"
+        self.stats.setText(expected)
+        status = []
+        if r.kind == predictions.WEEKLY:
+            status.append(f"Week {s.week + 1} of {s.weeks}" + ("" if s.ended else f", next reward {local_time(s.window[1])}"))
+        if s.obtained is not None:
+            status.append(f"Reported obtained {local_time(s.obtained.at)} (by you)")
+        elif s.last_action is not None and s.last_action.kind == predictions.RESTART:
+            status.append(f"New cycle since {local_time(s.last_action.at)}")
+        self.status.setText("   ·   ".join(status))
+        self.status.setVisible(bool(status))
+        self.insight.setText(predictions.insight(s) if s.started else "")
+        live = s.started and not s.ended
+        self.restart.setVisible(live)
+        self.obtained.setVisible(live and r.kind != predictions.REPEATABLE and not s.frozen)
+        self.undo.setVisible(s.last_action is not None and not s.ended)
+        if s.last_action is not None:
+            self.undo.setToolTip("Undo " + ("Mark obtained" if s.last_action.kind == predictions.OBTAINED else "Start new cycle")
+                                 + f" ({local_time(s.last_action.at)}). Nothing else changes.")
+
+
+class PredictionsPage(QWidget):
+    """Estimates for a pool of treasure rewards from the active profile's history, in two tabs. My Progress reads and writes only this
+    profile's predictions.jsonl; What If? never saves anything. Neither changes counts, history, Analytics or OBS."""
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.setObjectName("page")
+        self.rng = None                                       # a random.Random for What If? (tests); None: a fresh one per roll
+        self.clock = None                                     # a function giving "now" (tests); None: the real clock
+        self.rolls = 0
+        self._view = None
+        try:
+            self.pool, self.pool_error = predictions.load_pool(), None
+        except predictions.PoolError as error:
+            self.pool, self.pool_error = None, str(error)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 24, 30, 16)
+        layout.setSpacing(10)
+        top = QHBoxLayout()
+        top.addWidget(label("Predictions", "pageTitle"))
+        top.addStretch(1)
+        self.profile_line = label("", "hint")
+        top.addWidget(self.profile_line, 0, Qt.AlignVCenter)
+        top.addWidget(button("Refresh", tip="Read the history again", on_click=self.refresh), 0, Qt.AlignVCenter)
+        layout.addLayout(top)
+        layout.addWidget(label("Estimates from your counted chests and Epic's published odds. They never show what actually dropped.", "pageSub",
+                               wrap=True))
+        self.status = label("", "hint", wrap=True)
+        self.status.hide()
+        layout.addWidget(self.status)
+        segments = QHBoxLayout()
+        segments.setSpacing(4)
+        self.view_buttons = QButtonGroup(self)
+        for index, (name, tip) in enumerate(PREDICTION_VIEWS):
+            view_button = button(name, "segment", tip=tip)
+            view_button.setCheckable(True)
+            self.view_buttons.addButton(view_button, index)
+            segments.addWidget(view_button)
+        segments.addStretch(1)
+        layout.addLayout(segments)
+        layout.addWidget(hline())
+        self.views = QStackedWidget()
+        layout.addWidget(self.views, 1)
+        self.view_buttons.button(0).setChecked(True)
+        self.view_buttons.idClicked.connect(self.show_view)
+        self._build_progress()
+        self._build_what_if()
+        self._generation = 0
+        self._thread = None
+        self._done = queue.SimpleQueue()
+        self._collector = QTimer(self)
+        self._collector.timeout.connect(self._collect)
+        self._live = QTimer(self)
+        self._live.setSingleShot(True)
+        self._live.timeout.connect(self._refresh_if_open)
+
+    def show_view(self, index):
+        self.views.setCurrentIndex(index)
+        self.view_buttons.button(index).setChecked(True)
+
+    # ------------------------------------------------------------------ building
+    def _build_progress(self):
+        tab, layout = scroll_tab()
+        self.views.addWidget(tab)
+        box, box_layout = card()
+        self.pool_line = label("", "cardTitle", wrap=True)
+        box_layout.addWidget(self.pool_line)
+        self.chests_line = label("", "hint", wrap=True)
+        box_layout.addWidget(self.chests_line)
+        self.pace_line = label("", "hint", wrap=True)
+        box_layout.addWidget(self.pace_line)
+        row, self.team = team_selector(self, lambda _size: self._show())
+        box_layout.addWidget(label("Forecast for", "countLabel"))
+        box_layout.addLayout(row)
+        box_layout.addWidget(label("Teammates are assumed to open as many chests as you, with rewards shared: a scenario, not something Epic has "
+                                   "confirmed. It changes only the time, never the chance per chest.", "hint", wrap=True))
+        layout.addWidget(box)
+        self.cards = {}
+        if self.pool is not None:
+            self.cards = {reward.id: RewardCard(self, reward) for reward in self.pool.rewards}
+            layout.addLayout(tile_grid(list(self.cards.values()), 2))
+        layout.addWidget(label("Every counted chest (normal, rare and sprite) is one try at the normal odds, the same for every player (Epic). "
+                               "Treasure Hours are not included. Chests the counter missed, or opened while it was not counting, are not in "
+                               "these numbers. A cycle reaching 90% is a statistical milestone, never a reward found.", "hint", wrap=True))
+        layout.addStretch(1)
+
+    def _build_what_if(self):
+        tab, layout = scroll_tab()
+        self.views.addWidget(tab)
+        box, box_layout = card("Roll a prediction", "A random first drop from now, drawn with the real odds: each chest is an independent try. "
+                                                     "Nothing here is saved or changes your progress.")
+        self.roll_reward = QComboBox()
+        for reward in (self.pool.rewards if self.pool is not None else ()):
+            self.roll_reward.addItem(f"{reward.name}   (1 in {fmt(reward.odds)})", reward.id)
+        self.roll_reward.currentIndexChanged.connect(lambda _index: self._show_odds())
+        box_layout.addWidget(self.roll_reward)
+        self.roll_boost = QComboBox()
+        for multiplier in predictions.MULTIPLIERS:
+            self.roll_boost.addItem("Normal odds" if multiplier == 1 else f"{multiplier:g}x odds, the whole hunt (what if)", multiplier)
+        self.roll_boost.setToolTip("Epic has announced Treasure Hour boosts of 1.5x to 10x for some rewards (Pirate Shop Access, the gold outfit, "
+                                   "vehicle & decal). Here a multiplier lasts the whole hunt, which no real event does: a hypothetical.")
+        self.roll_boost.currentIndexChanged.connect(lambda _index: self._show_odds())
+        box_layout.addWidget(self.roll_boost)
+        row, self.roll_team = team_selector(self, lambda _size: None)
+        box_layout.addLayout(row)
+        self.roll_button = button("Roll a prediction", "primary", on_click=self.roll)
+        roll_row = QHBoxLayout()
+        roll_row.addWidget(self.roll_button)
+        roll_row.addStretch(1)
+        box_layout.addLayout(roll_row)
+        self.roll_result = label("", "statValue")
+        box_layout.addWidget(self.roll_result)
+        self.roll_detail = label("Press Roll to see one possible future.", "hint", wrap=True)
+        box_layout.addWidget(self.roll_detail)
+        self.roll_verdict = label("", "countSub", wrap=True)
+        box_layout.addWidget(self.roll_verdict)
+        self.roll_count = label("", "hint")
+        box_layout.addWidget(self.roll_count)
+        layout.addWidget(box)
+        self.odds_facts = label("", "hint", wrap=True)
+        layout.addWidget(self.odds_facts)
+        layout.addWidget(label("Who finds it is drawn at random among the team. Every roll is independent: a long wait in one roll, or in real "
+                               "life, never makes the next chest luckier.", "hint", wrap=True))
+        layout.addStretch(1)
+        self._show_odds()
+
+    # ------------------------------------------------------------------ reading
+    def refresh(self):
+        cfg, _ = load_cfg()
+        profile = cfg["profile"]
+        self.profile_line.setText(f"Profile: {profile['name']}")
+        if self.pool is None:
+            self.status.setText(f"The reward pool could not be loaded ({self.pool_error}). Your counts are not affected.")
+            self.status.show()
+            return
+        self._generation += 1
+        folder = paths.APP_DIR / profiles.history_folder(profile["state_base"], profile["id"])
+        counting = self.win.mode in ("counting", "stopping")
+        self._thread = threading.Thread(target=self._read, args=(self._generation, folder, counting), daemon=True, name="predictions")
+        self._thread.start()
+        self._collector.start(40)
+
+    def _read(self, generation, folder, counting):
+        try:
+            self._done.put((generation, predictions.load_view(folder, self.pool, now=self.clock() if self.clock else None, counting_now=counting)))
+        except Exception as error:
+            self._done.put((generation, error))
+
+    def _collect(self):
+        while True:
+            try:
+                generation, result = self._done.get_nowait()
+            except queue.Empty:
+                return
+            if generation != self._generation:                # an older request: a newer one, or another profile, replaced it
+                continue
+            self._collector.stop()
+            if isinstance(result, Exception):
+                self.status.setText(f"The history could not be read ({result}). Your counts are not affected.")
+                self.status.show()
+                continue
+            self._view = result
+            self.status.setText(f"{result.bad_lines} line(s) of this profile's predictions file could not be read and were skipped."
+                                if result.bad_lines else "")
+            self.status.setVisible(bool(result.bad_lines))
+            self._show()
+
+    def chest_counted(self):
+        """A chest was just counted: read again shortly if the page is open (one read for a burst of chests)."""
+        if self.win.pages.currentWidget() is self:
+            self._live.start(PREDICTIONS_REFRESH_MS)
+
+    def _refresh_if_open(self):
+        if self.win.pages.currentWidget() is self:
+            self.refresh()
+
+    # ------------------------------------------------------------------ showing
+    def _show(self):
+        v = self._view
+        if v is None:
+            return
+        pool = v.pool
+        self.pool_line.setText(f"{pool.name}   ·   {local_date(pool.start)} to {local_date(pool.end)}" + (" (estimated end)" if pool.end_estimated else ""))
+        if v.season_chests or v.first_chest is not None:
+            self.chests_line.setText(f"{fmt(v.season_chests)} chests counted this season, from your saved history since {local_time(v.first_chest)}.")
+        else:
+            self.chests_line.setText("No chests counted in this pool yet. Your saved history is used as soon as you count.")
+        team = self.team.checkedId()
+        if v.rate:
+            self.pace_line.setText(f"Your pace: {v.rate:.0f} chests per hour of real life ({v.rate_period}), breaks and queues included.")
+        else:
+            self.pace_line.setText(f"Your pace: not enough counting yet ({progression.MIN_HOURLY_SECONDS // 60} minutes of sessions), so forecasts "
+                                   "show chests only.")
+        for state in v.states:
+            self.cards[state.reward.id].fill(state, v.rate, team)
+
+    def act(self, kind, reward_card):
+        s = reward_card.state
+        if s is None or self.pool is None:
+            return
+        if kind == predictions.UNDO and s.last_action is None:
+            return
+        cfg, _ = load_cfg()
+        profile = cfg["profile"]
+        folder = paths.APP_DIR / profiles.history_folder(profile["state_base"], profile["id"])
+        try:
+            predictions.append_action(folder, kind, self.pool.id, s.reward.id, undoes=s.last_action.id if kind == predictions.UNDO else None,
+                                      chests=s.cycle_chests, at=self.clock() if self.clock else None)
+        except OSError as error:
+            show_error(self, f"That could not be saved ({error}). Nothing changed.")
+            return
+        self.refresh()
+
+    # ------------------------------------------------------------------ What If?
+    def _selected_reward(self):
+        rid = self.roll_reward.currentData()
+        return next((r for r in self.pool.rewards if r.id == rid), None) if self.pool is not None else None
+
+    def _show_odds(self):
+        reward = self._selected_reward()
+        if reward is None:
+            self.odds_facts.setText("")
+            return
+        multiplier = self.roll_boost.currentData() or 1.0
+        p = reward.p * multiplier
+        odds = f"1 in {fmt(reward.odds)}" if multiplier == 1 else f"about 1 in {fmt(round(1 / p))} at {multiplier:g}x (normally 1 in {fmt(reward.odds)})"
+        self.odds_facts.setText(f"{reward.name}: {odds} per chest. Half of first drops come within {fmt(predictions.chests_to(0.5, p))} chests, "
+                                f"9 in 10 within {fmt(predictions.chests_to(0.9, p))}, and there is no upper limit.")
+
+    def roll(self):
+        reward = self._selected_reward()
+        if reward is None:
+            return
+        team = self.roll_team.checkedId()
+        rate = self._view.rate if self._view is not None else None
+        result = predictions.roll(reward, team=team, rate=rate, rng=self.rng, multiplier=self.roll_boost.currentData() or 1.0)
+        self.rolls += 1
+        self.roll_result.setText(f"{fmt(result.chests)} chests")
+        found = predictions.finder_name(result)
+        detail = f"{found} found it" + (" on your own" if team == 1 else f", on the team's chest number {fmt(result.chests)}")
+        time_text = predictions.duration(result.hours)
+        detail += (f". About {time_text} at your pace" + ("" if team == 1 else f" with {team} players")) if time_text else \
+            ". Count for half an hour to see the time at your pace"
+        self.roll_detail.setText(detail + ".")
+        self.roll_verdict.setText(predictions.roll_verdict(result))
+        self.roll_count.setText(f"Rolls: {self.rolls}")
+
+
 class HelpPage(QWidget):
     def __init__(self, win):
         super().__init__()
@@ -3016,10 +3392,11 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.dashboard = Dashboard(self)
         self.analytics = AnalyticsPage(self)
+        self.predictions = PredictionsPage(self)
         self.overlay = OverlayPage(self)
         self.settings_page = SettingsPage(self)
         self.help = HelpPage(self)
-        for page in (self.dashboard, self.analytics, self.overlay, self.settings_page, self.help):
+        for page in (self.dashboard, self.analytics, self.predictions, self.overlay, self.settings_page, self.help):
             self.pages.addWidget(page)
         outer.addWidget(self.pages, 1)
         self.setCentralWidget(root)
@@ -3067,7 +3444,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(brand)
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
-        for name in ("Dashboard", "Analytics", "Overlay", "Settings", "Help & diagnostics"):
+        for name in ("Dashboard", "Analytics", "Predictions", "Overlay", "Settings", "Help & diagnostics"):
             QListWidgetItem(name, self.nav)
         self.nav.setCurrentRow(0)
         self.nav.currentRowChanged.connect(self._page_changed)
@@ -3095,6 +3472,8 @@ class MainWindow(QMainWindow):
             self.settings_page.load()
         elif page is self.analytics:
             self.analytics.refresh()
+        elif page is self.predictions:
+            self.predictions.refresh()
         self.preview_visibility_changed()
 
     def changeEvent(self, event):
@@ -3638,6 +4017,8 @@ class MainWindow(QMainWindow):
         elif kind in ("counts", "event", "status", "progress"):
             if message.get("certain") is not None and message.get("approx") is not None:
                 self.set_counts(message["certain"], message["approx"], flash=kind == "event")
+            if kind == "event":
+                self.predictions.chest_counted()
             if kind == "status":
                 self.last_status = message
             if kind == "counts" and message.get("overlay") is not None:
