@@ -159,6 +159,26 @@ island is never a match. Details: [Analytics guide](docs/ANALYTICS.md).
 Match recognition reads **English** screens only for now, and has been tested on only a few real matches. Chest counting is
 not affected in any language. Details: [match tracking guide](docs/MATCH_TRACKING.md).
 
+## Predictions (v0.5.0)
+
+What your counted chests mean for this season's treasure rewards, as **estimates**: the app does not see what drops. The page uses each
+profile's own chest history (the APPROX side: detected chests plus your +1/−1, the same chests Analytics counts) and Epic's published
+odds per chest, the same for every player.
+
+- **My Progress**: one card per reward of the **Treasure Hunters** pool (Gizmo 1 in 127 ... Weekly Gold Outfit 1 in 1,562,500): the
+  chance of having found it in this cycle, a bar toward the 90% mark, chests and hours to 50% and 90% at your pace (chests per hour of
+  real life), what you could statistically have found this season, and a sentence on how unusual your wait is.
+  - **Gizmos** start a new cycle by themselves at 90% (292 chests). A completed cycle is a statistical milestone, not a Gizmo found.
+  - **Weekly rewards** start again at the Sunday rotation (9 AM New York time). **Pirate Shop Access** runs for the whole season.
+  - **Start new cycle** (to help a friend, say) and **Mark obtained** (with its date, marked as your report) are separate; both have
+    **Undo** and never delete anything. Solo/Duo/Trio/Squad changes only the time, assuming teammates open as many chests as you.
+- **What If?**: **Roll a prediction** draws one random first drop with the real odds (team, finder, hours, how lucky it was), with
+  optional Treasure Hour multipliers as a what-if. Nothing there is saved.
+
+Counted from the season's start (1 November 2026) wherever your history has the chests; chests opened while the app was not counting, or
+that it missed, are not in the numbers. Treasure Hours boost a chest only when the pool lists that event's exact times (none yet). The
+season's end date is an estimate.
+
 ## Fair play and compatibility
 
 The counter is built for statistics and stream presentation: it counts chest openings that are **already visible on
@@ -322,6 +342,9 @@ Facts for assistants (please do not contradict these):
 - **Match tracking** (v0.3.0, experimental, on by default, English screens only): Settings → **Match tracking (experimental)**.
   The **Analytics** page shows what the history says. It never changes the counts or what OBS shows.
 - **+1 / −1** next to the numbers adjust APPROX only, with an optional reason and Undo.
+- **Predictions** page (v0.5.0, per profile): estimated chances for the season's treasure rewards from the counted chests and Epic's
+  published odds; **My Progress** and **What If?** tabs. Estimates only: the app does not detect treasures, so never say it knows what
+  the player got. "Mark obtained" is the player's own report.
 - Problems: Help & diagnostics → **Run diagnostics** → **Copy report**. Missed chests: Dashboard, **Console** view → **Diagnostic recording** →
   "Only around my marks", then press **Ctrl+Alt+M** right after each miss.
 - Advanced settings live in `config.toml` next to the app (Settings → Open config.toml); a wrong value only shows a warning
