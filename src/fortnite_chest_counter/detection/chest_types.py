@@ -31,6 +31,9 @@ LABELS = {NORMAL: "Chest", RARE: "Rare chest", SPRITE: "Sprite chest", UNKNOWN: 
 # type -> (prefix length range relative to the CHEST word, template file per HUD size)
 TYPES = {RARE: ((0.70, 0.95), {"normal": "chest/en/rare.npy", "small": "chest/en/rare_small.npy"}),
          SPRITE: ((0.98, 1.28), {"normal": "chest/en/sprite.npy", "small": "chest/en/sprite_small.npy"})}
+# A HUD Scale's own prefix words (v0.4.1), used with that HUD's CHEST template on normal-size lines. RARE at 75% is a consensus of the
+# maintainer's two rare pop-ups; there is no SPRITE at 75% yet, so a sprite chest there stays "unknown" (types never change counts).
+HUD_PREFIXES = {"75": {RARE: "chest/en/hud75/rare.npy"}}
 EMPTY_MAX = 0.25                 # prefix length below this = no prefix word = a normal chest
 WORD_MIN = 0.50                  # exact match of the length-matching word...
 WORD_MARGIN = 0.15               # ...and its lead over the other word
@@ -39,9 +42,10 @@ MAJORITY = 0.6                   # ...and the share the winning type needs
 SIGMA = 0.6
 
 
-def load_prefixes(size):
-    """{type: binary word template} for "normal" or "small" HUD size."""
-    return {kind: np.load(paths.TEMPLATES_DIR / files[size]).astype(np.float32) for kind, (_, files) in TYPES.items()}
+def load_prefixes(size, hud="standard"):
+    """{type: binary word template} for "normal" or "small" HUD size, with the HUD Scale's own words on normal-size lines."""
+    own = HUD_PREFIXES.get(hud, {}) if size == "normal" else {}
+    return {kind: np.load(paths.TEMPLATES_DIR / own.get(kind, files[size])).astype(np.float32) for kind, (_, files) in TYPES.items()}
 
 
 def prefix_length(mask, y, x, th, tw):

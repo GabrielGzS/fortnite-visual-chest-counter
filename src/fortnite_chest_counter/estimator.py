@@ -217,6 +217,22 @@ PROMPT_EVERY_N_FRAMES = 8                # ~1.9 prompt scores per second (as in 
 
 ENABLED_LANGUAGES = {"en", "pt"}
 
+# Fortnite HUD Scale (v0.4.1, [detector] hud, per profile): the English CHEST word's template for that HUD, cut where the game drew it
+# (research/hud75_templates.py: a consensus of the maintainer's pop-ups at 75%, 2560x1440 through OBS 1280x720). Only the template
+# changes: every rule after it (0.75 trigger, tiers, the 0.88 blurred promotion, the stacked tracker, the pop-up memory) is the same.
+# "standard" keeps the template of every release before v0.4.1. Measured on the maintainer's recording (one player, one recording):
+# leave-one-out exact 0.71-0.94 (median 0.84), 17 of 18 pop-ups would be CERTAIN by today's rules; non-chest frames of the recording,
+# the English and PS5 references and the Replays/Thiefs cases <= 0.61 exact / 0.82 blurred.
+HUD = "standard"
+HUD_CHEST_TEMPLATES = {"75": "chest/en/hud75/chest.npy"}
+# With a HUD's own template the exact path finds that player's pop-ups, so a pop-up found by the blurred (scale-aware) channel alone must
+# also look like the word: blurred >= HUD_SCALED_BLUR_MIN and the native template's exact match >= HUD_SCALED_EXACT_MIN over its first
+# second. Stricter than the standard channel, never looser. On the maintainer's recording at 75% the blurred-only onsets were 4 non-chest
+# pop-ups (NEW STORM PHASE and others: blurred 0.804-0.824, exact 0.43-0.55) and 2 real chests: one over bright water (0.887 / 0.71, kept)
+# and a CHEST line added to a CROWN BONUS pop-up (0.812 / 0.52), which these scores cannot tell from the non-chests, so it is given up.
+HUD_SCALED_BLUR_MIN = 0.85
+HUD_SCALED_EXACT_MIN = 0.60
+
 # Keep a copy of the popup region at each popup's peak so the session can save it as a PNG ([logging] save_snapshots).
 SAVE_SNAPSHOTS = False
 
@@ -231,6 +247,8 @@ def configure(detector_cfg):
     APPROX_MEDIUM_WITH_OBJECT_SUPPORT = detector_cfg["count_supported_medium_as_approx"]
     INTERACTION_ONLY_COUNTS_APPROX = detector_cfg["count_interaction_object_as_approx"]
     ENABLED_LANGUAGES = set(detector_cfg["languages"])
+    global HUD
+    HUD = detector_cfg.get("hud", "standard")
     SAMPLE_FPS = detector_cfg["process_fps"]
     PROMPT_EVERY_N_FRAMES = max(1, round(SAMPLE_FPS / 1.9))      # keep ~1.9 prompt scores per second
 
@@ -277,6 +295,10 @@ class ChestEstimator:
     def __init__(self, scale_aware=None, small_hud=None, stacked=None):
         """scale_aware / small_hud / stacked: None = the module constants; False / True to compare (tests, research)."""
         self.templates = [t for t in V.load_templates() if t["id"].split(":")[0] in ENABLED_LANGUAGES]
+        if HUD in HUD_CHEST_TEMPLATES:                     # this player's HUD Scale: the CHEST word as their game draws it
+            for t in self.templates:
+                if t["id"] == "en:CHEST":
+                    t["array"] = np.load(paths.TEMPLATES_DIR / HUD_CHEST_TEMPLATES[HUD]).astype(np.float32)
         if not self.templates:
             raise ValueError(f"no chest-word template for languages {sorted(ENABLED_LANGUAGES)}; "
                              f"available: {[t['id'] for t in V.CHEST_TEMPLATES]}")
@@ -445,7 +467,7 @@ class ChestEstimator:
                 tpl, line_min = next(x["array"] for x in self.templates if x["id"] == "en:CHEST"), STACKED_LINE_MIN
             self.trackers[key] = popup_lines.PopupTracker(tpl, line_min, SAMPLE_FPS)
             if CHEST_TYPES:
-                prefixes = chest_types.load_prefixes(key)
+                prefixes = chest_types.load_prefixes(key, HUD)
                 th, tw = tpl.shape
                 self.trackers[key].classify = lambda m, ln, p=prefixes, h=th, w=tw: chest_types.classify_line(
                     m, ln.y, ln.x, h, w, p)[0]
@@ -650,6 +672,9 @@ class ChestEstimator:
             self.tracked_counted = True
         exact_peak = max((h[1] for h in self.popup_hist if p["onset"] <= h[0] <= p["onset"] + POPUP_FINISH_DELAY),
                          default=0.0)
+        if HUD in HUD_CHEST_TEMPLATES and not p.get("small") and (p["blur"] < HUD_SCALED_BLUR_MIN or exact_peak < HUD_SCALED_EXACT_MIN):
+            self.scaled_stats["hud_scaled_rejected"] = self.scaled_stats.get("hud_scaled_rejected", 0) + 1
+            return                                           # not shaped enough like this HUD's own word: not counted
         popup = {"onset": p["onset"], "score": exact_peak, "y": p["y"], "x": p["x"], "template": p["template"],
                  "scaled": {"blur": p["blur"], "scale": p["scale"]}}
         if p.get("small"):

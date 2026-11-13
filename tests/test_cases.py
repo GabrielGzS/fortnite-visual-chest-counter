@@ -222,6 +222,41 @@ def test_every_case_finds_every_chest_once_and_nothing_else():
             check(name)
 
 
+def replay_hud(name, hud):
+    E.configure(dict(settings.DEFAULTS["detector"], hud=hud))
+    try:
+        est, events = E.ChestEstimator(), []
+        for t, f in frames(name):
+            events += est.process_frame(t, f)
+        events += est.flush()
+    finally:
+        E.configure(settings.DEFAULTS["detector"])
+    return [e for e in events if e["approx_counted"]]
+
+
+def test_hud_75_finds_every_chest_of_the_maintainers_cases():
+    """v0.4.1, [detector] hud = "75": the CHEST word as the maintainer's game draws it (research/hud75_templates.py). The templates come
+    from this recording, so these cases are in-sample; held out: match 1's consensus on match 2's pop-ups, 11 of 13 CERTAIN by today's
+    rules, and leave-one-out 17 of 18. Every rule after the template is unchanged."""
+    certain, types = {}, {}
+    for name in [n for n in CASES if n.startswith("user_")]:
+        counted = replay_hud(name, "75")
+        found, missed, dup, false = score(name, counted)
+        # the CHEST line added to a CROWN BONUS pop-up looks, to the blurred channel, like the non-chest pop-ups that HUD_SCALED_* rejects
+        expect = 1 if name == "user_chest_line_on_crown_bonus" else 0
+        assert (missed, dup, false) == (expect, 0, 0), (name, found, missed, dup, false)
+        certain[name] = sum(e["certain_counted"] for e in counted)
+        types[name] = [e["chest_type"] for e in counted]
+    assert certain == {"user_inventory_hides_popup": 1, "user_plain_popups_approx_only": 3, "user_chest_line_on_crown_bonus": 0,
+                       "user_low_margin_popup": 1, "user_bright_background_popup": 0, "user_two_rares_then_rare_line": 3}, certain
+    assert types["user_two_rares_then_rare_line"][:2] == ["rare", "rare"]           # v0.4.0: unknown, unknown
+
+
+def test_hud_75_changes_nothing_on_the_standard_profile():
+    for name in ("replays_six_chests", "thiefs_1080p_small_hud", "user_plain_popups_approx_only"):
+        assert [e["time"] for e in replay(name)] == [e["time"] for e in replay_hud(name, "standard")], name
+
+
 def test_v041_gaps_reproduce_exactly_until_fixed():
     """The maintainer's own recording (tests/cases/user_20261112.json): v0.4.0 on a 0.95x pop-up. Each gap is pinned exactly, so a change
     that fixes it fails here on purpose: then remove its "v041_gap" and the case must pass like every other (found all, 0 duplicates,
