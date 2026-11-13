@@ -1308,7 +1308,7 @@ def _open_tracker(cfg, session, history=None, source=None):
         return MatchTracker(lambda record: session.log.write({**record, "logged_at": now_iso()}), CONSOLE.warn, history=history,
                             heartbeat_seconds=cfg["match"].get("heartbeat_seconds"), frames=(lambda: (source.frames_processed, source.frames_dropped)) if source is not None else None,
                             status=(lambda **fields: CONSOLE.emit("match", **fields)) if history is not None else None,
-                            hud=cfg["detector"]["hud"])
+                            hud=(cfg.get("detector") or {}).get("hud", "standard"))
     except Exception as error:
         CONSOLE.warn(f"match tracking could not start ({error}); counting is not affected")
         if history is not None:
