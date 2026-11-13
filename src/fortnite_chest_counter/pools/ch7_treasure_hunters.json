@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "id": "ch7-treasure-hunters",
+  "revision": 1,
+  "name": "Treasure Hunters (Chapter 7)",
+  "start": "2026-11-01T08:00:00Z",
+  "end": "2026-12-05T14:00:00Z",
+  "end_estimated": true,
+  "rotations": ["2026-11-08T14:00:00Z", "2026-11-15T14:00:00Z", "2026-11-22T14:00:00Z", "2026-11-29T14:00:00Z"],
+  "rewards": [
+    {"id": "gizmo", "name": "Gizmo (any)", "odds": 127, "kind": "repeatable"},
+    {"id": "weekly_loading_screen", "name": "Weekly Loading Screen", "odds": 272, "kind": "weekly"},
+    {"id": "weekly_jam_track", "name": "Weekly Jam Track", "odds": 391, "kind": "weekly"},
+    {"id": "weekly_pickaxe_backbling", "name": "Weekly Pickaxe or Back Bling", "odds": 568, "kind": "weekly"},
+    {"id": "weekly_vehicle_decal", "name": "Weekly Vehicle & Decal", "odds": 7813, "kind": "weekly"},
+    {"id": "pirate_shop_access", "name": "Pirate Shop Access", "odds": 137500, "kind": "pool"},
+    {"id": "weekly_gold_outfit", "name": "Weekly Gold Outfit", "odds": 1562500, "kind": "weekly"}
+  ],
+  "treasure_hour_multipliers": {"pirate_shop_access": 1.5, "weekly_gold_outfit": 7.5, "weekly_vehicle_decal": 10},
+  "about": [
+    "Normal odds per chest as published by Epic Games for the Treasure Hunters mini-season (reported 2026-11-13); the same for every player, constant outside Treasure Hours. Except Gizmos, the same treasure cannot be obtained twice.",
+    "Gizmo 1 in 127 is taken from Epic's table as the maintainer read it; the press coverage found on 2026-11-13 did not list it.",
+    "Starts 2026-11-01 at 08:00 UTC (the previous season's downtime; no chests are opened between then and the launch). Weekly rewards rotate on Sundays at 9 AM America/New_York (14:00 UTC in November 2026), as the maintainer reported. The end, about 2026-12-05, is an estimate: Epic has not announced it.",
+    "Treasure Hour multipliers are reported figures and are not applied: every chest uses the normal odds.",
+    "Every chest the counter counts (normal, rare and sprite chests) is one attempt."
+  ],
+  "sources": [
+    "https://www.ggrecon.com/articles/fortnite-pirate-shop-access-drop-rate/",
+    "https://theloadout.com/fortnite-pirate-token-odds-are-1-in-137500-worth-10k",
+    "https://www.destructoid.com/all-fortnite-treasure-hunters-loot-odds-and-drop-rates-explained/",
+    "https://beebom.com/when-does-fortnite-treasure-hunters-mini-season-end/"
+  ]
+}
