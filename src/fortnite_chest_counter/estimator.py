@@ -136,6 +136,37 @@ SMALL_HIGH_BLUR = 0.95
 # (a 0.6 s full-screen map at 362.4 s of the M9H 720p capture), not a new chest.
 SMALL_SAME_POPUP_SECONDS = 2.0
 SMALL_SAME_POPUP_PIXELS = 4
+# v0.4.1: the same rule for every English pop-up channel, comparing with where the word was LAST SEEN, not where it was at the onset.
+# On the maintainer's recording an inventory panel covered a 0.95x pop-up for 0.75 s (66.7-67.45 s) and the scale-aware channel counted it
+# again 1.73 s after its onset (tests/cases user_inventory_hides_popup). Covering real pop-ups for 0.4-1.0 s made every channel count
+# twice (the exact path, the scale-aware channel, and the small-HUD channel despite its M9H rule: the word slides about 6 px during its
+# first 0.3 s, so it comes back away from its onset position). Separate pop-ups began 2.14 s or more apart on all labelled footage
+# (en: 70.33 / 72.47 s), because a chest opened while a pop-up is on screen is added to it.
+SAME_POPUP_SECONDS = SMALL_SAME_POPUP_SECONDS
+SAME_POPUP_PIXELS = SMALL_SAME_POPUP_PIXELS
+SAME_POPUP_FOLLOW_PIXELS = 8                # the word may move this far between frames and still be followed (stacked lines are ~15 px apart)
+
+
+class PopupMemory:
+    """One pop-up channel's last new pop-up: when it began and where its word was last seen. Reads the module constants at call time."""
+
+    def __init__(self, seconds_name="SAME_POPUP_SECONDS", pixels_name="SAME_POPUP_PIXELS"):
+        self.seconds_name, self.pixels_name = seconds_name, pixels_name
+        self.onset, self.where = None, None
+
+    def take(self, t, y, x):
+        self.onset, self.where = t, (y, x)
+
+    def follow(self, y, x):
+        """The word was seen this frame at (y, x): if it is the remembered word (moved a little), remember its new place."""
+        if self.where is not None and max(abs(y - self.where[0]), abs(x - self.where[1])) <= SAME_POPUP_FOLLOW_PIXELS:
+            self.where = (y, x)
+
+    def back(self, t, y, x):
+        """A new onset at (y, x): is it the remembered pop-up coming back after something covered it?"""
+        seconds, pixels = globals()[self.seconds_name], globals()[self.pixels_name]
+        return (self.onset is not None and t - self.onset < seconds
+                and max(abs(y - self.where[0]), abs(x - self.where[1])) <= pixels)
 # Where the small word is searched (normalized frame pixels): the pop-up keeps its place when the HUD is smaller (Thiefs'
 # word at x 889-910, y 228-234 against 885-911, 229-235), so a box around it is enough - a third of the pop-up box's work.
 SMALL_SEARCH_BOX = (800, 170, 1010, 300)
@@ -280,7 +311,9 @@ class ChestEstimator:
             tpl = np.load(paths.TEMPLATES_DIR / SMALL_TEMPLATE_FILE).astype(np.float32)
             self.small = {"array": tpl, "blur": V.blur_template(tpl, ROBUST_SIGMA)}
         self.small_onset = OnsetDetector(SMALL_TRIGGER, SMALL_REARM, False)
-        self.small_last_onset = None       # (t, y, x) of the last small-HUD pop-up taken as a new one
+        # each English channel's last new pop-up, so the same pop-up coming back after an overlay is not a new chest (SAME_POPUP_*)
+        self.same = {"exact": PopupMemory(), "scaled": PopupMemory(),
+                     "small": PopupMemory("SMALL_SAME_POPUP_SECONDS", "SMALL_SAME_POPUP_PIXELS")}
         self.stacked = bool((STACKED_POPUPS if stacked is None else stacked) and "en:CHEST" in self.robust_templates)
         self.trackers = {}                 # "normal" / "small" -> popup_lines.PopupTracker
         self.tracking = None               # the key of the tracker following the pop-up on screen
@@ -342,6 +375,16 @@ class ChestEstimator:
             exact_fired = False                              # the pop-up on screen, already counted: not a new chest
             self.scaled_stats["exact_same_popup"] = self.scaled_stats.get("exact_same_popup", 0) + 1
             self.exact_onsets.append(t)                      # ...but it still owns any blurred onset near it
+        if exact_fired and word == "en:CHEST":
+            if self.same["exact"].back(t, y, x):             # the pop-up counted a moment ago, back after an overlay
+                exact_fired = False
+                self.scaled_stats["exact_back"] = self.scaled_stats.get("exact_back", 0) + 1
+                self.exact_onsets.append(t)
+                self._resume(t, "normal", None, (y, x))
+            else:
+                self.same["exact"].take(t, y, x)
+        if word == "en:CHEST" and score >= V.EVENT_LOW_THRESHOLD:
+            self.same["exact"].follow(y, x)
         if exact_fired:
             self.pending_popups.append({"onset": t, "score": score, "y": y, "x": x, "template": word})
             if SAVE_SNAPSHOTS:
@@ -378,6 +421,12 @@ class ChestEstimator:
     def _same_popup_counted(self):
         return (self.stacked and self.tracking is not None and self.trackers[self.tracking].active
                 and self.trackers[self.tracking].run == self.tracked_run and self.tracked_counted)
+
+    def _resume(self, t, key, scaled, center):
+        """The pop-up counted a moment ago is back after an overlay: follow its content again (a chest added to it is still counted by
+        the tracker) without counting the pop-up itself again."""
+        if self._track(t, key, scaled, center) is not None:
+            self.tracked_counted = True
 
     def _track(self, t, key, scaled, center):
         """A pop-up onset: follow its content from now on (one pop-up at a time; the one on screen keeps its tracker).
@@ -507,14 +556,22 @@ class ChestEstimator:
                 if SAVE_SNAPSHOTS:
                     p["roi"] = roi.copy()
         if self.scaled_onset.update(t, score, cy, cx):
-            if not any(abs(o - t) <= SCALED_WAIT for o in self.exact_onsets) and \
+            if self.same["scaled"].back(t, cy, cx):
+                # the pop-up taken a moment ago, back after something covered it (inventory, map): not a new chest
+                self.scaled_stats["scaled_same_popup"] = self.scaled_stats.get("scaled_same_popup", 0) + 1
+                if s == 1.0:
+                    self._resume(t, "normal", {"blur": score, "scale": s}, (cy, cx))
+            elif not any(abs(o - t) <= SCALED_WAIT for o in self.exact_onsets) and \
                     not any(abs(p["onset"] - t) <= POPUP_FINISH_DELAY for p in self.pending_popups):
+                self.same["scaled"].take(t, cy, cx)
                 self.pending_scaled.append({"onset": t, "blur": score, "scale": s, "y": cy, "x": cx, "template": tid})
                 if SAVE_SNAPSHOTS:
                     self.pending_scaled[-1]["roi"] = roi.copy()
                 self.scaled_stats["onsets"] += 1
                 if s == 1.0:
                     self.pending_scaled[-1]["run"] = self._track(t, "normal", {"blur": score, "scale": s}, (cy, cx))
+        if score >= SCALED_REARM:
+            self.same["scaled"].follow(cy, cx)
         for p in list(self.pending_scaled):                 # not claimed by the exact path in time -> a pop-up
             if t >= p["onset"] + SCALED_WAIT:
                 self.pending_scaled.remove(p)
@@ -545,9 +602,9 @@ class ChestEstimator:
             if p.get("small") and t <= p["onset"] + POPUP_FINISH_DELAY and blur > p["blur"] and exact >= SMALL_TRIGGER:
                 p.update(blur=blur, exact_small=exact, y=cy, x=cx)
         if self.small_onset.update(t, exact, cy, cx):
-            last = self.small_last_onset
-            back = last is not None and t - last[0] < SMALL_SAME_POPUP_SECONDS and \
-                max(abs(cy - last[1]), abs(cx - last[2])) <= SMALL_SAME_POPUP_PIXELS
+            back = self.same["small"].back(t, cy, cx)
+            if back:
+                self._resume(t, "small", {"blur": blur, "scale": SMALL_SCALE}, (cy, cx))
             if back or (self.stacked and self.tracking == "small" and self.trackers["small"].active and (
                     self._same_popup_counted() or any(p.get("small") and p.get("run") == self.tracked_run for p in self.pending_scaled))):
                 # the pop-up on screen, already counted, matched again (a dip and a return): not a new chest. A chest added to it is the
@@ -561,7 +618,9 @@ class ChestEstimator:
                     self.pending_scaled[-1]["roi"] = roi.copy()
                 self.scaled_stats["small_onsets"] += 1
                 self.pending_scaled[-1]["run"] = self._track(t, "small", {"blur": blur, "scale": SMALL_SCALE}, (cy, cx))
-                self.small_last_onset = (t, cy, cx)
+                self.same["small"].take(t, cy, cx)
+        if exact >= SMALL_REARM:
+            self.same["small"].follow(cy, cx)
 
     def _scaled_scales(self):
         if self.scale_locked is None:

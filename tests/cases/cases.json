@@ -450,7 +450,7 @@
       ],
       "source": "maintainer's own game, OBS local recording 720p30 NVENC 4 Mbps (tests/cases/user_20261112.json)",
       "hud": 0.95,
-      "live": "v0.4.0: counted twice (66.07 and 67.80), both APPROX",
+      "live": "v0.4.0: counted twice (66.07 and 67.80), both APPROX. v0.4.1: once (every channel remembers where its last pop-up was seen)",
       "truth": [
         {
           "t": 65.95,
@@ -458,14 +458,7 @@
           "type": "chest",
           "text": "+600 XP / CHEST, covered 66.7-67.45 s by the inventory panel, then the same pop-up again"
         }
-      ],
-      "v041_gap": {
-        "found": 1,
-        "duplicates": 1,
-        "false": 0,
-        "certain": 0,
-        "why": "the scale-aware channel has no same-pop-up rule (the small-HUD channel has one since M9H)"
-      }
+      ]
     },
     "user_plain_popups_approx_only": {
       "video": "samples/video tests/2026-11-12 12-52-32.mp4",

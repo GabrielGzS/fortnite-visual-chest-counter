@@ -119,10 +119,12 @@ def compare(clip, base, new, tol=0.6):
             bad += cls in ("FALSE", "NONCHEST") and n["approx_counted"]
     labels = labelled(name)
     if labels is not None:
+        # Every chest is labelled, so the scorecard decides: an event lost inside a chest's window may be a duplicate removed (found and
+        # CERTAIN unchanged, duplicates down), which the per-event rule above cannot tell from a real chest lost.
         b, n = score_labelled(labels, base), score_labelled(labels, new)
         print(f"  labelled: found {b['found']}->{n['found']}/{len(labels['chests'])}  duplicates {b['duplicates']}->{n['duplicates']}  "
               f"false {b['false']}->{n['false']}  CERTAIN {b['certain']}->{n['certain']}")
-        bad += (n["found"] < b["found"]) + (n["duplicates"] > b["duplicates"]) + (n["false"] > b["false"]) + (n["certain"] < b["certain"])
+        bad = (n["found"] < b["found"]) + (n["duplicates"] > b["duplicates"]) + (n["false"] > b["false"]) + (n["certain"] < b["certain"])
     if len(base) == len(new) and not bad and (bc, ba) == (nc, na) and not any(
             (b["adjusted_tier"], b["certain_counted"], b["approx_counted"]) != (n["adjusted_tier"], n["certain_counted"], n["approx_counted"])
             for b, n in zip(base, new)):

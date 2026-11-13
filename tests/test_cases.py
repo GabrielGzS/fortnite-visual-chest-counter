@@ -124,6 +124,38 @@ def test_a_pop_up_hidden_for_a_moment_by_the_map_counts_once():
         assert len(replay("thiefs_720p_map_flash")) == 2                                # without the rule, the same pop-up twice
 
 
+def _covered(name, seconds):
+    """Replay a case with the pop-up box blanked for `seconds`, 0.5 s after every new pop-up (an inventory panel or the map)."""
+    truth = [r["t"] for r in CASES[name]["truth"] if r["what"] == "new_popup"]
+    E.configure(settings.DEFAULTS["detector"])
+    est, events = E.ChestEstimator(), []
+    for t, f in frames(name):
+        if any(c + 0.5 <= t <= c + 0.5 + seconds for c in truth):
+            f = f.copy()
+            f[V.ROI_Y:V.ROI_Y + V.ROI_H, V.ROI_X:V.ROI_X + V.ROI_W] = np.array([40, 36, 60], np.uint8)
+        events += est.process_frame(t, f)
+    events += est.flush()
+    return score(name, [e for e in events if e["approx_counted"]])
+
+
+def test_the_maintainers_pop_up_covered_by_the_inventory_counts_once():
+    counted = check("user_inventory_hides_popup")                      # v0.4.0: twice (66.07 and 67.80)
+    assert len(counted) == 1 and counted[0]["scaled_popup"]["scale"] == 1.0
+    with _with(SAME_POPUP_SECONDS=0):
+        assert len(replay("user_inventory_hides_popup")) == 2          # without the rule, the same pop-up twice
+
+
+def test_covered_pop_ups_count_once_on_every_channel():
+    """v0.4.1: blanking real pop-ups for 0.75 s made v0.4.0 count them again on every channel (exact, scale-aware, small-HUD: 11
+    duplicates over these cases). Each channel now remembers where its last pop-up's word was last seen. Chests added to a pop-up are
+    still counted by the tracker, which resumes on the returning pop-up."""
+    for name in ("thiefs_1080p_small_hud", "thiefs_small_hud", "user_plain_popups_approx_only"):
+        found, missed, dup, false = _covered(name, 0.75)
+        assert (missed, dup, false) == (0, 0, 0), (name, found, missed, dup, false)
+    with _with(SAME_POPUP_SECONDS=0, SMALL_SAME_POPUP_SECONDS=0):
+        assert _covered("user_plain_popups_approx_only", 0.75)[2] == 3   # v0.4.0's behaviour: every covered pop-up twice
+
+
 def test_strong_1080p_small_hud_pop_ups_are_certain_and_steps_stay_approx():
     counted = check("thiefs_1080p_small_hud")
     assert [e["certain_counted"] for e in counted] == [True, True, False, False, False, False, False]
@@ -195,7 +227,7 @@ def test_v041_gaps_reproduce_exactly_until_fixed():
     that fixes it fails here on purpose: then remove its "v041_gap" and the case must pass like every other (found all, 0 duplicates,
     0 false)."""
     gaps = {name: case for name, case in CASES.items() if case.get("v041_gap")}
-    assert len(gaps) == 6
+    assert len(gaps) == 5                                                  # 6 in M0; the inventory duplicate is fixed
     for name, case in gaps.items():
         gap = case["v041_gap"]
         counted = replay(name)
@@ -223,8 +255,11 @@ def test_a_late_exact_match_on_a_pop_up_already_counted_is_the_same_pop_up():
 def test_non_chest_lines_and_an_unchanged_pop_up_are_not_counted_again():
     for name in ("replays_weakpoint_line", "replays_static_popup_refire"):
         assert len(check(name)) == 1
-        _, _, dup, false = score(name, replay(name, stacked=False))
+        with _with(SAME_POPUP_SECONDS=0):                                # v0.2.1 had neither the tracker nor the pop-up memory
+            _, _, dup, false = score(name, replay(name, stacked=False))
         assert dup + false == 1, name                                    # v0.2.1 counted the same chest twice
+    # v0.4.1: the unchanged pop-up's re-fire is the same word at the same place within 2 s, so the memory alone stops it too
+    assert score("replays_static_popup_refire", replay("replays_static_popup_refire", stacked=False))[2:] == (0, 0)
 
 
 def test_portuguese_only_settings_keep_the_position_re_fire_and_no_new_channels():
