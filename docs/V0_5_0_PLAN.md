@@ -147,6 +147,10 @@ check. **Stop when** every target passes and the page is usable. Presentation po
 | What If? | Roll a prediction: a geometric first-drop draw (not a number between 1 and the odds), the finder drawn among the team, hours at the player's pace, how lucky the roll was |
 | Treasure Hours | the preset lists verified windows (start, end, multiplier per reward); a chest inside one counts at its boosted odds by its own time (1 − Π(1 − pᵢ)); none listed yet. What If? offers 1.5× to 10× as hypotheticals for the whole hunt. Forecasts stay at normal odds |
 
+RC3 (maintainer's review of RC2): the team choice changes every card's time rows at once (never the chance or the chests needed);
+**Assign to weeks...** (ALLOCATE rows: moves added chests between "week not known" and weeks that had begun, never adds or removes any);
+a **Probability curve** per reward (`charts.ProbabilityCurve`, QPainter, no new dependency).
+
 Built on `dev/v0.5.0`: `predictions.py` (engine, pool, actions), `pools/ch7_treasure_hunters.json`, the Predictions page in `gui/app.py`,
 `tests/test_predictions.py` (21) and `tests/test_predictions_ui.py` (7). The preset ships with the package automatically (the build copies
 the whole package folder except templates).

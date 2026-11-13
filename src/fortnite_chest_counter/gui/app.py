@@ -2915,7 +2915,25 @@ class RewardCard(QFrame):
         left.addWidget(self.bar)
         self.bar_text = label("", "hint", wrap=True)
         left.addWidget(self.bar_text)
-        self.forecast = label("", "hint", wrap=True)
+        self.forecast_caption = label("", "countLabel")
+        left.addWidget(self.forecast_caption)
+        rows = QGridLayout()
+        rows.setHorizontalSpacing(12)
+        rows.setVerticalSpacing(2)
+        self.rows = {}
+        for index, milestone in enumerate(predictions.MILESTONES):
+            mark = QLabel(f"{round(milestone * 100)}%")
+            mark.setStyleSheet(f"color: {accent}; font-size: 13px; font-weight: 700; background: transparent; border: none;")
+            when = QLabel()
+            when.setStyleSheet(f"color: {theme.TEXT}; font-size: {18 if featured else 16}px; font-weight: 700; background: transparent; border: none;")
+            chests = label("", "hint", wrap=True)
+            rows.addWidget(mark, index, 0)
+            rows.addWidget(when, index, 1)
+            rows.addWidget(chests, index, 2)
+            self.rows[milestone] = (mark, when, chests)
+        rows.setColumnStretch(2, 1)
+        left.addLayout(rows)
+        self.forecast = label("", "hint", wrap=True)          # instead of the rows: not started, over, or reported
         left.addWidget(self.forecast)
         self.stats = label("", "hint", wrap=True)
         left.addWidget(self.stats)
@@ -2943,6 +2961,12 @@ class RewardCard(QFrame):
             actions.addWidget(widget)
         actions.addStretch(1)
         layout.addLayout(actions)
+        curve_row = QHBoxLayout()                             # its own row: the narrow cards have no room beside the actions
+        self.curve_link = button("\u2197 Probability curve", "link", tip="How the chance of at least one grows with chests, from 0 toward 99.99%",
+                                 on_click=lambda: page.show_curve(self))
+        curve_row.addWidget(self.curve_link)
+        curve_row.addStretch(1)
+        layout.addLayout(curve_row)
 
     def fill(self, s, rate, team):
         self.state = s
@@ -2956,23 +2980,31 @@ class RewardCard(QFrame):
         self.bar_text.setText(("90% mark reached" if s.cycle_effective >= s.milestone_chests else
                                f"{fmt(int(s.cycle_effective))} of {fmt(s.milestone_chests)} chests to the 90% mark")
                               + (f" ({fmt(s.boosted)} opened in Treasure Hours count at their boosted odds)" if s.boosted else ""))
-        if not s.started:
-            self.forecast.setText(f"The pool starts on {local_time(s.window[0])}.")
-        elif s.ended:
-            self.forecast.setText("This week is over." if r.kind == predictions.WEEKLY else "This pool is over.")
-        elif s.frozen:
-            self.forecast.setText("Not counting: you reported it. Start a new cycle to count again (to help a friend, say).")
-        else:
-            parts = []
-            for milestone in predictions.MILESTONES:
-                left = s.remaining[milestone]
-                mark = f"{round(milestone * 100)}%"
-                if left == 0:
-                    parts.append(f"{mark}: reached")
-                else:
-                    time_left = predictions.duration(predictions.hours(left, rate, team))
-                    parts.append(f"{mark} in {fmt(left)} more chests" + (f", about {time_left}" if time_left else ""))
-            self.forecast.setText("   ·   ".join(parts))
+        message = (f"The pool starts on {local_time(s.window[0])}." if not s.started else
+                   ("This week is over." if r.kind == predictions.WEEKLY else "This pool is over.") if s.ended else
+                   "Not counting: you reported it. Start a new cycle to count again (to help a friend, say)." if s.frozen else None)
+        self.forecast.setText(message or "")
+        self.forecast.setVisible(message is not None)
+        name = {n: label_ for label_, n in predictions.TEAMS}[team]
+        self.forecast_caption.setText(("TIME AT YOUR PACE" if team == 1 else f"TIME AT {name.upper()} PACE ({predictions.team_factor(team):g}X)")
+                                      if rate else "CHESTS STILL NEEDED")
+        self.forecast_caption.setVisible(message is None)
+        for milestone, (mark, when, chests) in self.rows.items():
+            for widget in (mark, when, chests):
+                widget.setVisible(message is None)
+            if message is not None:
+                continue
+            left = s.remaining[milestone]
+            h = predictions.hours(left, rate, team)
+            if left == 0:
+                when.setText("reached")
+                chests.setText("")
+            elif h is None:
+                when.setText(fmt(left))
+                chests.setText("more chests (count for half an hour to see the time)")
+            else:
+                when.setText(predictions.short_hours(h))
+                chests.setText(f"{fmt(left)} more chests" + (f" \u00b7 about {round(h / 24):,} days nonstop" if h >= 1000 else ""))
         expected = f"Statistically expected: {s.expected:.2f}" + (" across the season's weeks" if r.kind == predictions.WEEKLY else " this season")
         if r.kind == predictions.REPEATABLE:
             expected += f"   ·   {fmt(s.completed_cycles)} completed 90% cycle{'s' if s.completed_cycles != 1 else ''} (cycles, not Gizmos found)"
@@ -2998,6 +3030,113 @@ class RewardCard(QFrame):
         if s.last_action is not None:
             self.undo.setToolTip("Undo " + ("Mark obtained" if s.last_action.kind == predictions.OBTAINED else "Start new cycle")
                                  + f" ({local_time(s.last_action.at)}). Nothing else changes.")
+
+
+class CurveDialog(QDialog):
+    """One reward's probability curve: the chance of at least one against chests, with its milestones and where you are."""
+
+    def __init__(self, parent, reward, accent, state=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"{reward.name}: probability curve")
+        self.resize(780, 620)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 18, 22, 16)
+        layout.setSpacing(10)
+        top = QHBoxLayout()
+        glyph = QLabel(REWARD_GLYPHS.get(reward.id, "\u25cf"))
+        glyph.setStyleSheet(f"color: {accent}; font-size: 20px;")
+        top.addWidget(glyph)
+        title = QLabel(reward.name)
+        title.setStyleSheet(f"color: {theme.TEXT}; font-size: 18px; font-weight: 600;")
+        top.addWidget(title, 1)
+        odds = QLabel(f"1 in {fmt(reward.odds)} per chest \u00b7 normal odds")
+        odds.setStyleSheet(f"color: {accent}; font-weight: 600;")
+        top.addWidget(odds)
+        layout.addLayout(top)
+        you = state.cycle_effective if state is not None and state.started and not state.frozen else None
+        self.chart = charts.ProbabilityCurve()
+        self.chart.show_curve(reward.p, reward.odds, accent, you)
+        layout.addWidget(self.chart)
+        self.tiles = []
+        for milestone in (0.5, 0.9, 0.99):
+            tile = StatTile(f"{round(milestone * 100)}% CHANCE", "chests")
+            tile.compact()
+            tile.set_value(fmt(predictions.chests_to(milestone, reward.p)))
+            self.tiles.append(tile)
+        layout.addLayout(tile_row(*self.tiles))
+        n = reward.odds
+        c = predictions.chance(n, reward.p)
+        found = round(100 * c)
+        self.explain = label(f"Every chest is 1 in {fmt(n)}. After {fmt(n)} chests the chance of at least one is {predictions.percent(c)}: if 100 players "
+                             f"each open {fmt(n)} chests, about {found} find at least one (some find more) and about {100 - found} find none. On "
+                             "average they find exactly one each, which is what 1 in " + fmt(n) + " means.", "hint", wrap=True)
+        layout.addWidget(self.explain)
+        layout.addWidget(label("The curve is the chance of at least one across all those chests. It never means the next chest is luckier: every "
+                               f"chest stays 1 in {fmt(n)}, however long the wait.", "hint", wrap=True))
+        self.mine = label("", "hint", wrap=True)
+        if you:
+            where = "this week's cycle" if reward.kind == predictions.WEEKLY else "this cycle"
+            self.mine.setText(f"You (the white dot): {fmt(int(you))} chests in {where}, {predictions.percent(predictions.chance(you, reward.p))}."
+                              + (" Chests from Treasure Hours count at their boosted odds." if state.boosted else ""))
+        layout.addWidget(self.mine)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
+class AllocationDialog(QDialog):
+    """Optional: which reward weeks the chests you added belong to. Only moves added chests; Predictions only."""
+
+    def __init__(self, parent, pool, view, now):
+        super().__init__(parent)
+        self.setWindowTitle("Assign added chests to weeks")
+        self.total = view.added.season
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(10)
+        layout.addWidget(label("Assign the chests you added to weeks", "cardTitle"))
+        layout.addWidget(label("Optional. If you know when you opened the chests you added with Edit counts, put them in their reward weeks: that "
+                               "week's rewards then use them. Chests you leave unassigned count for season rewards only. Your counter, Analytics, "
+                               "your pace and OBS are not changed.", "hint", wrap=True))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(6)
+        self.spins = {}
+        for week, (start, end) in enumerate(pool.weeks()):
+            if start > now:
+                break
+            grid.addWidget(label(f"Week {week + 1} \u00b7 {start.astimezone().strftime('%d %b')} to {end.astimezone().strftime('%d %b')}"), week, 0)
+            grid.addWidget(label(f"{fmt(view.week_recorded[week])} recorded", "hint"), week, 1)
+            spin = QSpinBox()
+            spin.setRange(0, max(self.total, 0))
+            spin.setGroupSeparatorShown(True)
+            spin.setValue(view.added.weeks.get(week, 0))
+            spin.setMinimumWidth(130)
+            spin.valueChanged.connect(self._check)
+            grid.addWidget(spin, week, 2)
+            self.spins[week] = spin
+        layout.addLayout(grid)
+        self.summary = label("", "hint", wrap=True)
+        layout.addWidget(self.summary)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+        self._check()
+
+    def assigned(self):
+        return sum(spin.value() for spin in self.spins.values())
+
+    def allocation(self):
+        return {week: spin.value() for week, spin in self.spins.items() if spin.value()}
+
+    def _check(self, _value=None):
+        assigned = self.assigned()
+        over = assigned > self.total
+        self.summary.setText(f"Added: {fmt(self.total)}   \u00b7   Assigned: {fmt(assigned)}   \u00b7   Not assigned: {fmt(max(self.total - assigned, 0))} "
+                             "(season rewards only)" + ("   \u2014   more than you added: lower a week" if over else ""))
+        self.summary.setStyleSheet(f"color: {theme.REJECT};" if over else "")
+        self.buttons.button(QDialogButtonBox.Save).setEnabled(not over)
 
 
 class PredictionsPage(QWidget):
@@ -3081,8 +3220,11 @@ class PredictionsPage(QWidget):
         added_row = QHBoxLayout()
         self.added_line = label("", "hint", wrap=True)
         added_row.addWidget(self.added_line, 1)
-        self.added_undo = button("Undo", "link", tip="Take back the last chests you added with Edit counts. Your counter is not changed.",
-                                 on_click=self.undo_added)
+        self.assign_link = button("Assign to weeks...", "link", tip="Optional: say which reward weeks the chests you added belong to",
+                                  on_click=self.assign_weeks)
+        added_row.addWidget(self.assign_link, 0, Qt.AlignTop)
+        self.added_undo = button("Undo", "link", tip="Take back your last change to the chests you added (an addition or an assignment). "
+                                                      "Your counter is not changed.", on_click=self.undo_added)
         added_row.addWidget(self.added_undo, 0, Qt.AlignTop)
         box_layout.addLayout(added_row)
         box_layout.addWidget(hline())
@@ -3231,9 +3373,13 @@ class PredictionsPage(QWidget):
         self.added_tile.set_value(f"+{fmt(a.season)}" if a.season else "0")
         self.season_tile.set_value(fmt(v.season_chests + a.season))
         self.week_tile.set_value(fmt(v.week_chests), f"chests they use (reward week {v.week + 1} of {len(pool.weeks())})")
-        if a.unknown_week:
+        if a.unknown_week and a.weeks:
+            self.added_line.setText(f"Assigned to weeks: {fmt(sum(a.weeks.values()))}. Not assigned: {fmt(a.unknown_week)}, counted for season rewards "
+                                    "only. Analytics and your pace never use added chests.")
+        elif a.unknown_week:
             self.added_line.setText(f"The {fmt(a.unknown_week)} chests you added with the week not known count for season rewards (Pirate Shop Access, "
-                                    "Gizmo) but not for any week's rewards, which change every Sunday. Analytics and your pace never use added chests.")
+                                    "Gizmo) but not for any week's rewards, which change every Sunday. Know when you opened them? Assign them to "
+                                    "weeks. Analytics and your pace never use added chests.")
         elif a.season:
             self.added_line.setText("Chests you added for a reward week count for that week's rewards and the season's. Analytics and your pace never "
                                     "use added chests.")
@@ -3241,6 +3387,7 @@ class PredictionsPage(QWidget):
             self.added_line.setText("Chests from before you used the counter? Add them with Edit counts on the Dashboard: Predictions can use them, "
                                     "Analytics will not.")
         self.added_undo.setVisible(a.last is not None)
+        self.assign_link.setVisible(a.season > 0)
         if v.rate:
             team_rate = v.rate * predictions.team_factor(team)
             self.pace_line.setText(f"Your pace: {v.rate:.0f} chests per hour of real life ({v.rate_period}), breaks and queues included"
@@ -3287,6 +3434,22 @@ class PredictionsPage(QWidget):
                                                   + " Analytics is not changed."})
         if self.win.pages.currentWidget() is self:
             self.refresh()
+
+    def assign_weeks(self):
+        if self._view is None or self.pool is None:
+            return
+        dialog = AllocationDialog(self, self.pool, self._view, self._now())
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            predictions.append_action(self._folder(), predictions.ALLOCATE, self.pool.id, "", weeks=dialog.allocation(), at=self._now())
+        except (OSError, ValueError) as error:
+            show_error(self, f"That could not be saved ({error}). Nothing changed.")
+            return
+        self.refresh()
+
+    def show_curve(self, reward_card):
+        CurveDialog(self, reward_card.reward, reward_card.accent, reward_card.state).exec()
 
     def undo_added(self):
         last = self._view.added.last if self._view is not None else None

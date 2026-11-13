@@ -34,6 +34,10 @@ chests count at normal odds at the start of their period: "season" (the week is 
 week's weekly rewards and the season's). A restart later in the period leaves them out, like any chest before it. A lower count takes
 back from what you added, never below zero, and Predictions never use more chests this season than the new total (reconcile), so editing
 again after more chests, or after a Reset, never counts the same chests twice. Reset changes nothing here.
+
+Assigning added chests to weeks (ALLOCATE): optional. It moves chests you already added between "week not known" and the reward weeks
+that had begun by then; it never adds or removes a chest, and what is not assigned stays for season rewards only. The rows are folded
+in time order, so later Edit counts rows add on top of an allocation, and Undo of an allocation brings back the split before it.
 """
 
 import json
@@ -58,8 +62,9 @@ CYCLE_MILESTONE = 0.90                     # a repeatable reward's automatic cyc
 MILESTONES = (0.50, 0.90)
 TEAMS = (("Solo", 1), ("Duo", 2), ("Trio", 3), ("Squad", 4))
 TEAMMATE_SHARE = 0.8                       # a teammate is assumed to open 80% as many chests as you: a safe average, never detected
-RESTART, OBTAINED, UNDO, ADJUST = "prediction_restart", "prediction_obtained", "prediction_undo", "prediction_chests"
-ACTION_KINDS = (RESTART, OBTAINED, UNDO, ADJUST)
+RESTART, OBTAINED, UNDO, ADJUST, ALLOCATE = ("prediction_restart", "prediction_obtained", "prediction_undo", "prediction_chests",
+                                             "prediction_allocation")
+ACTION_KINDS = (RESTART, OBTAINED, UNDO, ADJUST, ALLOCATE)
 SEASON, WEEK = "season", "week"            # an ADJUST row's period
 MANUAL = "manual"
 MULTIPLIERS = (1.0, 1.5, 2.0, 7.5, 10.0)   # What If? choices; Epic announced 1.5x-10x for some rewards
@@ -119,6 +124,24 @@ def team_factor(team):
 def hours(chests, rate, team=1):
     """Hours of real life for `chests` at your `rate` chests per hour, with `team` players opening chests. None without a rate."""
     return None if not rate or rate <= 0 else chests / (rate * team_factor(team))
+
+
+def short_hours(h):
+    """Hours for a large number on a card: "27 min", "1.5 h", "715 h", "33,312 h"."""
+    if h is None:
+        return None
+    if h < 1:
+        return f"{max(1, round(h * 60))} min"
+    return f"{h:.1f} h" if h < 100 else f"{round(h):,} h"
+
+
+CURVE_TOP = 0.9999                         # the probability curve runs from 0 to the chests for 99.99%
+
+
+def curve(p, points=240, top=CURVE_TOP):
+    """[(chests, chance)] from 0 to the chests for `top`, evenly spaced, and that last chest count: what the probability curve draws."""
+    end = chests_to(top, p)
+    return [(end * i / points, chance(end * i / points, p)) for i in range(points + 1)], end
 
 
 def duration(h):
@@ -283,6 +306,7 @@ class Action:
     delta: int = 0                         # ADJUST: chests added (or taken back)
     scope: object = None                   # ADJUST: SEASON or WEEK
     week: object = None                    # ADJUST with WEEK: the 0-based reward week
+    weeks: object = None                   # ALLOCATE: {week: chests} of the chests you added
 
 
 def read_actions(folder):
@@ -309,18 +333,26 @@ def read_actions(folder):
             if row["kind"] == ADJUST and (type(row.get("delta")) is not int or row.get("scope") not in (SEASON, WEEK)
                                           or (row["scope"] == WEEK and (type(row.get("week")) is not int or row["week"] < 0))):
                 raise ValueError
+            allocation = None
+            if row["kind"] == ALLOCATE:
+                raw = row.get("weeks")
+                if not isinstance(raw, dict) or any(not str(k).isdigit() or type(v) is not int or v < 0 for k, v in raw.items()):
+                    raise ValueError
+                allocation = {int(k): v for k, v in raw.items()}
         except (KeyError, TypeError, ValueError):
             bad += 1
             continue
         seen.add(row["id"])
         actions.append(Action(row["id"], row["kind"], at.astimezone(UTC), row["pool"], row["reward"], row.get("undoes"), str(row.get("source", MANUAL)),
-                              row.get("delta", 0), row.get("scope"), row.get("week")))
+                              row.get("delta", 0), row.get("scope"), row.get("week"), allocation))
     return actions, bad
 
 
-def append_action(folder, kind, pool, reward, undoes=None, chests=None, at=None, delta=None, scope=None, week=None):
+def append_action(folder, kind, pool, reward, undoes=None, chests=None, at=None, delta=None, scope=None, week=None, weeks=None):
     """One row in the profile's predictions.jsonl, on disk before returning. -> its id."""
     if kind not in ACTION_KINDS or (kind == ADJUST and (type(delta) is not int or scope not in (SEASON, WEEK) or (scope == WEEK) != (type(week) is int))):
+        raise ValueError(kind)
+    if kind == ALLOCATE and (not isinstance(weeks, dict) or any(type(w) is not int or w < 0 or type(n) is not int or n < 0 for w, n in weeks.items())):
         raise ValueError(kind)
     row_id = f"prediction:{uuid.uuid4().hex}"
     row = {"kind": kind, "schema": H.SCHEMA, "id": row_id, "at": (at or datetime.now(UTC)).astimezone().isoformat(timespec="milliseconds"),
@@ -331,6 +363,8 @@ def append_action(folder, kind, pool, reward, undoes=None, chests=None, at=None,
         row["chests"] = chests                                # for reading the file by eye; the numbers are always recalculated
     if kind == ADJUST:
         row.update(delta=delta, scope=scope, **({"week": week} if scope == WEEK else {}))
+    if kind == ALLOCATE:
+        row["weeks"] = {str(w): n for w, n in sorted(weeks.items()) if n}
     H._append_line(Path(folder) / ACTIONS_FILE, H._encode(row))
     return row_id
 
@@ -350,14 +384,26 @@ class Added:
 
 
 def added(pool, actions, now):
-    """Chests you added with Edit counts, from the standing ADJUST rows of this pool. Each period sums its rows and never goes below zero."""
-    rows = sorted((a for a in actions if a.kind == ADJUST and a.pool == pool.id and a.at <= now), key=lambda a: a.at)
-    unknown = max(sum(a.delta for a in rows if a.scope == SEASON), 0)
-    weeks = {}
+    """Chests you added with Edit counts, from the standing ADJUST and ALLOCATE rows of this pool, folded in time order. No period ever goes
+    below zero; an allocation only moves chests already added, to weeks that had begun when it was made."""
+    rows = sorted((a for a in actions if a.kind in (ADJUST, ALLOCATE) and a.pool == pool.id and a.at <= now), key=lambda a: a.at)
+    bounds = pool.weeks()
+    unknown, weeks = 0, {}
     for a in rows:
-        if a.scope == WEEK:
-            weeks[a.week] = weeks.get(a.week, 0) + a.delta
-    weeks = {w: n for w, n in weeks.items() if n > 0 and w < len(pool.weeks())}
+        if a.kind == ADJUST and a.scope == SEASON:
+            unknown = max(unknown + a.delta, 0)
+        elif a.kind == ADJUST:
+            if a.week < len(bounds):
+                weeks[a.week] = max(weeks.get(a.week, 0) + a.delta, 0)
+        else:
+            left, weeks = unknown + sum(weeks.values()), {}
+            for w in sorted(a.weeks):
+                if w < len(bounds) and bounds[w][0] <= a.at:
+                    n = min(a.weeks[w], left)
+                    if n:
+                        weeks[w], left = n, left - n
+            unknown = left
+    weeks = {w: n for w, n in weeks.items() if n > 0}
     return Added(unknown + sum(weeks.values()), weeks, unknown, rows[-1] if rows else None)
 
 
@@ -554,6 +600,7 @@ class View:
     first_chest: object                    # the first recorded chest in the pool, or None
     week: int                              # the current reward week (0-based)
     week_chests: int                       # chests this week's rewards use: recorded this week + added for this week
+    week_recorded: tuple                   # recorded chests in each reward week so far
     now: datetime
     bad_lines: int
 
@@ -570,5 +617,6 @@ def load_view(folder, pool, now=None, counting_now=False):
     extra = added(pool, effective(actions), now)
     week = pool.week_of(now)
     week_start, week_end = pool.weeks()[week]
+    per_week = tuple(log.count(a, min(now, b)) for a, b in pool.weeks())
     return View(pool, progress(pool, log, actions, now), rate, period, log.count(pool.start, min(now, pool.end)), extra,
-                min(inside) if inside else None, week, log.count(week_start, min(now, week_end)) + extra.weeks.get(week, 0), now, bad)
+                min(inside) if inside else None, week, log.count(week_start, min(now, week_end)) + extra.weeks.get(week, 0), per_week, now, bad)

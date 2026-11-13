@@ -320,6 +320,42 @@ def test_repeated_edits_never_count_the_same_chests_twice():
     assert lifetime == 5000                                               # a counter holding earlier seasons is not limited by them
 
 
+def allocate(weeks, at, aid=None):
+    return R.Action(aid or f"alloc{at.timestamp()}", R.ALLOCATE, at, POOL.id, "", None, R.MANUAL, 0, None, None, weeks)
+
+
+def test_assigning_added_chests_to_weeks_only_moves_them():
+    rotation = POOL.rotations[0]
+    now = rotation + timedelta(days=1)                                    # week 2 (index 1) has begun
+    log = log_of(*spread(70, timedelta(hours=1), timedelta(hours=20)))
+    rows = [adjust(17986, START + timedelta(hours=30)), allocate({0: 8000, 1: 2000}, rotation + timedelta(hours=2), aid="al1")]
+    a = R.added(POOL, rows, now)
+    assert (a.season, a.unknown_week, a.weeks) == (17986, 7986, {0: 8000, 1: 2000})                    # nothing added or lost
+    weekly = state("weekly_loading_screen", log, rows, now)
+    pirate = state("pirate_shop_access", log, rows, now)
+    assert weekly.week == 1 and weekly.added == 2000 and weekly.cycle_chests == 2000                    # this week: its 2,000
+    assert pirate.cycle_chests == 70 + 17986 and abs(pirate.expected - (70 + 17986) / 137500) < 1e-12   # the season: unchanged
+    last_week = state("weekly_loading_screen", log, rows, rotation - timedelta(minutes=1))
+    assert last_week.added == 0                                           # the allocation did not exist yet then
+    assert R.added(POOL, [rows[0], allocate({0: 30000}, rotation)], now).weeks == {0: 17986}             # never more than was added
+    assert R.added(POOL, [rows[0], allocate({3: 500}, rotation)], now).weeks == {}                       # a week that had not begun: ignored
+    later = rows + [adjust(1000, rotation + timedelta(hours=3)), adjust(300, rotation + timedelta(hours=4), R.WEEK, 1)]
+    b = R.added(POOL, later, now)
+    assert (b.season, b.unknown_week, b.weeks) == (19286, 8986, {0: 8000, 1: 2300})                     # later additions on top
+    undone = rows + [action(R.UNDO, "", rotation + timedelta(hours=5), undoes="al1")]
+    assert R.added(POOL, R.effective(undone), now).weeks == {} and R.added(POOL, R.effective(undone), now).unknown_week == 17986
+    assert R.reconcile(18056, 17000, 70, a) == -1056 and R.reconcile(18056, 10000, 70, a) == -7986      # a lower total: unassigned first,
+    assert R.reconcile(18056, 17000, 70, a, R.WEEK, 0) == -1056                                         # or the week you pick
+
+
+def test_the_curve_and_short_hours():
+    points, end = R.curve(1 / 127)
+    assert end == R.chests_to(0.9999, 1 / 127) == 1166 and points[0] == (0.0, 0.0) and abs(points[-1][1] - R.chance(1166, 1 / 127)) < 1e-12
+    assert all(b[1] > a[1] for a, b in zip(points, points[1:]))           # rises, never reaching 100%
+    assert abs(R.chance(127, 1 / 127) - 0.634) < 0.001                    # 1 in 127 after 127 chests: about 63 of 100 players
+    assert R.short_hours(0.25) == "15 min" and R.short_hours(26.2) == "26.2 h" and R.short_hours(1463.2) == "1,463 h" and R.short_hours(None) is None
+
+
 # ------------------------------------------------------------------ wording
 def test_luck_wording_follows_the_chance_and_is_conditional_without_a_report():
     log_n = lambda n: log_of(*spread(n, timedelta(hours=1), timedelta(hours=30)))

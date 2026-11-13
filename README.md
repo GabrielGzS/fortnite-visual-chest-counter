@@ -175,12 +175,17 @@ odds per chest, the same for every player.
     chests as you (Duo 1.8x, Trio 2.6x, Squad 3.4x your pace), a safe average; the app never tries to detect your team.
   - Pirate Shop Access and the Weekly Gold Outfit have their own full-width cards; each reward has its own colour, and the luck sentence
     is a coloured badge ("Still early", "Perfectly normal" ... "Terrible luck, if you are still waiting").
+  - Every card shows the time to 50% and 90% at the selected team's pace, and opens its **Probability curve**: the chance of at least
+    one against chests, with the 50%, 90% and 99% marks, the "1 in N" point (after 127 chests, 1 in 127 is 63%: of 100 players, about
+    63 have found one and 37 have not) and where you are.
 - **What If?**: **Roll a prediction** draws one random first drop with the real odds (team, finder, hours, how lucky it was), with
   optional Treasure Hour multipliers as a what-if. Nothing there is saved.
 
 Counted from the season's start (1 November 2026) wherever your history has the chests. Chests opened before you used the counter: raise
 APPROX with **Edit counts** and tick **Count the difference in Predictions** (choose the season, this week or last week). Predictions then
-use them; Analytics, chests per hour and per minute never do, and Predictions never use more chests this season than your total. Treasure Hours boost a chest only when the pool lists that event's exact times (none yet). The
+use them; Analytics, chests per hour and per minute never do, and Predictions never use more chests this season than your total.
+Added them with the week not known? **Assign to weeks...** on My Progress puts them in the reward weeks you choose (optional); what you
+leave unassigned counts for season rewards only. Treasure Hours boost a chest only when the pool lists that event's exact times (none yet). The
 season's end date is an estimate.
 
 ## Fair play and compatibility

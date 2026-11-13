@@ -85,7 +85,8 @@ def test_my_progress_shows_the_profiles_chests_pace_and_odds():
         assert page.added_tile.value.text() == "0" and "60 chests per hour" in page.pace_line.text()
         gizmo = card(page, "gizmo")
         assert gizmo.chance.text() == R.percent(R.chance(70, 1 / 127)) and "70 of 292 chests to the 90% mark" in gizmo.bar_text.text()
-        assert "50% in 18 more chests" in gizmo.forecast.text() and "0 completed 90% cycles" in gizmo.stats.text()
+        assert gizmo.rows[0.5][2].text() == "18 more chests" and gizmo.rows[0.5][1].text() == "18 min" and gizmo.forecast.isHidden()
+        assert gizmo.forecast_caption.text() == "TIME AT YOUR PACE" and "0 completed 90% cycles" in gizmo.stats.text()
         assert gizmo.obtained.isHidden() and gizmo.luck.level == R.CYCLE
         pirate = card(page, "pirate_shop_access")
         assert pirate.chance.text() == "0.05%" and pirate.luck.heading.text() == "Still early" and "THIS SEASON" in pirate.chance_sub.text()
@@ -98,9 +99,14 @@ def test_the_team_scenario_changes_only_the_time():
         play(w)
         page = opened(w)
         pirate = card(page, "pirate_shop_access")
-        chance, solo = pirate.chance.text(), pirate.forecast.text()
+        needed = lambda: pirate.rows[0.9][2].text().split(" more chests")[0]
+        chance, solo, chests = pirate.chance.text(), pirate.rows[0.9][1].text(), needed()
         page.team.button(4).click()
-        assert pirate.chance.text() == chance and pirate.forecast.text() != solo and "more chests" in pirate.forecast.text()
+        # every card's time follows the team at once; the chance and the chests still needed do not
+        assert pirate.chance.text() == chance and needed() == chests and pirate.rows[0.9][1].text() != solo
+        assert all(c.forecast_caption.text() == "TIME AT SQUAD PACE (3.4X)" for c in page.cards.values())
+        left = R.more_to(0.9, 1 / 137500, 70)
+        assert pirate.rows[0.9][1].text() == R.short_hours(left / (60 * 3.4))
         assert "3.4x your pace" in page.team_line.text() and "204 per hour (3.4x)" in page.pace_line.text()   # teammates at 80% of your pace
         page.team.button(2).click()
         assert "1.8x" in page.team_line.text()
@@ -235,6 +241,66 @@ def test_outside_the_season_edit_counts_has_no_predictions_part():
         dialog = w.A.CountsDialog(w.win, 0, 0, prediction=None)
         dialog.approx.setValue(300)
         assert dialog.predict_box.isHidden() and dialog.prediction_choice() is None
+
+
+def test_every_card_opens_its_probability_curve():
+    with G.window() as w:
+        play(w)
+        page = opened(w)
+        seen = {}
+
+        def show(dialog):
+            seen[dialog.chart.p] = (dialog.chart.end, dialog.chart.you, [t.value.text() for t in dialog.tiles], dialog.explain.text(), dialog.mine.text())
+            return 0
+
+        from unittest.mock import patch
+        with patch.object(w.A.CurveDialog, "exec", show):
+            for reward_card in page.cards.values():
+                reward_card.curve_link.click()
+        assert len(seen) == 7
+        end, you, tiles, explain, mine = seen[1 / 127]
+        assert end == 1166 and you == 70 and tiles == ["88", "292", "583"]
+        assert "about 63 find at least one" in explain and "about 37 find none" in explain and "70 chests in this cycle" in mine
+        end, you, tiles, *_ = seen[1 / 1562500]
+        assert tiles == ["1,083,043", "3,597,789", "7,195,577"] and you == 70
+
+
+def test_assigning_added_chests_to_weeks_changes_predictions_only():
+    from unittest.mock import patch
+    from fortnite_chest_counter import progression as P
+    with G.window() as w:
+        play(w)
+        R.append_action(folder(w), R.ADJUST, POOL.id, "", delta=5000, scope=R.SEASON, at=NOW - timedelta(hours=1))
+        page = opened(w)
+        before = P.load(folder(w), now=NOW).progress("all")
+        assert not page.assign_link.isHidden() and page.week_tile.value.text() == "70"
+
+        def assign(dialog):
+            assert list(dialog.spins) == [0]                                # only weeks that have begun
+            dialog.spins[0].setValue(6000)
+            capped = dialog.spins[0].value()                                 # one week can never hold more than was added
+            dialog.spins[0].setValue(3000)
+            seen.update(capped=capped, summary=dialog.summary.text())
+            return w.A.QDialog.Accepted
+
+        seen = {}
+        with patch.object(w.A.AllocationDialog, "exec", assign):
+            page.assign_link.click()
+        settle(page)
+        assert seen["capped"] == 5000 and "Assigned: 3,000" in seen["summary"] and "Not assigned: 2,000" in seen["summary"]
+        later = w.A.AllocationDialog(page, POOL, page._view, POOL.rotations[0] + timedelta(days=1))      # in week 2: two weeks to fill
+        later.spins[0].setValue(4000)
+        later.spins[1].setValue(4000)
+        assert not later.buttons.button(w.A.QDialogButtonBox.Save).isEnabled() and "more than you added" in later.summary.text()
+        assert page.week_tile.value.text() == "3,070" and page.season_tile.value.text() == "5,070"       # this week: 70 + 3,000
+        assert card(page, "weekly_jam_track").chance.text() == R.percent(R.chance(3070, 1 / 391))
+        assert "Assigned to weeks: 3,000" in page.added_line.text()
+        after = P.load(folder(w), now=NOW).progress("all")
+        assert (before.totals, before.in_sessions, before.per_hour) == (after.totals, after.in_sessions, after.per_hour)   # Analytics: unchanged
+        assert w.win.counts == (0, 0)                                                                     # the counter: unchanged
+        page.added_undo.click()
+        settle(page)
+        assert page.week_tile.value.text() == "70" and page.season_tile.value.text() == "5,070"
 
 
 FIT_CHECK = """
