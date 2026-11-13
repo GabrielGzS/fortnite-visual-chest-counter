@@ -583,9 +583,12 @@ class PreviewPanel(QFrame):
 class CountsDialog(QDialog):
     """Set the counter (also: start from the chests already opened)."""
 
-    def __init__(self, parent, certain, approx):
+    def __init__(self, parent, certain, approx, prediction=None):
+        """prediction: {"week": the current reward week (0-based), "added": chests already added to Predictions} while a reward pool
+        runs, else None: then the dialog has no Predictions part."""
         super().__init__(parent)
         self.setWindowTitle("Edit counts")
+        self._start_approx, self._prediction = approx, prediction
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(12)
@@ -609,6 +612,30 @@ class CountsDialog(QDialog):
         layout.addLayout(grid)
         layout.addWidget(label("CERTAIN is part of APPROX, so it cannot be higher. Chests opened before the counter ran "
                                "were not seen by it: leave CERTAIN at 0 for those.", "hint", wrap=True))
+        self.predict_box = QFrame()
+        box = QVBoxLayout(self.predict_box)
+        box.setContentsMargins(0, 6, 0, 0)
+        box.setSpacing(6)
+        box.addWidget(label("Treasure predictions", "cardTitle"))
+        self.predict = QCheckBox()
+        self.predict.setChecked(True)
+        box.addWidget(self.predict)
+        self.when = QButtonGroup(self)
+        week = (prediction or {}).get("week", 0)
+        for index, text in enumerate(("Earlier this season, week not known (season rewards only)", "This reward week",
+                                      "Last reward week")):
+            choice = QRadioButton(text)
+            choice.setEnabled(index < 2 or week >= 1)
+            self.when.addButton(choice, index)
+            box.addWidget(choice)
+        self.when.button(0).setChecked(True)
+        self.predict_note = label("", "hint", wrap=True)
+        box.addWidget(self.predict_note)
+        box.addWidget(label("Predictions only: your Analytics, chests per hour and per minute, matches and OBS stay on the chests the app "
+                            "counted, and no chest is placed at a time it was not seen.", "hint", wrap=True))
+        layout.addWidget(self.predict_box)
+        self.predict.toggled.connect(self._show_prediction)
+        self.when.idClicked.connect(lambda _id: self._show_prediction())
         self.problem = label("", "hint")
         self.problem.setStyleSheet(f"color: {theme.REJECT};")
         layout.addWidget(self.problem)
@@ -617,7 +644,51 @@ class CountsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.approx.valueChanged.connect(self._check)
+        self.approx.valueChanged.connect(lambda _value: self._show_prediction())
         self.certain.valueChanged.connect(self._check)
+        self._show_prediction()
+
+    def _scope(self):
+        choice, week = max(self.when.checkedId(), 0), self._prediction.get("week", 0)
+        return (predictions.SEASON, None) if choice == 0 else (predictions.WEEK, week if choice == 1 else week - 1)
+
+    def _effective(self):
+        """The chests this edit really adds to Predictions (negative: takes back), after reconcile."""
+        info = self._prediction
+        return predictions.reconcile(self._start_approx, self.approx.value(), info["recorded"], info["added"], *self._scope())
+
+    def _show_prediction(self):
+        """Shown when APPROX changes while a reward pool runs; a lower count only when there are added chests to take back."""
+        delta = self.approx.value() - self._start_approx
+        info = self._prediction
+        shown = info is not None and (delta > 0 or (delta < 0 and info["added"].season > 0))
+        self.predict_box.setVisible(shown)
+        if not shown:
+            return
+        self.predict.setText("Count the difference in Predictions" if delta > 0 else "Take the difference back from the chests you added")
+        for index in range(3):
+            self.when.button(index).setVisible(self.predict.isChecked())
+        using = info["recorded"] + info["added"].season
+        if not self.predict.isChecked():
+            self.predict_note.setText("Predictions keep using only the chests they use now.")
+            return
+        change = self._effective()
+        where = ("season rewards (Gizmo, Pirate Shop Access)", "this week's rewards and the season's",
+                 "last week's rewards and the season's")[max(self.when.checkedId(), 0)]
+        if change == 0:
+            self.predict_note.setText(f"Nothing to change: Predictions already use {fmt(using)} chests this season ({fmt(info['recorded'])} counted "
+                                      f"+ {fmt(info['added'].season)} added), and never more than your new total."
+                                      if delta > 0 else "None of the chests you added are in that period.")
+        else:
+            self.predict_note.setText(f"{'+' if change > 0 else '−'}{fmt(abs(change))} chests for {where}: Predictions will use "
+                                      f"{fmt(using + change)} chests this season. Undo on the Predictions page.")
+
+    def prediction_choice(self):
+        """-> (chests, scope, week) for Predictions after reconcile, or None."""
+        if not self.predict_box.isVisibleTo(self) or not self.predict.isChecked():
+            return None
+        change = self._effective()
+        return (change, *self._scope()) if change else None
 
     def _check(self):
         bad = self.certain.value() > self.approx.value()
@@ -2893,6 +2964,13 @@ class PredictionsPage(QWidget):
         box_layout.addWidget(self.pool_line)
         self.chests_line = label("", "hint", wrap=True)
         box_layout.addWidget(self.chests_line)
+        added_row = QHBoxLayout()
+        self.added_line = label("", "hint", wrap=True)
+        added_row.addWidget(self.added_line, 1)
+        self.added_undo = button("Undo", "link", tip="Take back the last chests you added with Edit counts. Your counter is not changed.",
+                                 on_click=self.undo_added)
+        added_row.addWidget(self.added_undo, 0, Qt.AlignTop)
+        box_layout.addLayout(added_row)
         self.pace_line = label("", "hint", wrap=True)
         box_layout.addWidget(self.pace_line)
         row, self.team = team_selector(self, lambda _size: self._show())
@@ -3011,6 +3089,13 @@ class PredictionsPage(QWidget):
             self.chests_line.setText(f"{fmt(v.season_chests)} chests counted this season, from your saved history since {local_time(v.first_chest)}.")
         else:
             self.chests_line.setText("No chests counted in this pool yet. Your saved history is used as soon as you count.")
+        a = v.added
+        self.added_line.setText(f"+{fmt(a.season)} chests you added with Edit counts" + (f" ({fmt(a.unknown_week)} with the week not known, for "
+                                "season rewards only)" if a.unknown_week and a.weeks else "") + f": {fmt(v.season_chests + a.season)} chests for "
+                                "season rewards. Analytics and your pace use only the chests the app counted." if a.season else
+                                "Chests from before you used the counter? Add them with Edit counts on the Dashboard: Predictions can use them, "
+                                "Analytics will not.")
+        self.added_undo.setVisible(a.last is not None)
         team = self.team.checkedId()
         if v.rate:
             self.pace_line.setText(f"Your pace: {v.rate:.0f} chests per hour of real life ({v.rate_period}), breaks and queues included.")
@@ -3019,6 +3104,54 @@ class PredictionsPage(QWidget):
                                    "show chests only.")
         for state in v.states:
             self.cards[state.reward.id].fill(state, v.rate, team)
+
+    def _folder(self):
+        cfg, _ = load_cfg()
+        profile = cfg["profile"]
+        return paths.APP_DIR / profiles.history_folder(profile["state_base"], profile["id"])
+
+    def _now(self):
+        return self.clock() if self.clock else datetime.now().astimezone()
+
+    def edit_info(self):
+        """What the Edit counts dialog needs, or None when no reward pool runs now."""
+        pool = self.pool
+        now = self._now()
+        if pool is None or not pool.start <= now < pool.end:
+            return None
+        folder = self._folder()
+        try:                                                  # always re-read what was added: a cached view could count chests twice
+            actions, _ = predictions.read_actions(folder)
+            view = self._view
+            if view is None or view.pool is not pool or abs((view.now - now).total_seconds()) > 60:
+                view = predictions.load_view(folder, pool, now=now)       # recorded chests: a view at most a minute old is close enough
+        except Exception:
+            return None
+        return {"week": pool.week_of(now), "recorded": view.season_chests, "added": predictions.added(pool, predictions.effective(actions), now)}
+
+    def add_chests(self, delta, scope, week):
+        """Chests from Edit counts, for Predictions only."""
+        try:
+            predictions.append_action(self._folder(), predictions.ADJUST, self.pool.id, "", delta=delta, scope=scope, week=week, at=self._now())
+        except (OSError, ValueError) as error:
+            show_error(self, f"The chests could not be added to Predictions ({error}). Your counter is set.")
+            return
+        self.win.add_log({"type": "info", "text": f"Predictions: {'+' if delta > 0 else '−'}{fmt(abs(delta))} chests "
+                                                  + ("for the season." if scope == predictions.SEASON else f"for reward week {week + 1}.")
+                                                  + " Analytics is not changed."})
+        if self.win.pages.currentWidget() is self:
+            self.refresh()
+
+    def undo_added(self):
+        last = self._view.added.last if self._view is not None else None
+        if last is None:
+            return
+        try:
+            predictions.append_action(self._folder(), predictions.UNDO, self.pool.id, "", undoes=last.id, at=self._now())
+        except OSError as error:
+            show_error(self, f"That could not be saved ({error}). Nothing changed.")
+            return
+        self.refresh()
 
     def act(self, kind, reward_card):
         s = reward_card.state
@@ -4295,10 +4428,13 @@ class MainWindow(QMainWindow):
         return cfg
 
     def edit_counts(self):
-        dialog = CountsDialog(self, *self.counts)
+        dialog = CountsDialog(self, *self.counts, prediction=self.predictions.edit_info())
         if dialog.exec() != QDialog.Accepted:
             return
-        self._set(dialog.certain.value(), dialog.approx.value(), "set_count")
+        if self._set(dialog.certain.value(), dialog.approx.value(), "set_count"):
+            choice = dialog.prediction_choice()
+            if choice is not None:
+                self.predictions.add_chests(*choice)
 
     def reset_counts(self):
         whose = "" if self.dashboard.profile.count() <= 1 else f' of the profile "{self.dashboard.profile.currentText()}"'
@@ -4310,12 +4446,13 @@ class MainWindow(QMainWindow):
             session = C.set_counts(self._cfg_for_actions(), certain, approx, action)
         except (C.UserError, OSError) as error:
             show_error(self, str(error))
-            return
+            return False
         self.set_counts(session.state["certain"], session.state["approximate"], flash=True)
         self.refresh_corrections()
         what = "reset to 0" if action == "reset" else f"set to CERTAIN {fmt(certain)} / APPROX {fmt(approx)}"
         self.add_log({"type": "info", "text": f"Counter {what}."
                       + (" The running counter picks it up within a second." if self.worker.running() else "")})
+        return True
 
     # ---- chest corrections: +1 and -1 on APPROX. A +1 is not a claim that the detector failed.
     def correct_chest(self, delta):

@@ -26,6 +26,14 @@ Treasure Hours. A pool lists the verified ones (times and a multiplier per rewar
 for that reward, so the chance is 1 - prod(1 - p_i), worked with "normal-odds chests": n chests at p*m are worth n*log(1-p*m)/log(1-p)
 chests at p. Nothing is boosted that the pool does not list, and forecasts use the normal odds (an event lasts hours, not the whole hunt).
 What If? can try any multiplier, labelled hypothetical.
+
+Chests you add with Edit counts. The history only has chests the app counted. When you raise APPROX with Edit counts (chests opened
+before you used the counter, say), the dialog can add the difference to Predictions as an ADJUST row here: never in the history, so
+Analytics, chests per hour and per minute, matches and pace never see it, and no chest is ever invented at a moment in time. Added
+chests count at normal odds at the start of their period: "season" (the week is not known: season rewards only) or one reward week (that
+week's weekly rewards and the season's). A restart later in the period leaves them out, like any chest before it. A lower count takes
+back from what you added, never below zero, and Predictions never use more chests this season than the new total (reconcile), so editing
+again after more chests, or after a Reset, never counts the same chests twice. Reset changes nothing here.
 """
 
 import json
@@ -49,8 +57,9 @@ KINDS = (REPEATABLE, WEEKLY, POOL)
 CYCLE_MILESTONE = 0.90                     # a repeatable reward's automatic cycle, and the bar's target
 MILESTONES = (0.50, 0.90)
 TEAMS = (("Solo", 1), ("Duo", 2), ("Trio", 3), ("Squad", 4))
-RESTART, OBTAINED, UNDO = "prediction_restart", "prediction_obtained", "prediction_undo"
-ACTION_KINDS = (RESTART, OBTAINED, UNDO)
+RESTART, OBTAINED, UNDO, ADJUST = "prediction_restart", "prediction_obtained", "prediction_undo", "prediction_chests"
+ACTION_KINDS = (RESTART, OBTAINED, UNDO, ADJUST)
+SEASON, WEEK = "season", "week"            # an ADJUST row's period
 MANUAL = "manual"
 MULTIPLIERS = (1.0, 1.5, 2.0, 7.5, 10.0)   # What If? choices; Epic announced 1.5x-10x for some rewards
 RATE_PERIODS = (("last7", "last 7 days"), ("all", "all your history"))
@@ -265,6 +274,9 @@ class Action:
     reward: str
     undoes: object = None
     source: str = MANUAL
+    delta: int = 0                         # ADJUST: chests added (or taken back)
+    scope: object = None                   # ADJUST: SEASON or WEEK
+    week: object = None                    # ADJUST with WEEK: the 0-based reward week
 
 
 def read_actions(folder):
@@ -288,17 +300,21 @@ def read_actions(folder):
                 raise ValueError
             if row["kind"] == UNDO and not isinstance(row.get("undoes"), str):
                 raise ValueError
+            if row["kind"] == ADJUST and (type(row.get("delta")) is not int or row.get("scope") not in (SEASON, WEEK)
+                                          or (row["scope"] == WEEK and (type(row.get("week")) is not int or row["week"] < 0))):
+                raise ValueError
         except (KeyError, TypeError, ValueError):
             bad += 1
             continue
         seen.add(row["id"])
-        actions.append(Action(row["id"], row["kind"], at.astimezone(UTC), row["pool"], row["reward"], row.get("undoes"), str(row.get("source", MANUAL))))
+        actions.append(Action(row["id"], row["kind"], at.astimezone(UTC), row["pool"], row["reward"], row.get("undoes"), str(row.get("source", MANUAL)),
+                              row.get("delta", 0), row.get("scope"), row.get("week")))
     return actions, bad
 
 
-def append_action(folder, kind, pool, reward, undoes=None, chests=None, at=None):
+def append_action(folder, kind, pool, reward, undoes=None, chests=None, at=None, delta=None, scope=None, week=None):
     """One row in the profile's predictions.jsonl, on disk before returning. -> its id."""
-    if kind not in ACTION_KINDS:
+    if kind not in ACTION_KINDS or (kind == ADJUST and (type(delta) is not int or scope not in (SEASON, WEEK) or (scope == WEEK) != (type(week) is int))):
         raise ValueError(kind)
     row_id = f"prediction:{uuid.uuid4().hex}"
     row = {"kind": kind, "schema": H.SCHEMA, "id": row_id, "at": (at or datetime.now(UTC)).astimezone().isoformat(timespec="milliseconds"),
@@ -307,6 +323,8 @@ def append_action(folder, kind, pool, reward, undoes=None, chests=None, at=None)
         row["undoes"] = undoes
     if chests is not None:
         row["chests"] = chests                                # for reading the file by eye; the numbers are always recalculated
+    if kind == ADJUST:
+        row.update(delta=delta, scope=scope, **({"week": week} if scope == WEEK else {}))
     H._append_line(Path(folder) / ACTIONS_FILE, H._encode(row))
     return row_id
 
@@ -315,6 +333,41 @@ def effective(actions):
     """The actions that stand: every one not undone. An undo is final."""
     undone = {a.undoes for a in actions if a.kind == UNDO}
     return [a for a in actions if a.kind != UNDO and a.id not in undone]
+
+
+@dataclass(frozen=True)
+class Added:
+    season: int                            # season rewards: every chest you added this season
+    weeks: dict                            # {week: chests added for that reward week}
+    unknown_week: int                      # added with the week unknown (counted for season rewards only)
+    last: object                           # the latest standing ADJUST row, for Undo
+
+
+def added(pool, actions, now):
+    """Chests you added with Edit counts, from the standing ADJUST rows of this pool. Each period sums its rows and never goes below zero."""
+    rows = sorted((a for a in actions if a.kind == ADJUST and a.pool == pool.id and a.at <= now), key=lambda a: a.at)
+    unknown = max(sum(a.delta for a in rows if a.scope == SEASON), 0)
+    weeks = {}
+    for a in rows:
+        if a.scope == WEEK:
+            weeks[a.week] = weeks.get(a.week, 0) + a.delta
+    weeks = {w: n for w, n in weeks.items() if n > 0 and w < len(pool.weeks())}
+    return Added(unknown + sum(weeks.values()), weeks, unknown, rows[-1] if rows else None)
+
+
+def reconcile(old_total, new_total, recorded, added_now, scope=SEASON, week=None):
+    """How many chests an Edit counts from `old_total` to `new_total` APPROX adds to Predictions (negative: takes back). The counter already
+    holds every chest counted and added so far, so only the difference counts, and:
+      * Predictions never use more chests this season than the new total: recorded + added <= new_total. After a Reset, typing the old
+        total back in adds nothing, and a counter that also holds earlier seasons is not limited by it;
+      * a lower total takes back only from what you added for that period, never below zero: no negative chests."""
+    delta = new_total - old_total
+    if delta > 0:
+        return max(0, min(delta, new_total - recorded - added_now.season))
+    if delta < 0:
+        have = added_now.unknown_week if scope == SEASON else added_now.weeks.get(week, 0)
+        return -min(-delta, have)
+    return 0
 
 
 # ------------------------------------------------------------------ one reward's state
@@ -334,7 +387,8 @@ class RewardState:
     milestone_chests: int                  # normal-odds chests for CYCLE_MILESTONE
     remaining: object                      # {milestone: chests still needed at normal odds, 0 when reached}; None while obtained
     completed_cycles: int                  # repeatable only
-    pool_chests: int
+    pool_chests: int                       # recorded chests in the pool so far
+    added: int                             # chests you added that this reward counts (its week, or the season)
     expected: float
     obtained: object                       # the standing "Mark obtained" in this frame, or None
     obtained_chance: object                # the chance in its cycle when it was reported
@@ -342,8 +396,9 @@ class RewardState:
     last_action: object                    # the latest standing action in this frame, for Undo
 
 
-def reward_state(pool, reward, log, actions, now):
+def reward_state(pool, reward, log, actions, now, extra=None):
     now = now.astimezone(UTC)
+    extra = extra or added(pool, actions, now)
     hours_ = pool.treasure_hours
     weeks = pool.weeks()
     if reward.kind == WEEKLY:
@@ -359,29 +414,34 @@ def reward_state(pool, reward, log, actions, now):
     cycle_start = max([start, *restarts])
     frozen = report is not None and report.at >= cycle_start
     stop = report.at if frozen else end
-    n, e = log.count(cycle_start, stop), log.effective(cycle_start, stop, reward, hours_)
+    mine_added = extra.weeks.get(week, 0) if reward.kind == WEEKLY else extra.season
+    head = mine_added if cycle_start == start else 0        # added chests sit at the start of their period, at normal odds
+    n, e = log.count(cycle_start, stop) + head, log.effective(cycle_start, stop, reward, hours_) + head
     boosted = log.boosted_count(cycle_start, stop, reward, hours_)
     milestone = chests_to(CYCLE_MILESTONE, reward.p)
     completed = 0
     if reward.kind == REPEATABLE:
         bounds = [start, *restarts, end]
-        completed = sum(int(log.effective(a, b, reward, hours_) // milestone) for a, b in zip(bounds, bounds[1:]))
+        completed = sum(int((log.effective(a, b, reward, hours_) + (mine_added if a == start else 0)) // milestone)
+                        for a, b in zip(bounds, bounds[1:]))
         e %= milestone
         n = int(e)
     report_chance = None
     if report is not None:
         began = max([start, *(t for t in restarts if t <= report.at)])
-        report_chance = chance(log.effective(began, report.at, reward, hours_), reward.p)
+        report_chance = chance(log.effective(began, report.at, reward, hours_) + (mine_added if began == start else 0), reward.p)
     in_pool = (pool.start, min(now, pool.end))
     remaining = None if frozen else {m: more_to(m, reward.p, e) for m in MILESTONES}
+    expected = log.expected(*in_pool, reward, hours_) + extra.season * reward.p
     return RewardState(reward, (start, finish), week, len(weeks), now >= pool.start, now >= finish, cycle_start, n, e, boosted, chance(e, reward.p),
-                       milestone, remaining, completed, log.count(*in_pool), log.expected(*in_pool, reward, hours_), report, report_chance, frozen,
+                       milestone, remaining, completed, log.count(*in_pool), mine_added, expected, report, report_chance, frozen,
                        mine[-1] if mine else None)
 
 
 def progress(pool, log, actions, now):
     live = effective(actions)
-    return [reward_state(pool, reward, log, live, now) for reward in pool.rewards]
+    extra = added(pool, live, now.astimezone(UTC))
+    return [reward_state(pool, reward, log, live, now, extra) for reward in pool.rewards]
 
 
 # ------------------------------------------------------------------ what it means (fixed wording, never generated)
@@ -460,7 +520,8 @@ class View:
     states: list
     rate: object
     rate_period: object
-    season_chests: int
+    season_chests: int                     # recorded chests in the pool so far
+    added: object                          # Added: chests you added with Edit counts
     first_chest: object                    # the first recorded chest in the pool, or None
     now: datetime
     bad_lines: int
@@ -475,4 +536,5 @@ def load_view(folder, pool, now=None, counting_now=False):
     actions, bad = read_actions(folder)
     rate, period = pace(snapshot)
     inside = [e.at for e in snapshot.events if pool.start <= e.at < min(now, pool.end)]
-    return View(pool, progress(pool, log, actions, now), rate, period, log.count(pool.start, min(now, pool.end)), min(inside) if inside else None, now, bad)
+    return View(pool, progress(pool, log, actions, now), rate, period, log.count(pool.start, min(now, pool.end)), added(pool, effective(actions), now),
+                min(inside) if inside else None, now, bad)

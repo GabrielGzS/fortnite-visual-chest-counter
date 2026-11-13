@@ -223,6 +223,101 @@ def test_what_if_multipliers_shorten_the_hunt():
     assert 0.4 < boosted / normal < 0.6 and R.MULTIPLIERS == (1.0, 1.5, 2.0, 7.5, 10.0)
 
 
+# ------------------------------------------------------------------ chests added with Edit counts
+def adjust(delta, at, scope=R.SEASON, week=None, aid=None):
+    return R.Action(aid or f"adj{at.timestamp()}{delta}", R.ADJUST, at, POOL.id, "", None, R.MANUAL, delta, scope, week)
+
+
+def test_chests_added_for_the_season_count_for_season_rewards_only():
+    log = log_of(*spread(2400, timedelta(hours=1), timedelta(hours=40)))
+    rows = [adjust(5000, START + timedelta(hours=41))]
+    now = START + timedelta(days=2)
+    pirate, gizmo, weekly = (state(rid, log, rows, now) for rid in ("pirate_shop_access", "gizmo", "weekly_loading_screen"))
+    p = 1 / 137500
+    assert pirate.added == 5000 and pirate.cycle_chests == 7400 and abs(pirate.chance - R.chance(7400, p)) < 1e-12
+    assert pirate.pool_chests == 2400 and abs(pirate.expected - 7400 * p) < 1e-12                  # recorded stays recorded
+    assert gizmo.completed_cycles == 7400 // 292 and gizmo.cycle_chests == 7400 % 292
+    assert weekly.added == 0 and weekly.cycle_chests == 2400 and abs(weekly.expected - 7400 / 272) < 1e-9   # no week known: not this week's
+
+
+def test_chests_added_for_a_week_count_for_that_week_and_the_season():
+    rotation = POOL.rotations[0]
+    log = log_of(*spread(100, timedelta(hours=1), timedelta(hours=20)))
+    rows = [adjust(3000, rotation + timedelta(hours=2), R.WEEK, 0), adjust(500, rotation + timedelta(hours=3), R.WEEK, 1)]
+    now = rotation + timedelta(hours=5)
+    weekly = state("weekly_vehicle_decal", log, rows, now)
+    assert weekly.week == 1 and weekly.added == 500 and weekly.cycle_chests == 500        # this week: only this week's
+    last_week = state("weekly_vehicle_decal", log, rows, rotation - timedelta(minutes=1) + timedelta(hours=0))
+    assert last_week.added == 0                                                            # rows made after that moment do not exist yet
+    assert state("pirate_shop_access", log, rows, now).cycle_chests == 3600 and R.added(POOL, rows, now).unknown_week == 0
+
+
+def test_a_lower_count_takes_back_never_below_zero_and_undo_and_restart_leave_them_out():
+    log = log_of(*spread(100, timedelta(hours=1), timedelta(hours=20)))
+    now = START + timedelta(days=2)
+    rows = [adjust(5000, START + timedelta(hours=21), aid="a1"), adjust(-2000, START + timedelta(hours=22))]
+    assert state("pirate_shop_access", log, rows, now).added == 3000
+    assert state("pirate_shop_access", log, [adjust(-50, START + timedelta(hours=21))], now).added == 0
+    undone = rows[:1] + [action(R.UNDO, "", START + timedelta(hours=23), undoes="a1")]
+    assert state("pirate_shop_access", log, undone, now).added == 0
+    restarted = rows[:1] + [action(R.RESTART, "pirate_shop_access", START + timedelta(hours=30))]
+    s = state("pirate_shop_access", log, restarted, now)
+    assert s.added == 5000 and s.cycle_chests == 0 and abs(s.expected - 5100 / 137500) < 1e-12      # the new cycle starts after them
+
+
+def test_added_chests_never_get_treasure_hour_odds_and_never_change_pace_or_analytics():
+    pool = with_hours((timedelta(hours=0), timedelta(hours=30), {"pirate_shop_access": 2}))
+    rows = [adjust(1000, START + timedelta(hours=5))]
+    s = next(x for x in R.progress(pool, log_of(), rows, START + timedelta(days=1)) if x.reward.id == "pirate_shop_access")
+    assert s.cycle_chests == 1000 and s.boosted == 0 and abs(s.chance - R.chance(1000, 1 / 137500)) < 1e-12
+    from fortnite_chest_counter import progression as P
+    with tempfile.TemporaryDirectory() as tmp:
+        rec = F.Recorder(Path(tmp))
+        rec.run(START + timedelta(hours=2)).chests(*range(60, 3600, 60)).end(3600)
+        before = P.load(rec.folder, now=START + timedelta(days=1)).progress("all")
+        R.append_action(rec.folder, R.ADJUST, POOL.id, "", delta=5000, scope=R.SEASON, at=START + timedelta(hours=5))
+        after = P.load(rec.folder, now=START + timedelta(days=1)).progress("all")
+        assert (before.totals, before.in_sessions, before.per_hour) == (after.totals, after.in_sessions, after.per_hour)
+        view = R.load_view(rec.folder, POOL, now=START + timedelta(days=1))
+        assert view.season_chests == 59 and view.added.season == 5000 and abs(view.rate - before.per_hour) < 1e-12
+        try:
+            R.append_action(rec.folder, R.ADJUST, POOL.id, "", delta=5, scope=R.WEEK)          # a week row needs its week
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a week row without a week was written")
+
+
+def test_repeated_edits_never_count_the_same_chests_twice():
+    """The maintainer's sequence: 2,000 recorded; edit to 7,000; 100 real chests; edit to 7,200 (adds 100, not 5,200); edit down to 7,000
+    (takes 200 back); Reset; type 7,000 back in (adds nothing). Predictions always use what the counter says, never more."""
+    rows, counter, recorded, t = [], 2000, 2000, [START + timedelta(hours=1)]
+
+    def now_added():
+        return R.added(POOL, R.effective(rows), START + timedelta(days=2))
+
+    def edit(new_total):
+        nonlocal counter
+        change = R.reconcile(counter, new_total, recorded, now_added())
+        if change:
+            t[0] += timedelta(minutes=1)
+            rows.append(adjust(change, t[0]))
+        counter = new_total
+        return change
+
+    assert edit(7000) == 5000 and recorded + now_added().season == 7000
+    counter, recorded = counter + 100, recorded + 100                     # 100 real chests, counted and recorded
+    assert edit(7200) == 100 and recorded + now_added().season == 7200
+    assert edit(7000) == -200 and recorded + now_added().season == 7000
+    counter = 0                                                           # Reset: the counter only; predictions keep their chests
+    assert edit(7000) == 0 and recorded + now_added().season == 7000
+    assert edit(500) == -4900 and now_added().season == 0                 # below the recorded: everything added comes back, nothing more
+    assert edit(0) == 0 and now_added().season == 0                       # no negative chests
+    assert R.reconcile(0, 3000, 2100, R.added(POOL, [], START + timedelta(days=2))) == 900   # a reset mid-season: only above the recorded
+    lifetime = R.reconcile(20000, 25000, 3000, R.added(POOL, [], START + timedelta(days=2)))
+    assert lifetime == 5000                                               # a counter holding earlier seasons is not limited by them
+
+
 # ------------------------------------------------------------------ wording
 def test_luck_wording_follows_the_chance_and_is_conditional_without_a_report():
     log_n = lambda n: log_of(*spread(n, timedelta(hours=1), timedelta(hours=30)))

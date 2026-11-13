@@ -1131,7 +1131,9 @@ def test_history_depends_only_on_the_standard_library():
 def test_only_the_counter_opens_history_and_only_lazily():
     src = ROOT / "src/fortnite_chest_counter"
     for file in src.rglob("*.py"):
-        if file.name not in ("match_history.py", "counter.py", "match_tracker.py", "match_analytics.py", "progression.py", "app.py"):   # progression: reads only (v0.4.0)
+        # progression: reads only (v0.4.0). predictions (v0.5.0): writes only its own predictions.jsonl with the same safe append, and
+        # reads chests through progression
+        if file.name not in ("match_history.py", "counter.py", "match_tracker.py", "match_analytics.py", "progression.py", "app.py", "predictions.py"):
             assert "match_history" not in file.read_text(encoding="utf-8"), file.name
     tree = ast.parse((src / "counter.py").read_text(encoding="utf-8"))
     for node in tree.body:

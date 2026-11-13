@@ -151,6 +151,82 @@ def test_what_if_rolls_are_random_first_drops_and_never_saved():
         assert not (folder(w) / R.ACTIONS_FILE).exists()
 
 
+def test_edit_counts_adds_the_difference_to_predictions_only_and_undo_takes_it_back():
+    from unittest.mock import patch
+    from fortnite_chest_counter import progression as P
+    with G.window() as w:
+        play(w)
+        page = opened(w)
+        before = P.load(folder(w), now=NOW).progress("all")
+        seen = {}
+
+        def accept(dialog):
+            dialog.approx.setValue(5070)                                   # 70 counted + 5,000 opened before the app (the counter showed 0)
+            seen.update(shown=not dialog.predict_box.isHidden(), note=dialog.predict_note.text(), last_week=dialog.when.button(2).isEnabled())
+            return w.A.QDialog.Accepted
+
+        with patch.object(w.A.CountsDialog, "exec", accept):
+            w.win.edit_counts()
+        settle(page)
+        assert seen["shown"] and "+5,000 chests for season rewards" in seen["note"] and "will use 5,070 chests" in seen["note"]
+        assert not seen["last_week"]                                                                             # week 1: no last week
+        assert w.win.counts == (0, 5070)                                                                         # the counter is set as always
+        rows, _ = R.read_actions(folder(w))
+        assert [(a.kind, a.delta, a.scope) for a in rows] == [(R.ADJUST, 5000, R.SEASON)]
+        after = P.load(folder(w), now=NOW).progress("all")
+        assert (before.totals, before.in_sessions, before.per_hour) == (after.totals, after.in_sessions, after.per_hour)   # Analytics: unchanged
+        assert "+5,000 chests you added" in page.added_line.text() and "5,070 chests for season rewards" in page.added_line.text()
+        assert card(page, "pirate_shop_access").chance.text() == R.percent(R.chance(5070, 1 / 137500))
+        assert card(page, "weekly_jam_track").chance.text() == R.percent(R.chance(70, 1 / 391))                # no week known: not this week's
+        assert "60 chests per hour" in page.pace_line.text()                                                    # pace: counted chests only
+        page.added_undo.click()
+        settle(page)
+        assert "Add them with Edit counts" in page.added_line.text() and page.added_undo.isHidden()
+
+        def lower(dialog):
+            dialog.approx.setValue(4000)
+            seen.update(text=dialog.predict.text(), choice=dialog.prediction_choice())
+            return w.A.QDialog.Accepted
+
+        R.append_action(folder(w), R.ADJUST, POOL.id, "", delta=2000, scope=R.SEASON, at=NOW)
+        with patch.object(w.A.CountsDialog, "exec", lower):
+            w.win.edit_counts()
+        assert "Take the difference back" in seen["text"] and seen["choice"] == (-1070, R.SEASON, None)
+
+
+def test_reset_and_typing_the_total_back_in_adds_nothing_even_with_the_page_closed():
+    """The page's last read is cached; what was added must be read again, or a reset and re-entry would count 5,000 chests twice."""
+    from unittest.mock import patch
+    with G.window() as w:
+        play(w)
+        opened(w)                                                          # a cached view: nothing added yet
+        w.win.show_page(w.win.dashboard)
+
+        def to(total):
+            def accept(dialog):
+                dialog.approx.setValue(total)
+                return w.A.QDialog.Accepted
+            return accept
+
+        with patch.object(w.A.CountsDialog, "exec", to(5070)):
+            w.win.edit_counts()
+        w.win._set(0, 0, "reset")
+        with patch.object(w.A.CountsDialog, "exec", to(5070)):
+            w.win.edit_counts()
+        rows, _ = R.read_actions(folder(w))
+        assert [(a.kind, a.delta) for a in rows] == [(R.ADJUST, 5000)] and w.win.counts == (0, 5070)
+
+
+def test_outside_the_season_edit_counts_has_no_predictions_part():
+    with G.window() as w:
+        page = w.win.predictions
+        page.clock = lambda: POOL.end + timedelta(days=3)
+        assert page.edit_info() is None
+        dialog = w.A.CountsDialog(w.win, 0, 0, prediction=None)
+        dialog.approx.setValue(300)
+        assert dialog.predict_box.isHidden() and dialog.prediction_choice() is None
+
+
 FIT_CHECK = """
 import os, sys
 root = sys.argv[1]
