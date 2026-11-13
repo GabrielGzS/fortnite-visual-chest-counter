@@ -2759,6 +2759,7 @@ class RewardCard(QFrame):
         self.insight = label("", "countSub", wrap=True)
         layout.addWidget(self.insight)
         actions = QHBoxLayout()
+        actions.setSpacing(18)
         self.restart = button("Start new cycle", "link", tip="Start counting this reward's chance from now. Nothing is deleted: Undo brings it back.",
                               on_click=lambda: page.act(predictions.RESTART, self))
         self.obtained = button("Mark obtained", "link", tip="You got it: the chance stops here, with the date. A report from you, not a detection.",
