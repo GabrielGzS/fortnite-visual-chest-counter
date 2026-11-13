@@ -3,7 +3,7 @@ The v0.4.0 Analytics page and Game status (M4-M7, M10): four tabs, the period ch
 brought into view and nothing else moving the list (UX-06), a refresh when a match ends while the page is open (UX-07), Days & weeks,
 Personal Bests, sessions, where chests came from, and the calmer Partial status (UX-05).
 
-Histories are dated relative to the real clock, because the page reads with the real clock, as the app does.
+Histories are dated relative to one fixed "now", the last local noon, and the page reads the same clock (see ANCHOR).
 
 Run:   python tests/test_analytics_ui.py     (or pytest)
 """
@@ -24,6 +24,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from fortnite_chest_counter import match_analytics as A
 from fortnite_chest_counter import match_history as H
+from fortnite_chest_counter import progression as P
 from fortnite_chest_counter import timeline as TL
 
 import history_fixtures as F
@@ -35,8 +36,40 @@ UTC = timezone.utc
 DASH = "—"
 
 
+def _last_local_noon():
+    local = datetime.now().astimezone()
+    noon = local.replace(hour=12, minute=0, second=0, microsecond=0)
+    return (noon if noon <= local else noon - timedelta(days=1)).astimezone(UTC)
+
+
+# The fixtures place runs "3 days and 2 hours ago" and "30 minutes ago". Run between 00:00 and about 02:00, those crossed local midnight
+# and the day charts got an extra day (v0.4.1: failed at 01:42, also on untouched v0.4.0). So "now" is the last local noon, for these
+# fixtures and for the two modules the Analytics page takes the time from.
+ANCHOR = _last_local_noon()
+
+
+class _FrozenDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return ANCHOR.astimezone(tz) if tz is not None else ANCHOR.astimezone().replace(tzinfo=None)
+
+
+_CLOCKS = [patch.object(TL, "datetime", _FrozenDatetime), patch.object(P, "datetime", _FrozenDatetime)]
+
+
+def setup_module(module=None):
+    """Only while these checks run: pytest runs every test file in one process, and other files read the real clock."""
+    for clock in _CLOCKS:
+        clock.start()
+
+
+def teardown_module(module=None):
+    for clock in _CLOCKS:
+        clock.stop()
+
+
 def now():
-    return datetime.now(UTC)
+    return ANCHOR
 
 
 def history(w):
@@ -277,6 +310,7 @@ def test_every_tab_fits_the_smallest_window_without_scrolling_sideways():
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     failed = 0
+    setup_module()
     for name, fn in tests:
         try:
             fn()
@@ -286,5 +320,6 @@ if __name__ == "__main__":
             import traceback
             print(f"  FAIL  {name}", flush=True)
             traceback.print_exc()
+    teardown_module()
     print(f"{len(tests) - failed}/{len(tests)} Analytics page checks passed")
     sys.exit(1 if failed else 0)
