@@ -60,12 +60,15 @@ MAX_ARCHIVE_FOLDER = 120
 # Parts of a dependency that this program never imports and whose paths are too long to ship. Nothing else is left out.
 NOT_SHIPPED = {"lxml": ("isoschematron",)}                      # XML schema validation: Streamlink uses lxml.etree only
 TEMPLATE_FILES = ["chest/en/chest.npy", "chest/en/chest_small.npy", "chest/en/rare.npy", "chest/en/rare_small.npy",
+                  "chest/en/hud75/chest.npy", "chest/en/hud75/rare.npy",                    # v0.4.1: Fortnite HUD Scale 75%
                   "chest/en/sprite.npy", "chest/en/sprite_small.npy", "chest/pt/bau.npy", "container_opened.npy",
                   "ui/interaction_disc.npy", "ui/interaction_ring.npy",                    # audio_fingerprint.npy is development-only
                   *(f"match/en/{name}.npy" for name in ("you_placed_screen", "you_placed_bar", "eliminated_by", "connecting", "menu_locker", "menu_quests", "menu_career",
                                                         "matchmaking_cancel", "waiting_for_players", "bus_launching", "spectating", "victory_large", "victory_small",
                                                         "waiting_for_players_small", "bus_launching_small",
-                                                        "connecting_shadow", "ready_party", "ready_finding")),          # v0.4.1
+                                                        "connecting_shadow", "ready_party", "ready_finding",            # v0.4.1
+                                                        "waiting_for_players_75", "bus_launching_75", "you_placed_screen_75",
+                                                        "you_placed_bar_75", "victory_75")),
                   *(f"match/hud/{name}.npy" for name in ("stats", "stats_small", "compass", "compass_small"))]
 THIRD_PARTY = ["numpy", "scipy"]
 # Livestream URL input (v0.2.1): Streamlink and its complete dependency closure on Windows / Python 3.13 (BSD / MIT /

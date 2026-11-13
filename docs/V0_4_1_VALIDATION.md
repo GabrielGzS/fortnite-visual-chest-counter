@@ -269,3 +269,52 @@ fix it; not attempted in this batch.
 **RARE typing (investigated, HUD-dependent):** the scale-free length test reads RARE on the maintainer's pop-ups (0.78-0.81 of the CHEST
 word), but the exact 1.0x RARE template confirms at 0.22-0.36 against its 0.50 line. A blurred confirmation was rejected in v0.2.2 (random
 ink 0.65) and the line is not lowered, so RARE typing comes with the native templates (M3). Types never change counts.
+
+## Targeted 75% HUD hotfix (revised authorization, 2026-11-13)
+
+Scope: an opt-in, per-profile **Fortnite HUD Scale 75%** setting with native templates cut from the maintainer's labelled recording;
+Standard unchanged and the default. Closed by the maintainer the same day: 19/20 with 0 false is accepted; the CROWN BONUS line miss and
+match 1's +27 s are not pursued in v0.4.1; no further benchmarking. **Every 75% figure below comes from the recording the templates were
+cut from, so it is not independent validation.** The maintainer's live test is.
+
+| Commit | What |
+|---|---|
+| `2b4dd5e` | tests: the Analytics checks no longer depend on the time of day (the clock-dependent failure reported above; separate, test-only) |
+| `4f52b2d` | 75% CHEST (consensus of 18 pop-ups) and RARE templates; `estimator.HUD`; the native-profile gate on blurred-only pop-ups |
+| `a81c250` | 75% countdown, bus, YOU PLACED (screen and bar) and Victory templates, read only for a 75% profile |
+| `e94ca82` | `[detector] hud`, a HUD Scale per profile, the Settings card, `--hud` |
+| `126f493` | 75% observations fixture; case `user_storm_phase_popup`; `pipeline_baseline.py --hud` and `types.json` |
+
+**Templates** (`research/hud75_templates.py`): CHEST leave-one-out exact 0.71-0.94 (median 0.84), 17 of 18 CERTAIN by today's rules;
+a consensus of match 1 scored on match 2's pop-ups 11 of 13. Highest on non-chest frames (the recording, en, PS5, the cases): 0.61 exact /
+0.82 blurred. Match text on screen 0.98-1.00, elsewhere <= 0.27 (Victory 0.43 on the reference's own Victory).
+
+**The native-profile gate.** The first full run at 75% found 20/20 with 4 false counts: blurred-only onsets of non-chest pop-ups
+(blurred 0.804-0.824, native exact 0.43-0.55). With a native template a pop-up found only by the blurred channel must also reach
+blurred 0.85 and native exact 0.60 (stricter than Standard, never looser). That removes the 4 and gives up one real chest: a CHEST
+line added to a CROWN BONUS pop-up (0.812 / 0.52), which these scores cannot tell apart. `user_storm_phase_popup` fails without the gate.
+
+**Full pipeline on the recording** (`research/pipeline_baseline.py`, two identical runs):
+
+| | v0.4.0 | v0.4.1 Standard | v0.4.1 75% | True |
+|---|---:|---:|---:|---:|
+| Found / duplicates / false (of 20) | 16 / 1 / 0 | 16 / 0 / 0 | **19 / 0 / 0** | 20 |
+| CERTAIN | 0 | 0 | **18** | |
+| Types | RARE unknown | RARE unknown | 16 CHEST, 2 RARE, 1 unknown (RARE line on CROWN BONUS), none wrong | 16 CHEST, 3 RARE |
+| Match 1 | Partial, 469 s | Partial, 377 s | Partial, ended by Victory, 364 s | 337 s (reboot wait at 0-24 s) |
+| Match 2 | Partial, 974 s | Partial, 945 s | **Complete, YOU PLACED, 913 s** | Complete, 912.3 s |
+| Detector ms/frame (mean) | 15.7 | not re-measured | 7.9 (run alone) | |
+
+Match 1's +27 s is the wait for a reboot before the recording's first second of play, which the v0.3.0 rule counts (a design question,
+not a detector miss).
+
+**Standard is unchanged:** `regress.py compare --tag v0.4.0 --clips en ps5 user1112`: en and PS5 identical decisions; user1112 16 -> 16
+found, duplicates 1 -> 0, false 0, CERTAIN 0. `test_hud_75_changes_nothing_on_the_standard_profile`.
+
+**Checks run** (only what the change touches, per the closing decision): test_cases 21, test_match_cues 39, test_match_tracker 68,
+test_user_recording 6, test_profiles 12, test_types 9, test_basics 6, test_app 30, test_analytics_ui 12; packaging below. Not run: the
+full 33-suite pass, mutation runs, the occlusion check at 75%, Standard timing (cancelled), the en clip at 75%.
+
+**Known limits of 75%:** made from one recording of one player (2560x1440 through OBS 1280x720, 4 Mbps SRT); other resolutions at 75%
+untested; a chest line added to a CROWN BONUS pop-up is missed; a RARE line added to another pop-up stays "unknown"; no SPRITE template at
+75% (sprite chests "unknown"); Portuguese at 75% uses the standard BAÚ template; a 75% profile on a different HUD is untested.

@@ -8,6 +8,9 @@ labelled in `tests/cases/user_20261112.json`. Results of each milestone go to [V
 implement, test what changed, commit locally, record results, then stop for review where this plan says so. Nothing is pushed, tagged,
 signed, built for release or published without explicit approval.
 
+**Revised 2026-11-13:** v0.4.1 ships a targeted, opt-in Fortnite HUD Scale 75% setting instead of waiting for M1b (section 6). The
+general HUD architecture (M2/M3 as planned below, and the gate before them) continues after v0.4.1 on M1b's footage.
+
 ## 1. Goals
 
 1. **HUD compatibility is a feature, not a patch.** The maintainer cannot use the app properly with their own Fortnite HUD: on their footage
@@ -131,6 +134,7 @@ today: no later change (v0.4.2, v0.5.0) may break it without that showing in the
 | 2026-11-13 | RARE typing on the maintainer's footage is HUD-dependent (the scale-free length test reads RARE, 0.78-0.81; the exact 1.0x RARE template confirms at 0.22-0.36 against 0.50), so it moves to M3 with the native templates. Lowering the word threshold or a blurred confirmation stays rejected (random ink reached 0.65, v0.2.2). |
 | 2026-11-13 | Confirmed: the maintainer plays at HUD Scale 75%, 2560x1440; Replays at 82%; Thiefs unknown. Ordinary HUD Scale values are the app's compatibility responsibility: a player never has to change a comfortable HUD to use the counter. M1b refined to three matches (75% source, 75% held-out, a slider sweep), each recorded at 1440p and as the 720p SRT feed (V0_4_1_VALIDATION.md). |
 | 2026-11-13 | README HUD compatibility matrix (M5 deliverable): see section 4, M5. |
+| 2026-11-13 | **Revised authorization: targeted 75% HUD hotfix.** M1b recordings no longer block v0.4.1: a dedicated, opt-in, per-profile 75% HUD setting with native templates cut from the labelled recording, everything else unchanged (Standard stays the default and behaves as before). Same-recording verification is documented as not independent; 75% is provisional until the maintainer's live test. A local release candidate for that test; nothing pushed, tagged, signed or published. Calibration, automatic HUD detection and adaptive spectator processing stay out (section 7). The architecture gate (bank, calibration or hybrid) moves to after v0.4.1, with M1b's footage. |
 
 ## 7. Backlog and research proposals (not v0.4.1 scope)
 

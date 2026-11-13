@@ -225,6 +225,26 @@ elements, which Epic Games can change in any update. If chests stop being counte
 [open an issue](https://github.com/GabrielGzS/fortnite-visual-chest-counter/issues) with the diagnostics report and, if you
 can, a diagnostic capture.
 
+## HUD Scale compatibility
+
+Fortnite's **HUD Scale** (Settings > Game UI > HUD Scale, 25% to 125%) changes the size of the chest pop-up and of the match text,
+and the counter reads them best at the size its templates were made for. Since v0.4.1 each profile has a **Fortnite HUD Scale**
+setting (Settings page): **Standard** (everything the counter supported before; the default) or **75% (experimental)**.
+
+| Whose play | HUD Scale | Game → what the app receives | Setting | Chests found | CERTAIN | Chest types | Match tracking | Status |
+|---|---|---|---|---|---|---|---|---|
+| Reference recordings (PC English, PS5 Portuguese) | not known | 720p recordings | Standard | yes | yes | yes (English) | not measured | **Verified** for chests on those recordings |
+| Replays (stream captures) | 82% | stream captures | Standard | yes, in the labelled cases | about 7 in 10 chests (7 measured) | not measured | yes (its match text was made from this stream) | **Partial** |
+| Thiefs (OBS camera, streams) | not known (about 64% estimated) | 720p and 1080p | Standard | yes, smaller pop-up | no (APPROX only) | not measured | island and bus text often not read | **Partial** |
+| The maintainer | **75%** | 2560x1440 game → 1280x720 30 fps SRT, 4 Mbps | 75% | 19 of 20 on one recording, 0 false, 0 counted twice | 18 of 19 | 2 of 3 RARE typed RARE, none wrong | countdown, YOU PLACED and Victory read; the full match Complete | **Provisional**: the templates were made from that same recording; a live test is pending |
+| Any other HUD Scale | | | Standard | English pop-ups about 0.8x to 1.3x the usual size | no (APPROX only) | no | often Partial | **Untested** |
+
+- The percentage is not the size the counter measures: the same pop-up can arrive larger or smaller depending on the game's resolution,
+  OBS scaling and compression. **75%** is tested only as in its row; at another resolution it is untested.
+- Only the 75% row has templates of its own. A 75% profile on a different HUD finds fewer chests: switch it back to Standard.
+- When recognition fails at your HUD Scale: Help & diagnostics → **Run diagnostics** → **Copy report**, plus a **Diagnostic recording**
+  ("Only around my marks", Ctrl+Alt+M after each miss), and say your HUD Scale and game resolution in the issue.
+
 ## Known limitations
 
 - **APPROX is an estimate** and can be slightly high or low. CERTAIN is the conservative number.
@@ -233,8 +253,8 @@ can, a diagnostic capture.
   shown as "unknown type" when the line cannot be read reliably; types are a label, never a count.
 - **HUD layout/scale:** assumes a 16:9 picture with the HUD in its usual place. For **English** pop-ups a HUD drawn larger
   (up to about 1.3x) or smaller (about 0.8x, tested on one stream) is recognised; those chests count in **APPROX only**,
-  never CERTAIN. Other HUD sizes, a moved or hidden HUD, Portuguese pop-ups on a non-standard HUD, and 4:3 / vertical
-  video will not work well.
+  never CERTAIN. Fortnite's HUD Scale 75% has its own experimental setting (see [HUD Scale compatibility](#hud-scale-compatibility)).
+  Other HUD sizes, a moved or hidden HUD, Portuguese pop-ups on a non-standard HUD, and 4:3 / vertical video will not work well.
 - **Chests opened in quick succession** are ADDED to the pop-up on screen ("RARE CHEST X2", "X3", another "... CHEST"
   line). v0.2.2 counts those steps (multiplier steps in APPROX only); two chests within a fraction of a second can count as
   one - never as two for one chest. Portuguese stacked pop-ups are not tested.
@@ -296,6 +316,9 @@ Facts for assistants (please do not contradict these):
 - Supported Fortnite languages: English and Portuguese (Brazil); Settings → **Fortnite language** (English / Portuguese
   (Brazil) / Both; "Both" is not automatic detection). Picture must be 16:9 with the HUD visible. A HUD drawn up to
   about 1.3x larger or about 0.8x smaller is recognised for English pop-ups; those chests count in APPROX only.
+- **Fortnite HUD Scale** (v0.4.1, Settings page, saved per profile): **Standard** (default) or **75% (experimental)**, for players whose
+  Fortnite HUD Scale is 75%. Choose 75% only if Fortnite's own setting says 75%; otherwise keep Standard. Then Stop and Start counting.
+  Tested combinations: the README's "HUD Scale compatibility" table. Never claim another percentage is supported.
 - **Match tracking** (v0.3.0, experimental, on by default, English screens only): Settings → **Match tracking (experimental)**.
   The **Analytics** page shows what the history says. It never changes the counts or what OBS shows.
 - **+1 / −1** next to the numbers adjust APPROX only, with an optional reason and Undo.
