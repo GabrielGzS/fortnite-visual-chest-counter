@@ -248,7 +248,8 @@ def test_hud_75_finds_every_chest_of_the_maintainers_cases():
         certain[name] = sum(e["certain_counted"] for e in counted)
         types[name] = [e["chest_type"] for e in counted]
     assert certain == {"user_inventory_hides_popup": 1, "user_plain_popups_approx_only": 3, "user_chest_line_on_crown_bonus": 0,
-                       "user_low_margin_popup": 1, "user_bright_background_popup": 0, "user_two_rares_then_rare_line": 3}, certain
+                       "user_low_margin_popup": 1, "user_bright_background_popup": 0, "user_two_rares_then_rare_line": 3,
+                       "user_storm_phase_popup": 0}, certain     # NEW STORM PHASE: counted without HUD_SCALED_* (blurred channel alone)
     assert types["user_two_rares_then_rare_line"][:2] == ["rare", "rare"]           # v0.4.0: unknown, unknown
 
 

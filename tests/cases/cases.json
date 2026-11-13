@@ -460,6 +460,23 @@
         }
       ]
     },
+    "user_storm_phase_popup": {
+      "video": "samples/video tests/2026-11-12 12-52-32.mp4",
+      "window": [
+        48.0,
+        56.0
+      ],
+      "source": "maintainer's own game, OBS local recording 720p30 NVENC 4 Mbps (tests/cases/user_20261112.json)",
+      "hud": 0.95,
+      "live": "v0.4.0: not counted. v0.4.1 with the 75% HUD templates, before the native-profile gate (estimator.HUD_SCALED_*): counted at 50.73 by the blurred channel alone (exact 0.55 with the native template)",
+      "truth": [
+        {
+          "t": 50.9,
+          "what": "not_chest",
+          "text": "+900 XP / NEW STORM PHASE"
+        }
+      ]
+    },
     "user_plain_popups_approx_only": {
       "video": "samples/video tests/2026-11-12 12-52-32.mp4",
       "window": [

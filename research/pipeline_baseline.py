@@ -1,13 +1,14 @@
 """
 The real pipeline on one recording, with the evidence regress.py does not keep (v0.4.1 M0).
 
-    python research/pipeline_baseline.py VIDEO OUT_DIR [--match-mode on] [--until SECONDS] [--set NAME=VALUE ...]
+    python research/pipeline_baseline.py VIDEO OUT_DIR [--match-mode on] [--until SECONDS] [--hud 75] [--set NAME=VALUE ...]
 
 Runs `simulate` (every frame at 15 fps through the real ChestEstimator and, with match tracking on, the real MatchTracker) in a fresh
 process, in a temporary folder of its own: an explicit --state, --obs-dir and --log-dir, so no profile, history, count or OBS file of the
 user's is read or written. It refuses to run where a config.toml would be picked up. Writes to OUT_DIR:
 
     events.json          the chest events in research/regress.py's snapshot format
+    types.json           each counted chest's final type (after the detector's type updates)
     observations.json.gz every Observation the match state machine received (exactly what live tracking would feed it)
     matches.json         the match_state lines of the session log (records, transitions, summary)
     timing.json          detector time per frame (mean, percentiles, max), process CPU and wall time, frames processed
@@ -68,7 +69,7 @@ sys.exit(code)
 '''
 
 
-def run(video, out_dir, match_mode="on", sets=(), until=None):
+def run(video, out_dir, match_mode="on", sets=(), until=None, hud=None):
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     if (Path.cwd() / "config.toml").exists():
@@ -79,6 +80,7 @@ def run(video, out_dir, match_mode="on", sets=(), until=None):
                 "--obs-dir", str(tmp / "obs"), "--log-dir", str(tmp / "logs")]
         argv += ["--match-mode", match_mode] if match_mode else []
         argv += ["--until", str(until)] if until is not None else []
+        argv += ["--hud", hud] if hud else []
         env_path = str(ROOT / "src")
         subprocess.run([sys.executable, "-B", "-c", CHILD, json.dumps(argv), str(out_dir), json.dumps([s.split("=", 1) for s in sets])],
                        check=True, stdout=subprocess.DEVNULL, env={**__import__("os").environ, "PYTHONPATH": env_path})
@@ -90,6 +92,14 @@ def run(video, out_dir, match_mode="on", sets=(), until=None):
             r["chest_object"] = e.get("chest_object_gold") is not None
             events.append(r)
     (out_dir / "events.json").write_text(json.dumps(events, indent=1) + "\n", encoding="utf-8", newline="\n")
+    # each counted chest's final type, after the detector's later type updates; a file of its own so events.json keeps regress's format
+    types = {e["event_id"]: {"time": e["time"], "chest_type": e.get("chest_type")} for e in rows
+             if "time" in e and e.get("source") != "manual" and e.get("approx_counted") and "event_id" in e}
+    for u in rows:
+        if u.get("event") == "type_update" and u.get("event_id") in types:
+            types[u["event_id"]]["chest_type"] = u["to"]
+    (out_dir / "types.json").write_text(json.dumps(sorted(types.values(), key=lambda r: r["time"]), indent=1) + "\n", encoding="utf-8",
+                                        newline="\n")
     matches = [{k: v for k, v in e.items() if k != "logged_at"} for e in rows if e.get("event") == "match_state"]
     (out_dir / "matches.json").write_text(json.dumps(matches, indent=1) + "\n", encoding="utf-8", newline="\n")
     return events, matches, json.loads((out_dir / "timing.json").read_text(encoding="utf-8"))
@@ -101,9 +111,10 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--match-mode", default="on")
     ap.add_argument("--until", type=float, help="stop at this video time (seconds)")
+    ap.add_argument("--hud", help="Fortnite HUD Scale templates (settings.HUD_CHOICES)")
     ap.add_argument("--set", dest="sets", action="append", default=[])
     a = ap.parse_args()
-    events, matches, timing = run(a.video, a.out, a.match_mode, a.sets, a.until)
+    events, matches, timing = run(a.video, a.out, a.match_mode, a.sets, a.until, a.hud)
     print(f"{len(events)} events, CERTAIN {sum(e['certain_counted'] for e in events)}, APPROX {sum(e['approx_counted'] for e in events)}")
     for m in matches:
         if m.get("kind") == "record":

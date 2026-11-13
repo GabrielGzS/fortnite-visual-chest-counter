@@ -7,6 +7,11 @@ give v0.4.0's two records exactly. The truth (tests/cases/user_20261112.json) sa
 YOU PLACED, so it should be Complete; that gap is pinned here until v0.4.1 fixes the cues, when the fixture is regenerated and this test
 is changed to require Complete. Active time is pinned the same way: it is a v0.4.1 goal, not only Complete versus Partial.
 
+These first fixtures are the Standard HUD setting, which stays as it is for every other player. The maintainer plays at Fortnite HUD
+Scale 75%: user_20261112_observations_hud75.json.gz is the same pipeline with the profile's HUD set to 75% (simulate --hud 75), where the
+match text is read with native templates. Those templates were cut from this recording, so it shows the setting works on its source,
+not that it generalises (V0_4_1_VALIDATION.md).
+
 Run:   python tests/test_user_recording.py     (or pytest)
 """
 
@@ -23,11 +28,12 @@ from fortnite_chest_counter import match_state as S
 
 HERE = Path(__file__).resolve().parent
 FIXTURE = HERE / "fixtures" / "match" / "user_20261112_observations.json.gz"
+FIXTURE75 = HERE / "fixtures" / "match" / "user_20261112_observations_hud75.json.gz"
 TRUTH = json.loads((HERE / "cases" / "user_20261112.json").read_text(encoding="utf-8"))
 
 
-def replay():
-    data = json.loads(gzip.open(FIXTURE, "rt", encoding="utf-8").read())
+def replay(fixture=FIXTURE):
+    data = json.loads(gzip.open(fixture, "rt", encoding="utf-8").read())
     machine, events = S.MatchStateMachine(), []
     for row in data["observations"]:
         row = dict(row, chests=tuple(row["chests"]))
@@ -37,7 +43,12 @@ def replay():
 
 
 def test_fixture_is_the_real_pipeline_input():
-    _, _, data = replay()
+    for fixture in (FIXTURE, FIXTURE75):
+        check_fixture(fixture)
+
+
+def check_fixture(fixture):
+    _, _, data = replay(fixture)
     assert data["source"]["sha256"] == TRUTH["sha256"]
     rows = data["observations"]
     assert len(rows) >= 1470 and all(b["t"] > a["t"] for a, b in zip(rows, rows[1:]))
@@ -78,6 +89,31 @@ def test_v041_gap_active_time_includes_screens_that_are_not_play():
     true_m1 = truth["m1-rebooted-win"]["active"][1] - truth["m1-rebooted-win"]["active"][0]
     assert round(records[1].active_seconds - true_m2) == 33             # the waiting island counted as play (v0.4.0: 62, after death too)
     assert round(records[0].active_seconds - true_m1) == 40             # waiting for a reboot, Victory and recap (v0.4.0: 132, the READY overlay too)
+
+
+def test_hud75_the_fully_observed_match_is_complete():
+    """The countdown (WAITING FOR PLAYERS at 490 s), the bus and YOU PLACED are read at 75%, so match 2 is Complete and ended by its
+    placement. Match 1 began before the recording, so it stays Partial, and ends by its Victory Royale."""
+    records, transitions, data = replay(FIXTURE75)
+    assert data["source"]["hud"] == "75"
+    got = [(r.match_number, r.completion, r.ended_by, r.opened_t, round(r.closed_t, 2), r.active_seconds) for r in records]
+    assert got == [(1, "partial", "victory", 0.0, 484.0, 364.0), (2, "complete", "placed", 489.0, 1465.0, 913.0)], got
+    truth = {m["id"]: m for m in TRUTH["matches"]}["m2-full-placed-3"]
+    m2 = records[1]
+    assert m2.completion == truth["completion"] and m2.ended_by == truth["ended_by"] and m2.observed_from_start
+    assert abs(m2.ended_t - truth["ended_t"]) <= 1.0 and abs(m2.played_from_t - truth["played_from_t"]) <= 1.0
+    pre = [(round(t.t), t.reason) for t in transitions if t.state == S.PRE_GAME]
+    assert pre == [(490, "countdown_seen")], pre                                      # the countdown begins at 488 s
+
+
+def test_hud75_active_time():
+    records, _, _ = replay(FIXTURE75)
+    truth = {m["id"]: m for m in TRUTH["matches"]}
+    true_m2 = truth["m2-full-placed-3"]["active"][1] - truth["m2-full-placed-3"]["active"][0]
+    true_m1 = truth["m1-rebooted-win"]["active"][1] - truth["m1-rebooted-win"]["active"][0]
+    assert abs(records[1].active_seconds - true_m2) <= 2.0                     # 913 s against 912.3 s: bus to YOU PLACED
+    # match 1: the first 24 s are the wait for a reboot, which the v0.3.0 rule cannot tell from play (a design question, see the truth)
+    assert round(records[0].active_seconds - true_m1) == 27
 
 
 if __name__ == "__main__":
