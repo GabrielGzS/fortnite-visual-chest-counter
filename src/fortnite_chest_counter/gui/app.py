@@ -23,9 +23,9 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QDate, QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap, QTextDocument
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QTextBrowser,
                                QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
@@ -584,8 +584,8 @@ class CountsDialog(QDialog):
     """Set the counter (also: start from the chests already opened)."""
 
     def __init__(self, parent, certain, approx, prediction=None):
-        """prediction: {"week": the current reward week (0-based), "added": chests already added to Predictions} while a reward pool
-        runs, else None: then the dialog has no Predictions part."""
+        """prediction: {"pools": installed pools, "info": {pool id: {"recorded", "added", "week"}}, "default": the running pool's id or
+        None, "now": now}, or None: then the dialog has no Predictions part."""
         super().__init__(parent)
         self.setWindowTitle("Edit counts")
         self._start_approx, self._prediction = approx, prediction
@@ -618,24 +618,59 @@ class CountsDialog(QDialog):
         box.setSpacing(6)
         box.addWidget(label("Treasure predictions", "cardTitle"))
         self.predict = QCheckBox()
-        self.predict.setChecked(True)
+        self.predict.setChecked(bool((prediction or {}).get("default")))
         box.addWidget(self.predict)
+        season_row = QHBoxLayout()
+        season_row.addWidget(label("Season"))
+        self.season = QComboBox()
+        now = (prediction or {}).get("now")
+        for pool in (prediction or {}).get("pools", []):
+            running = now is not None and pool.start <= now < pool.end
+            self.season.addItem(f"{pool.name}   ({local_day(pool.start)} to {local_day(pool.end)}){'   \u00b7 now' if running else ''}", pool.id)
+        if prediction and prediction.get("default"):
+            self.season.setCurrentIndex(max(self.season.findData(prediction["default"]), 0))
+        season_row.addWidget(self.season, 1)
+        box.addLayout(season_row)
+        box.addWidget(label("When were these chests opened? (optional)", "countLabel"))
         self.when = QButtonGroup(self)
-        week = (prediction or {}).get("week", 0)
-        for index, text in enumerate(("Earlier this season, week not known (season rewards only)", "This reward week",
-                                      "Last reward week")):
+        self.period_pick = QComboBox()
+        self.date_pick = QDateEdit()
+        self.date_pick.setCalendarPopup(True)
+        self.date_pick.setDisplayFormat("dd MMM yyyy")
+        self.date_found = label("", "hint", wrap=True)
+        for index, text in enumerate(("Period not known (season rewards only)", "The current reward week", "The previous reward week",
+                                      "A reward week:", "On a date:")):
             choice = QRadioButton(text)
-            choice.setEnabled(index < 2 or week >= 1)
             self.when.addButton(choice, index)
-            box.addWidget(choice)
+            if index == 3:
+                row = QHBoxLayout()
+                row.addWidget(choice)
+                row.addWidget(self.period_pick, 1)
+                box.addLayout(row)
+            elif index == 4:
+                row = QHBoxLayout()
+                row.addWidget(choice)
+                row.addWidget(self.date_pick)
+                row.addWidget(self.date_found, 1)
+                box.addLayout(row)
+            else:
+                box.addWidget(choice)
         self.when.button(0).setChecked(True)
         self.predict_note = label("", "hint", wrap=True)
         box.addWidget(self.predict_note)
         box.addWidget(label("Predictions only: your Analytics, chests per hour and per minute, matches and OBS stay on the chests the app "
-                            "counted, and no chest is placed at a time it was not seen.", "hint", wrap=True))
+                            "counted, and no chest is placed at a time it was not seen. You can move them between weeks later: Predictions, "
+                            "Manage weeks.", "hint", wrap=True))
         layout.addWidget(self.predict_box)
         self.predict.toggled.connect(self._show_prediction)
         self.when.idClicked.connect(lambda _id: self._show_prediction())
+        self.season.currentIndexChanged.connect(self._season_changed)
+        self.period_pick.currentIndexChanged.connect(lambda _index: self._show_prediction())
+        self.date_pick.dateChanged.connect(self._date_changed)
+        if now is not None:
+            local = now.astimezone()
+            self.date_pick.setDate(QDate(local.year, local.month, local.day))
+        self._fill_periods()
         self.problem = label("", "hint")
         self.problem.setStyleSheet(f"color: {theme.REJECT};")
         layout.addWidget(self.problem)
@@ -648,47 +683,114 @@ class CountsDialog(QDialog):
         self.certain.valueChanged.connect(self._check)
         self._show_prediction()
 
+    # ---- Predictions: which season and which of its periods the difference belongs to
+    def _pool(self):
+        pid = self.season.currentData()
+        return next((pool for pool in (self._prediction or {}).get("pools", []) if pool.id == pid), None)
+
+    def _info(self):
+        pool = self._pool()
+        return self._prediction["info"].get(pool.id) if pool is not None else None
+
+    def _season_changed(self, _index=None):
+        self._fill_periods()
+        self._show_prediction()
+
+    def _fill_periods(self):
+        """The selected season's periods that have begun; current and previous only while it runs."""
+        pool, info = self._pool(), self._info()
+        self.period_pick.blockSignals(True)
+        self.period_pick.clear()
+        now = (self._prediction or {}).get("now")
+        if pool is not None:
+            for index, (start, end) in enumerate(pool.weeks()):
+                if now is None or start <= now:
+                    self.period_pick.addItem(f"Week {index + 1}   ({local_day(start)} to {local_day(end)})", index)
+        self.period_pick.blockSignals(False)
+        week = info.get("week") if info else None
+        self.when.button(1).setEnabled(week is not None)
+        self.when.button(2).setEnabled(week is not None and week >= 1)
+        self.when.button(3).setEnabled(self.period_pick.count() > 0)
+        if not self.when.checkedButton() or not self.when.checkedButton().isEnabled():
+            self.when.button(0).setChecked(True)
+
+    def _date_changed(self, _date=None):
+        """A date picks its season and week, among the installed ones only."""
+        day = self.date_pick.date()
+        when = datetime(day.year(), day.month(), day.day(), 12).astimezone()
+        pool, week = predictions.pool_at((self._prediction or {}).get("pools", []), when)
+        if pool is None:
+            self.date_found.setText("No installed season covers that date.")
+        else:
+            if pool.id != self.season.currentData():
+                self.season.setCurrentIndex(self.season.findData(pool.id))
+            self.date_found.setText(f"{pool.name}, week {week + 1}")
+        self._date_hit = (pool.id, week) if pool is not None else None
+        self._show_prediction()
+
     def _scope(self):
-        choice, week = max(self.when.checkedId(), 0), self._prediction.get("week", 0)
-        return (predictions.SEASON, None) if choice == 0 else (predictions.WEEK, week if choice == 1 else week - 1)
+        """-> (scope, week, period id) in the selected season, or None when the choice does not resolve (a date no season covers)."""
+        pool, info = self._pool(), self._info()
+        choice = max(self.when.checkedId(), 0)
+        if pool is None:
+            return None
+        if choice == 0:
+            return predictions.SEASON, None, None
+        if choice in (1, 2):
+            week = info["week"] - (choice - 1)
+        elif choice == 3:
+            week = self.period_pick.currentData()
+        else:
+            hit = getattr(self, "_date_hit", None)
+            if hit is None or hit[0] != pool.id:
+                return None
+            week = hit[1]
+        return (predictions.WEEK, week, pool.period_id(week)) if week is not None and week >= 0 else None
 
     def _effective(self):
         """The chests this edit really adds to Predictions (negative: takes back), after reconcile."""
-        info = self._prediction
-        return predictions.reconcile(self._start_approx, self.approx.value(), info["recorded"], info["added"], *self._scope())
+        info, scope = self._info(), self._scope()
+        if info is None or scope is None:
+            return 0
+        return predictions.reconcile(self._start_approx, self.approx.value(), info["recorded"], info["added"], scope[0], scope[1])
 
     def _show_prediction(self):
-        """Shown when APPROX changes while a reward pool runs; a lower count only when there are added chests to take back."""
+        """Shown when APPROX changes and a season is installed; a lower count only when there are added chests to take back."""
         delta = self.approx.value() - self._start_approx
-        info = self._prediction
+        info = self._info()
         shown = info is not None and (delta > 0 or (delta < 0 and info["added"].season > 0))
         self.predict_box.setVisible(shown)
         if not shown:
             return
         self.predict.setText("Count the difference in Predictions" if delta > 0 else "Take the difference back from the chests you added")
-        for index in range(3):
-            self.when.button(index).setVisible(self.predict.isChecked())
+        on = self.predict.isChecked()
+        for widget in (self.season, self.period_pick, self.date_pick, self.date_found, *self.when.buttons()):
+            widget.setVisible(on)
         using = info["recorded"] + info["added"].season
-        if not self.predict.isChecked():
+        if not on:
             self.predict_note.setText("Predictions keep using only the chests they use now.")
             return
+        scope = self._scope()
+        if scope is None:
+            self.predict_note.setText("Choose a date inside an installed season, or another option.")
+            return
         change = self._effective()
-        where = ("season rewards (Gizmo, Pirate Shop Access)", "this week's rewards and the season's",
-                 "last week's rewards and the season's")[max(self.when.checkedId(), 0)]
+        where = "season rewards only" if scope[0] == predictions.SEASON else f"week {scope[1] + 1}'s rewards and the season's"
         if change == 0:
-            self.predict_note.setText(f"Nothing to change: Predictions already use {fmt(using)} chests this season ({fmt(info['recorded'])} counted "
+            self.predict_note.setText(f"Nothing to change: Predictions already use {fmt(using)} chests in this season ({fmt(info['recorded'])} counted "
                                       f"+ {fmt(info['added'].season)} added), and never more than your new total."
                                       if delta > 0 else "None of the chests you added are in that period.")
         else:
             self.predict_note.setText(f"{'+' if change > 0 else '−'}{fmt(abs(change))} chests for {where}: Predictions will use "
-                                      f"{fmt(using + change)} chests this season. Undo on the Predictions page.")
+                                      f"{fmt(using + change)} chests in this season. Undo on the Predictions page.")
 
     def prediction_choice(self):
-        """-> (chests, scope, week) for Predictions after reconcile, or None."""
+        """-> (chests, scope, week, pool id, period id) for Predictions after reconcile, or None."""
         if not self.predict_box.isVisibleTo(self) or not self.predict.isChecked():
             return None
+        scope = self._scope()
         change = self._effective()
-        return (change, *self._scope()) if change else None
+        return (change, scope[0], scope[1], self._pool().id, scope[2]) if change and scope is not None else None
 
     def _check(self):
         bad = self.certain.value() > self.approx.value()
@@ -2791,6 +2893,10 @@ def local_date(moment):
     return moment.astimezone().strftime("%d %b %Y")
 
 
+def local_day(moment):
+    return moment.astimezone().strftime("%d %b")
+
+
 def rgba(color, alpha):
     r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
     return f"rgba({r}, {g}, {b}, {alpha})"
@@ -2824,12 +2930,16 @@ def team_selector(parent, on_change):
     return row, group
 
 
-def team_text(team):
+def team_text(team, model=False):
+    """model: My Progress, where a team is a scenario over your chests; otherwise What If?, where it changes only the time and the finder."""
     if team == 1:
-        return "Solo: your own pace."
-    return (f"{dict((n, name) for name, n in predictions.TEAMS)[team]}: you plus {team - 1} teammate{'s' if team > 2 else ''}, each opening 80% "
-            f"as many chests as you ({predictions.team_factor(team):g}x your pace). A safe average, not your real team: only the time changes, "
-            "never the chance.")
+        return "Solo: your own chests and your own pace." if model else "Solo: your own pace."
+    name, factor = dict((n, name) for name, n in predictions.TEAMS)[team], predictions.team_factor(team)
+    who = f"you plus {team - 1} teammate{'s' if team > 2 else ''}, each opening 80% as many chests as you"
+    if model:
+        return (f"{name} model: {who}, all season. Every card counts {factor:g}x your chests and the time runs at {factor:g}x your pace. "
+                "A scenario, not your real team: your own figures stay on each card, and nothing is saved.")
+    return f"{name}: {who} ({factor:g}x your pace). A safe average, not your real team: only the time changes, never the chance per chest."
 
 
 class LuckBadge(QFrame):
@@ -2915,6 +3025,9 @@ class RewardCard(QFrame):
         left.addWidget(self.bar)
         self.bar_text = label("", "hint", wrap=True)
         left.addWidget(self.bar_text)
+        self.actual = label("", "hint", wrap=True)               # your actual figures, while a team scenario is shown
+        self.actual.setStyleSheet(f"color: {theme.TEXT}; background: transparent; border: none;")
+        left.addWidget(self.actual)
         self.forecast_caption = label("", "countLabel")
         left.addWidget(self.forecast_caption)
         rows = QGridLayout()
@@ -2973,12 +3086,20 @@ class RewardCard(QFrame):
         r = s.reward
         shown = s.obtained_chance if s.frozen else s.chance
         self.chance.setText(predictions.percent(shown))
-        self.chance_sub.setText("CHANCE WHEN YOU REPORTED IT" if s.frozen else "CHANCE OF AT LEAST ONE, THIS CYCLE" if r.kind == predictions.REPEATABLE
-                                else "CHANCE OF HAVING FOUND IT, THIS WEEK" if r.kind == predictions.WEEKLY else "CHANCE OF HAVING FOUND IT, THIS SEASON")
+        modeled = s.team > 1 and not s.frozen
+        name = {n: label_ for label_, n in predictions.TEAMS}[s.team]
+        self.chance_sub.setText(("" if not modeled else f"{name.upper()} MODEL \u00b7 ") + (
+            "CHANCE WHEN YOU REPORTED IT" if s.frozen else "CHANCE OF AT LEAST ONE, THIS CYCLE" if r.kind == predictions.REPEATABLE
+            else "CHANCE OF HAVING FOUND IT, THIS WEEK" if r.kind == predictions.WEEKLY else "CHANCE OF HAVING FOUND IT, THIS SEASON"))
+        if modeled:
+            self.actual.setText(f"Yours: {predictions.percent(s.actual_chance)} from {fmt(int(s.actual_cycle_effective))} chests"
+                                + (f", {fmt(s.actual_completed)} completed cycles" if r.kind == predictions.REPEATABLE else "")
+                                + f". The {name} model counts {predictions.team_factor(s.team):g}x your chests.")
+        self.actual.setVisible(modeled)
         done = min(s.cycle_effective / s.milestone_chests, 1.0)
         self.bar.setValue(round(done * BAR_STEPS))
         self.bar_text.setText(("90% mark reached" if s.cycle_effective >= s.milestone_chests else
-                               f"{fmt(int(s.cycle_effective))} of {fmt(s.milestone_chests)} chests to the 90% mark")
+                               f"{fmt(int(s.cycle_effective))} of {fmt(s.milestone_chests)} {'team ' if modeled else ''}chests to the 90% mark")
                               + (f" ({fmt(s.boosted)} opened in Treasure Hours count at their boosted odds)" if s.boosted else ""))
         message = (f"The pool starts on {local_time(s.window[0])}." if not s.started else
                    ("This week is over." if r.kind == predictions.WEEKLY else "This pool is over.") if s.ended else
@@ -3005,9 +3126,11 @@ class RewardCard(QFrame):
             else:
                 when.setText(predictions.short_hours(h))
                 chests.setText(f"{fmt(left)} more chests" + (f" \u00b7 about {round(h / 24):,} days nonstop" if h >= 1000 else ""))
-        expected = f"Statistically expected: {s.expected:.2f}" + (" across the season's weeks" if r.kind == predictions.WEEKLY else " this season")
+        expected = (f"Statistically expected{' (' + name + ' model)' if modeled else ''}: {s.expected:.2f}"
+                    + (" across the season's weeks" if r.kind == predictions.WEEKLY else " this season"))
         if r.kind == predictions.REPEATABLE:
-            expected += f"   ·   {fmt(s.completed_cycles)} completed 90% cycle{'s' if s.completed_cycles != 1 else ''} (cycles, not Gizmos found)"
+            expected += (f"   ·   {fmt(s.completed_cycles)} completed 90% cycle{'s' if s.completed_cycles != 1 else ''}"
+                         + (" in the model" if modeled else "") + " (cycles, not Gizmos found)")
         if s.added:
             expected += f"   ·   includes {fmt(s.added)} chests you added"
         self.stats.setText(expected)
@@ -3022,7 +3145,8 @@ class RewardCard(QFrame):
         self.status.setVisible(bool(status))
         self.luck.setVisible(s.started)
         if s.started:
-            self.luck.show_insight(predictions.insight(s))
+            found = predictions.insight(s)
+            self.luck.show_insight(predictions.Insight(found.level, found.heading, f"{name} model: {found.text}") if modeled else found)
         live = s.started and not s.ended
         self.restart.setVisible(live)
         self.obtained.setVisible(live and r.kind != predictions.REPEATABLE and not s.frozen)
@@ -3053,9 +3177,12 @@ class CurveDialog(QDialog):
         odds.setStyleSheet(f"color: {accent}; font-weight: 600;")
         top.addWidget(odds)
         layout.addLayout(top)
-        you = state.cycle_effective if state is not None and state.started and not state.frozen else None
+        live = state is not None and state.started and not state.frozen
+        you = state.actual_cycle_effective if live else None
+        modeled = live and state.team > 1
+        team_name = {n: label_ for label_, n in predictions.TEAMS}[state.team] if state is not None else "Solo"
         self.chart = charts.ProbabilityCurve()
-        self.chart.show_curve(reward.p, reward.odds, accent, you)
+        self.chart.show_curve(reward.p, reward.odds, accent, you, state.cycle_effective if modeled else None, team_name if modeled else None)
         layout.addWidget(self.chart)
         self.tiles = []
         for milestone in (0.5, 0.9, 0.99):
@@ -3077,6 +3204,8 @@ class CurveDialog(QDialog):
         if you:
             where = "this week's cycle" if reward.kind == predictions.WEEKLY else "this cycle"
             self.mine.setText(f"You (the white dot): {fmt(int(you))} chests in {where}, {predictions.percent(predictions.chance(you, reward.p))}."
+                              + (f" The {team_name} model (the ring): {fmt(int(state.cycle_effective))} chests, {predictions.percent(state.chance)}."
+                                 if modeled else "")
                               + (" Chests from Treasure Hours count at their boosted odds." if state.boosted else ""))
         layout.addWidget(self.mine)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
@@ -3089,8 +3218,8 @@ class AllocationDialog(QDialog):
 
     def __init__(self, parent, pool, view, now):
         super().__init__(parent)
-        self.setWindowTitle("Assign added chests to weeks")
-        self.total = view.added.season
+        self.setWindowTitle("Manage weeks")
+        self.total, self.pool = view.added.season, pool
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(10)
@@ -3128,7 +3257,8 @@ class AllocationDialog(QDialog):
         return sum(spin.value() for spin in self.spins.values())
 
     def allocation(self):
-        return {week: spin.value() for week, spin in self.spins.items() if spin.value()}
+        """{period id: chests}: stable names, so a later change to the pool file cannot move them."""
+        return {self.pool.period_id(week): spin.value() for week, spin in self.spins.items() if spin.value()}
 
     def _check(self, _value=None):
         assigned = self.assigned()
@@ -3151,10 +3281,9 @@ class PredictionsPage(QWidget):
         self.clock = None                                     # a function giving "now" (tests); None: the real clock
         self.rolls = 0
         self._view = None
-        try:
-            self.pool, self.pool_error = predictions.load_pool(), None
-        except predictions.PoolError as error:
-            self.pool, self.pool_error = None, str(error)
+        self.pools, errors = predictions.load_pools()
+        self.pool = predictions.active_pool(self.pools, datetime.now().astimezone())
+        self.pool_error = None if self.pool is not None else ("; ".join(f"{name}: {error}" for name, error in errors) or "no reward pool installed")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 24, 30, 16)
         layout.setSpacing(10)
@@ -3205,6 +3334,14 @@ class PredictionsPage(QWidget):
         tab, layout = scroll_tab()
         self.views.addWidget(tab)
         box, box_layout = card()
+        self.season_pick = QComboBox()                        # only with more than one installed season: look at an earlier one
+        for pool in self.pools:
+            self.season_pick.addItem(f"{pool.name}   ({local_date(pool.start)} to {local_date(pool.end)})", pool.id)
+        if self.pool is not None:
+            self.season_pick.setCurrentIndex(max(self.season_pick.findData(self.pool.id), 0))
+        self.season_pick.setVisible(len(self.pools) > 1)
+        self.season_pick.currentIndexChanged.connect(self._season_picked)
+        box_layout.addWidget(self.season_pick)
         self.pool_line = label("", "cardTitle", wrap=True)
         box_layout.addWidget(self.pool_line)
         self.chests_line = label("", "hint", wrap=True)
@@ -3220,7 +3357,7 @@ class PredictionsPage(QWidget):
         added_row = QHBoxLayout()
         self.added_line = label("", "hint", wrap=True)
         added_row.addWidget(self.added_line, 1)
-        self.assign_link = button("Assign to weeks...", "link", tip="Optional: say which reward weeks the chests you added belong to",
+        self.assign_link = button("Manage weeks...", tip="Optional: which reward weeks the chests you added with Edit counts belong to",
                                   on_click=self.assign_weeks)
         added_row.addWidget(self.assign_link, 0, Qt.AlignTop)
         self.added_undo = button("Undo", "link", tip="Take back your last change to the chests you added (an addition or an assignment). "
@@ -3233,7 +3370,7 @@ class PredictionsPage(QWidget):
         box_layout.addWidget(label("FORECAST FOR", "countLabel"))
         row, self.team = team_selector(self, lambda _size: self._show())
         box_layout.addLayout(row)
-        self.team_line = label(team_text(1), "hint", wrap=True)
+        self.team_line = label(team_text(1, model=True), "hint", wrap=True)
         box_layout.addWidget(self.team_line)
         layout.addWidget(box)
         self.cards = {}
@@ -3362,7 +3499,7 @@ class PredictionsPage(QWidget):
     def _show(self):
         v = self._view
         team = self.team.checkedId()
-        self.team_line.setText(team_text(team))
+        self.team_line.setText(team_text(team, model=True))
         if v is None:
             return
         pool, a = v.pool, v.added
@@ -3387,7 +3524,9 @@ class PredictionsPage(QWidget):
             self.added_line.setText("Chests from before you used the counter? Add them with Edit counts on the Dashboard: Predictions can use them, "
                                     "Analytics will not.")
         self.added_undo.setVisible(a.last is not None)
-        self.assign_link.setVisible(a.season > 0)
+        self.assign_link.setEnabled(a.season > 0)
+        self.assign_link.setToolTip("Optional: which reward weeks the chests you added with Edit counts belong to" if a.season else
+                                    "Add chests from before the counter with Edit counts first; then put them in their weeks here")
         if v.rate:
             team_rate = v.rate * predictions.team_factor(team)
             self.pace_line.setText(f"Your pace: {v.rate:.0f} chests per hour of real life ({v.rate_period}), breaks and queues included"
@@ -3395,8 +3534,14 @@ class PredictionsPage(QWidget):
         else:
             self.pace_line.setText(f"Your pace: not enough counting yet ({progression.MIN_HOURLY_SECONDS // 60} minutes of sessions), so forecasts "
                                    "show chests only.")
-        for state in v.states:
+        states = predictions.progress(pool, v.log, list(v.actions), v.now, team) if v.log is not None else v.states
+        for state in states:
             self.cards[state.reward.id].fill(state, v.rate, team)
+        if team > 1:
+            factor = predictions.team_factor(team)
+            self.season_tile.set_value(fmt(v.season_chests + a.season), f"yours; {self.team.checkedButton().text()} model: "
+                                                                        f"{fmt(round((v.season_chests + a.season) * factor))}")
+            self.week_tile.set_value(fmt(v.week_chests), f"yours; {self.team.checkedButton().text()} model: {fmt(round(v.week_chests * factor))}")
 
     def _folder(self):
         cfg, _ = load_cfg()
@@ -3407,29 +3552,28 @@ class PredictionsPage(QWidget):
         return self.clock() if self.clock else datetime.now().astimezone()
 
     def edit_info(self):
-        """What the Edit counts dialog needs, or None when no reward pool runs now."""
-        pool = self.pool
-        now = self._now()
-        if pool is None or not pool.start <= now < pool.end:
+        """What the Edit counts dialog needs for every installed season, read fresh (a cached view could count chests twice), or None
+        without installed seasons. The season running now is chosen by default; with none running, nothing is counted unless chosen."""
+        if not self.pools:
             return None
-        folder = self._folder()
-        try:                                                  # always re-read what was added: a cached view could count chests twice
-            actions, _ = predictions.read_actions(folder)
-            view = self._view
-            if view is None or view.pool is not pool or abs((view.now - now).total_seconds()) > 60:
-                view = predictions.load_view(folder, pool, now=now)       # recorded chests: a view at most a minute old is close enough
+        now = self._now()
+        try:
+            info = predictions.edit_summary(self._folder(), self.pools, now)
         except Exception:
             return None
-        return {"week": pool.week_of(now), "recorded": view.season_chests, "added": predictions.added(pool, predictions.effective(actions), now)}
+        running = next((pool.id for pool in self.pools if pool.start <= now < pool.end), None)
+        return {"pools": self.pools, "info": info, "default": running, "now": now}
 
-    def add_chests(self, delta, scope, week):
-        """Chests from Edit counts, for Predictions only."""
+    def add_chests(self, delta, scope, week, pool_id=None, period=None):
+        """Chests from Edit counts, for Predictions only, in the chosen season and period."""
+        pool = next((p for p in self.pools if p.id == pool_id), self.pool)
         try:
-            predictions.append_action(self._folder(), predictions.ADJUST, self.pool.id, "", delta=delta, scope=scope, week=week, at=self._now())
+            predictions.append_action(self._folder(), predictions.ADJUST, pool.id, "", delta=delta, scope=scope, week=week,
+                                      period=period if period is not None else (pool.period_id(week) if week is not None else None), at=self._now())
         except (OSError, ValueError) as error:
             show_error(self, f"The chests could not be added to Predictions ({error}). Your counter is set.")
             return
-        self.win.add_log({"type": "info", "text": f"Predictions: {'+' if delta > 0 else '−'}{fmt(abs(delta))} chests "
+        self.win.add_log({"type": "info", "text": f"Predictions ({pool.name}): {'+' if delta > 0 else '−'}{fmt(abs(delta))} chests "
                                                   + ("for the season." if scope == predictions.SEASON else f"for reward week {week + 1}.")
                                                   + " Analytics is not changed."})
         if self.win.pages.currentWidget() is self:
@@ -3450,6 +3594,13 @@ class PredictionsPage(QWidget):
 
     def show_curve(self, reward_card):
         CurveDialog(self, reward_card.reward, reward_card.accent, reward_card.state).exec()
+
+    def _season_picked(self, _index=None):
+        pid = self.season_pick.currentData()
+        pool = next((p for p in self.pools if p.id == pid), None)
+        if pool is not None and pool is not self.pool:
+            self.pool, self._view = pool, None
+            self.refresh()
 
     def undo_added(self):
         last = self._view.added.last if self._view is not None else None
@@ -4752,7 +4903,7 @@ class MainWindow(QMainWindow):
         if self._set(dialog.certain.value(), dialog.approx.value(), "set_count"):
             choice = dialog.prediction_choice()
             if choice is not None:
-                self.predictions.add_chests(*choice)
+                self.predictions.add_chests(*choice)          # (chests, scope, week, pool id, period id)
 
     def reset_counts(self):
         whose = "" if self.dashboard.profile.count() <= 1 else f' of the profile "{self.dashboard.profile.currentText()}"'

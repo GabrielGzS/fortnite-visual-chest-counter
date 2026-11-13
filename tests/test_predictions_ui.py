@@ -94,22 +94,43 @@ def test_my_progress_shows_the_profiles_chests_pace_and_odds():
         assert "Week 1 of 5" in weekly.status.text() and "THIS WEEK" in weekly.chance_sub.text()
 
 
-def test_the_team_scenario_changes_only_the_time():
+def test_a_team_models_every_card_and_solo_restores_your_own_view():
     with G.window() as w:
         play(w)
         page = opened(w)
-        pirate = card(page, "pirate_shop_access")
-        needed = lambda: pirate.rows[0.9][2].text().split(" more chests")[0]
-        chance, solo, chests = pirate.chance.text(), pirate.rows[0.9][1].text(), needed()
+        solo = {rid: c.chance.text() for rid, c in page.cards.items()}
         page.team.button(4).click()
-        # every card's time follows the team at once; the chance and the chests still needed do not
-        assert pirate.chance.text() == chance and needed() == chests and pirate.rows[0.9][1].text() != solo
-        assert all(c.forecast_caption.text() == "TIME AT SQUAD PACE (3.4X)" for c in page.cards.values())
-        left = R.more_to(0.9, 1 / 137500, 70)
-        assert pirate.rows[0.9][1].text() == R.short_hours(left / (60 * 3.4))
-        assert "3.4x your pace" in page.team_line.text() and "204 per hour (3.4x)" in page.pace_line.text()   # teammates at 80% of your pace
-        page.team.button(2).click()
-        assert "1.8x" in page.team_line.text()
+        squad = {rid: c.chance.text() for rid, c in page.cards.items()}
+        assert all(squad[rid] != solo[rid] for rid in solo), (solo, squad)                       # every card's percentage moves
+        p = 1 / 137500
+        pirate, gizmo = card(page, "pirate_shop_access"), card(page, "gizmo")
+        assert pirate.chance.text() == R.percent(R.chance(70 * 3.4, p)) and "SQUAD MODEL" in pirate.chance_sub.text()
+        assert not pirate.actual.isHidden() and pirate.actual.text().startswith(f"Yours: {R.percent(R.chance(70, p))} from 70 chests")
+        assert pirate.rows[0.9][1].text() == R.short_hours(R.more_to(0.9, p, 70 * 3.4) / (60 * 3.4))   # needed from the model, team pace
+        assert "238 of 316,605 team chests" in pirate.bar_text.text() and gizmo.luck.text.text().startswith("Squad model:")
+        assert "Squad model: 238" in page.season_tile.sub.text() and page.season_tile.value.text() == "70"   # your actual total stays
+        assert not (folder(w) / R.ACTIONS_FILE).exists()                                         # a scenario saves nothing
+        page.roll_team.button(2).click()                                                        # What If?: a team changes only the time
+        assert "counts 3.4x your chests" in page.team_line.text() and "only the time changes" in page.roll_team_line.text()
+        page.team.button(1).click()
+        assert {rid: c.chance.text() for rid, c in page.cards.items()} == solo and pirate.actual.isHidden()
+
+
+def test_the_curve_shows_your_position_and_the_teams():
+    from unittest.mock import patch
+    with G.window() as w:
+        play(w)
+        page = opened(w)
+        page.team.button(3).click()
+        seen = {}
+
+        def show(dialog):
+            seen.update(you=dialog.chart.you, team=dialog.chart.team_you, label=dialog.chart.team_label, mine=dialog.mine.text())
+            return 0
+
+        with patch.object(w.A.CurveDialog, "exec", show):
+            card(page, "weekly_jam_track").curve_link.click()
+        assert seen["you"] == 70 and abs(seen["team"] - 70 * 2.6) < 1e-9 and seen["label"] == "Trio" and "Trio model (the ring)" in seen["mine"]
 
 
 def test_start_new_cycle_mark_obtained_and_undo_are_saved_to_this_profile_only():
@@ -207,7 +228,7 @@ def test_edit_counts_adds_the_difference_to_predictions_only_and_undo_takes_it_b
         R.append_action(folder(w), R.ADJUST, POOL.id, "", delta=2000, scope=R.SEASON, at=NOW)
         with patch.object(w.A.CountsDialog, "exec", lower):
             w.win.edit_counts()
-        assert "Take the difference back" in seen["text"] and seen["choice"] == (-1070, R.SEASON, None)
+        assert "Take the difference back" in seen["text"] and seen["choice"] == (-1070, R.SEASON, None, POOL.id, None)
 
 
 def test_reset_and_typing_the_total_back_in_adds_nothing_even_with_the_page_closed():
@@ -233,14 +254,48 @@ def test_reset_and_typing_the_total_back_in_adds_nothing_even_with_the_page_clos
         assert [(a.kind, a.delta) for a in rows] == [(R.ADJUST, 5000)] and w.win.counts == (0, 5070)
 
 
-def test_outside_the_season_edit_counts_has_no_predictions_part():
+def test_outside_a_season_edit_counts_counts_nothing_unless_you_choose_one():
     with G.window() as w:
         page = w.win.predictions
         page.clock = lambda: POOL.end + timedelta(days=3)
-        assert page.edit_info() is None
-        dialog = w.A.CountsDialog(w.win, 0, 0, prediction=None)
+        info = page.edit_info()
+        assert info["default"] is None and [p.id for p in info["pools"]] == [POOL.id]
+        dialog = w.A.CountsDialog(w.win, 0, 0, prediction=info)
         dialog.approx.setValue(300)
-        assert dialog.predict_box.isHidden() and dialog.prediction_choice() is None
+        assert not dialog.predict_box.isHidden() and not dialog.predict.isChecked() and dialog.prediction_choice() is None
+        assert not dialog.when.button(1).isEnabled()                                            # no current week in a season that is over
+        none = w.A.CountsDialog(w.win, 0, 0, prediction=None)
+        none.approx.setValue(300)
+        assert none.predict_box.isHidden() and none.prediction_choice() is None
+
+
+def test_edit_counts_asks_optionally_for_the_season_and_the_period():
+    from PySide6.QtCore import QDate
+    with G.window() as w:
+        play(w)
+        page = opened(w)
+        info = page.edit_info()
+        assert info["default"] == POOL.id and info["info"][POOL.id]["recorded"] == 70 and info["info"][POOL.id]["week"] == 0
+        d = w.A.CountsDialog(w.win, 70, 70, prediction=info)
+        d.approx.setValue(5070)
+        assert d.predict.isChecked() and d.season.currentData() == POOL.id and d.when.button(0).isChecked()   # default: period not known
+        assert d.prediction_choice() == (5000, R.SEASON, None, POOL.id, None)
+        assert d.when.button(1).isEnabled() and not d.when.button(2).isEnabled()                 # week 1: no previous week
+        d.when.button(1).click()
+        assert d.prediction_choice() == (5000, R.WEEK, 0, POOL.id, "2026-11-01")
+        d.when.button(4).click()
+        d.date_pick.setDate(QDate(2026, 11, 3))
+        assert "week 1" in d.date_found.text() and d.prediction_choice() == (5000, R.WEEK, 0, POOL.id, "2026-11-01")
+        d.date_pick.setDate(QDate(2026, 10, 1))
+        assert "No installed season" in d.date_found.text() and d.prediction_choice() is None    # never guessed
+        d.when.button(3).click()
+        assert d.period_pick.count() == 1 and d.prediction_choice() == (5000, R.WEEK, 0, POOL.id, "2026-11-01")
+        from unittest.mock import patch
+        with patch.object(w.A.CountsDialog, "exec", lambda dialog: (dialog.approx.setValue(5070), dialog.when.button(1).click(),
+                                                                   w.A.QDialog.Accepted)[-1]):
+            w.win.edit_counts()
+        rows, _ = R.read_actions(folder(w))
+        assert [(a.kind, a.delta, a.scope, a.week, a.period, a.pool) for a in rows] == [(R.ADJUST, 5000, R.WEEK, 0, "2026-11-01", POOL.id)]
 
 
 def test_every_card_opens_its_probability_curve():

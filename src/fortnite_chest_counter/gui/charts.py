@@ -185,10 +185,12 @@ class ProbabilityCurve(QWidget):
         self.setMinimumHeight(height)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.points, self.end, self.p, self.odds, self.you, self.accent = [], 1, None, None, None, theme.ACCENT
+        self.team_you, self.team_label = None, None
 
-    def show_curve(self, p, odds, accent, you=None):
+    def show_curve(self, p, odds, accent, you=None, team_you=None, team_label=None):
+        """you: your actual position (normal-odds chests); team_you: a team scenario's modeled position, drawn as a ring."""
         from fortnite_chest_counter import predictions
-        self.p, self.odds, self.accent, self.you = p, odds, accent, you
+        self.p, self.odds, self.accent, self.you, self.team_you, self.team_label = p, odds, accent, you, team_you, team_label
         self.points, self.end = predictions.curve(p)
         self.update()
 
@@ -249,6 +251,18 @@ class ProbabilityCurve(QWidget):
         painter.setFont(_font(8, bold=True))
         painter.drawText(QRectF(x + 8, y - 22, 280, 14), Qt.AlignLeft | Qt.AlignVCenter,
                          f"{self.odds:,} chests (1 in {self.odds:,}): {predictions.percent(odds_chance)}")
+        if self.team_you is not None and self.team_you > 0:    # a team scenario: a ring, never mistaken for you
+            modeled = predictions.chance(self.team_you, self.p)
+            x, y = x_of(self.team_you), y_of(modeled)
+            painter.setPen(QPen(accent, 2.5))
+            painter.setBrush(QColor(theme.BG))
+            painter.drawEllipse(QPointF(x, y), 7, 7)
+            left = x > plot.center().x()
+            painter.setPen(accent)
+            painter.setFont(_font(8, bold=True))
+            painter.drawText(QRectF(x - 240 if left else x + 12, y - 22, 230, 14), (Qt.AlignRight if left else Qt.AlignLeft) | Qt.AlignVCenter,
+                             f"{self.team_label} model: {compact(self.team_you)}{'+' if self.team_you > self.end else ''} \u00b7 "
+                             f"{predictions.percent(modeled)}")
         if self.you is not None and self.you > 0:              # where you are in this cycle
             mine = predictions.chance(self.you, self.p)
             x, y = x_of(self.you), y_of(mine)

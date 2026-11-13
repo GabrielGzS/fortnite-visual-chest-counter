@@ -151,6 +151,13 @@ RC3 (maintainer's review of RC2): the team choice changes every card's time rows
 **Assign to weeks...** (ALLOCATE rows: moves added chests between "week not known" and weeks that had begun, never adds or removes any);
 a **Probability curve** per reward (`charts.ProbabilityCurve`, QPainter, no new dependency).
 
+RC4 (maintainer's review of RC3): the team selector is a **scenario model**, not a speed control: every card is recalculated from your
+actual position in its own period times the team factor (chance, bar, expected, Gizmo's hypothetical cycles, chests and time needed),
+with your own figures beside it; never saved, a reported reward never modeled, Solo is the actual view. **Seasons and periods** are
+generic: every file in `pools/` is a season, its periods are named by their start date (stable ids in the rows; RC3's indexes still
+read); Edit counts asks optionally for the season (the running one by default) and the period (not known, current, previous, a listed
+week, or a date resolved among installed seasons only). **Manage weeks...** is a visible button on My Progress.
+
 Built on `dev/v0.5.0`: `predictions.py` (engine, pool, actions), `pools/ch7_treasure_hunters.json`, the Predictions page in `gui/app.py`,
 `tests/test_predictions.py` (21) and `tests/test_predictions_ui.py` (7). The preset ships with the package automatically (the build copies
 the whole package folder except templates).

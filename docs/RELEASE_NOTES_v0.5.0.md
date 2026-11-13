@@ -8,7 +8,7 @@ The Predictions update. What do your chests mean for this season's treasure rewa
 and Epic's published odds into chances, forecasts and a bit of perspective on how wild those odds are.
 
 - **My Progress**: your chance for every Treasure Hunters reward, from the Gizmo (1 in 127) to the Weekly Gold Outfit (1 in 1,562,500)
-- Chests and hours to 50% and 90% at your own pace; pick Solo, Duo, Trio or Squad and every card's time changes
+- Chests and hours to 50% and 90% at your own pace; pick Duo, Trio or Squad and every card shows your team's model
 - A probability curve for every reward: what "1 in 127" really means
 - Gizmo cycles, weekly rewards that start again at the Sunday rotation, and a sentence on how normal (or unlucky) your wait is
 - **What If?**: roll a random first drop and see how many chests it could take
@@ -35,9 +35,10 @@ sentence on how unusual your wait is ("Perfectly normal: 41% of players would st
 - **Gizmos** start a new cycle by themselves at 90% (292 chests).
 - **Weekly rewards** start again at the Sunday rotation, 9 AM New York time. **Pirate Shop Access** runs for the whole season.
 - **Start new cycle** counts from now (to help a friend, say); **Mark obtained** stops that reward's chance with the date. Both have Undo.
-- **Solo / Duo / Trio / Squad** changes only the time: you plus teammates who each open 80% as many chests as you (Duo 1.8x, Trio 2.6x,
-  Squad 3.4x your pace), a safe average, with rewards shared (not confirmed by Epic). The app never tries to detect your team, and the
-  chance per chest never changes.
+- **Solo / Duo / Trio / Squad** models a squad player: you plus teammates who each open 80% as many chests as you (Duo 1.8x, Trio 2.6x,
+  Squad 3.4x), with rewards shared (not confirmed by Epic). Every card's percentage, bar, expected number and time are recalculated for
+  that team in each reward's own period, with your own figures beside them. A scenario: nothing is saved, the app never tries to detect
+  your team, the chance per chest never changes, and Solo is your own view.
 - **Pirate Shop Access** and the **Weekly Gold Outfit** get their own full-width cards, the rest follow from the rarest; every reward has
   its colour, and how normal or unusual your wait is shows as a coloured badge.
 - **Probability curve** on every card: the chance of at least one against chests, from 0 toward 99.99%, with the 50%, 90% and 99% marks,
@@ -45,12 +46,12 @@ sentence on how unusual your wait is ("Perfectly normal: 41% of players would st
 
 ### Chests from before the counter
 
-Raise APPROX with **Edit counts** and tick **Count the difference in Predictions**, then say when they were opened: earlier this season
-(week not known), this reward week or last week. Predictions use them; Analytics, chests per hour and per minute, matches and your pace
+Raise APPROX with **Edit counts** and tick **Count the difference in Predictions**, then, if you know, say when they were opened: the
+season (the one running now, or another installed one) and the period (not known, the current or previous reward week, a week from the
+list, or a date). Predictions use them; Analytics, chests per hour and per minute, matches and your pace
 never do. Only the difference from your counter counts, Predictions never use more chests this season than your total (so a Reset and
-typing the total back in adds nothing), and a lower total takes back only what you added. Undo is on the Predictions page. Know
-which weeks they came from? **Assign to weeks...** moves them into those reward weeks, optionally; unassigned chests count for season
-rewards only.
+typing the total back in adds nothing), and a lower total takes back only what you added. Undo is on the Predictions page, and
+**Manage weeks...** moves added chests between weeks later; unassigned chests count for season rewards only.
 
 ### What If?
 

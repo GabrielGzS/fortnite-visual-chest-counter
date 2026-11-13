@@ -171,21 +171,25 @@ odds per chest, the same for every player.
   - **Gizmos** start a new cycle by themselves at 90% (292 chests). A completed cycle is a statistical milestone, not a Gizmo found.
   - **Weekly rewards** start again at the Sunday rotation (9 AM New York time). **Pirate Shop Access** runs for the whole season.
   - **Start new cycle** (to help a friend, say) and **Mark obtained** (with its date, marked as your report) are separate; both have
-    **Undo** and never delete anything. Solo/Duo/Trio/Squad changes only the time: you plus teammates who each open 80% as many
-    chests as you (Duo 1.8x, Trio 2.6x, Squad 3.4x your pace), a safe average; the app never tries to detect your team.
+    **Undo** and never delete anything.
+  - **Solo / Duo / Trio / Squad** is a model for squad players: you plus teammates who each open 80% as many chests as you (Duo 1.8x,
+    Trio 2.6x, Squad 3.4x). Every card's percentage, bar, expected number and time are recalculated as if your team had opened that
+    many chests in each reward's own period, with your own figures shown beside them. A scenario, never saved; the app never tries to
+    detect your team, and Solo is your own view.
   - Pirate Shop Access and the Weekly Gold Outfit have their own full-width cards; each reward has its own colour, and the luck sentence
     is a coloured badge ("Still early", "Perfectly normal" ... "Terrible luck, if you are still waiting").
   - Every card shows the time to 50% and 90% at the selected team's pace, and opens its **Probability curve**: the chance of at least
     one against chests, with the 50%, 90% and 99% marks, the "1 in N" point (after 127 chests, 1 in 127 is 63%: of 100 players, about
-    63 have found one and 37 have not) and where you are.
+    63 have found one and 37 have not), where you are, and the team model's position.
 - **What If?**: **Roll a prediction** draws one random first drop with the real odds (team, finder, hours, how lucky it was), with
   optional Treasure Hour multipliers as a what-if. Nothing there is saved.
 
 Counted from the season's start (1 November 2026) wherever your history has the chests. Chests opened before you used the counter: raise
-APPROX with **Edit counts** and tick **Count the difference in Predictions** (choose the season, this week or last week). Predictions then
-use them; Analytics, chests per hour and per minute never do, and Predictions never use more chests this season than your total.
-Added them with the week not known? **Assign to weeks...** on My Progress puts them in the reward weeks you choose (optional); what you
-leave unassigned counts for season rewards only. Treasure Hours boost a chest only when the pool lists that event's exact times (none yet). The
+APPROX with **Edit counts** and tick **Count the difference in Predictions**. Optionally say when they were opened: the season (the one
+running now by default, or any installed one), then the period not known, the current or previous reward week, a week from the list, or
+a date. Predictions then use them; Analytics, chests per hour and per minute never do, and Predictions never use more chests in a season
+than your total. **Manage weeks...** on My Progress moves added chests between weeks later (optional); what you leave unassigned counts
+for season rewards only. Treasure Hours boost a chest only when the pool lists that event's exact times (none yet). The
 season's end date is an estimate.
 
 ## Fair play and compatibility

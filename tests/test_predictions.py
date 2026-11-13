@@ -348,6 +348,94 @@ def test_assigning_added_chests_to_weeks_only_moves_them():
     assert R.reconcile(18056, 17000, 70, a, R.WEEK, 0) == -1056                                         # or the week you pick
 
 
+def team_state(rid, log, actions=(), now=START + timedelta(days=2), team=1, pool=POOL):
+    return next(s for s in R.progress(pool, log, list(actions), now, team) if s.reward.id == rid)
+
+
+def test_a_team_scenario_models_your_position_times_the_team_and_solo_is_your_actual_view():
+    log = log_of(*spread(2400, timedelta(hours=1), timedelta(hours=40)))
+    rows = [adjust(5000, START + timedelta(hours=41))]
+    p = 1 / 137500
+    solo = team_state("pirate_shop_access", log, rows)
+    assert solo == state("pirate_shop_access", log, rows) and solo.team == 1                       # Solo: exactly the actual view
+    by_team = {t: team_state("pirate_shop_access", log, rows, team=t) for t in (1, 2, 3, 4)}
+    assert len({round(s.chance, 12) for s in by_team.values()}) == 4                                # four different percentages
+    squad = by_team[4]
+    assert abs(squad.cycle_effective - 7400 * 3.4) < 1e-6 and abs(squad.chance - R.chance(7400 * 3.4, p)) < 1e-12
+    assert squad.actual_cycle_chests == 7400 and abs(squad.actual_chance - R.chance(7400, p)) < 1e-12   # the actual kept beside it
+    assert abs(squad.expected - 7400 * 3.4 * p) < 1e-12 and abs(squad.actual_expected - 7400 * p) < 1e-12
+    assert squad.remaining[0.5] == R.more_to(0.5, p, 7400 * 3.4) and squad.pool_chests == 2400            # needed from the model
+
+
+def test_a_team_scenario_keeps_each_rewards_own_period_and_its_odds():
+    rotation = POOL.rotations[0]
+    log = log_of(*spread(500, timedelta(hours=1), rotation - START - timedelta(hours=1)),
+                 *spread(100, rotation - START + timedelta(hours=1), rotation - START + timedelta(hours=20)))
+    weekly = team_state("weekly_loading_screen", log, now=rotation + timedelta(days=1), team=4)
+    assert weekly.actual_cycle_chests == 100 and weekly.cycle_chests == 340                        # this week's chests, never the season's
+    hour = with_hours((timedelta(hours=10), timedelta(hours=12), {"pirate_shop_access": 2}))
+    mixed = log_of(*spread(800, timedelta(hours=1), timedelta(hours=9)), *spread(200, timedelta(hours=10), timedelta(hours=11, minutes=59)))
+    squad = team_state("pirate_shop_access", mixed, team=4, pool=hour)
+    assert abs(squad.cycle_effective - squad.actual_cycle_effective * 3.4) < 1e-9 and squad.actual_cycle_effective > 1000   # boosted, scaled
+
+
+def test_a_team_scenario_gives_gizmo_hypothetical_cycles_and_never_touches_a_report_or_the_saved_rows():
+    log = log_of(*spread(1000, timedelta(hours=1), timedelta(hours=40)))
+    squad = team_state("gizmo", log, team=4)
+    assert (squad.actual_completed, squad.actual_cycle_chests) == (3, 1000 - 3 * 292)               # actual cycles: unchanged
+    assert (squad.completed_cycles, squad.cycle_chests) == (3400 // 292, 3400 % 292)               # the squad's, apart
+    got = action(R.OBTAINED, "weekly_jam_track", START + timedelta(hours=11), aid="o1")
+    rows = [got]
+    reported = team_state("weekly_jam_track", log, rows, team=4)
+    assert reported.frozen and reported.chance == reported.actual_chance and reported.obtained_chance == state("weekly_jam_track", log, rows).obtained_chance
+    assert rows == [got]                                                                              # nothing saved by a scenario
+
+
+def test_periods_have_stable_ids_and_old_rows_still_read():
+    assert POOL.period_id(0) == "2026-11-01" and POOL.period_id(1) == "2026-11-08"
+    assert POOL.period_index("2026-11-08") == 1 and POOL.period_index("1") == 1 and POOL.period_index(1) == 1
+    assert POOL.period_index("2027-01-01") is None and POOL.period_index(99) is None
+    rotation = POOL.rotations[0]
+    now = rotation + timedelta(days=1)
+    by_id = R.Action("p1", R.ADJUST, rotation + timedelta(hours=1), POOL.id, "", None, R.MANUAL, 500, R.WEEK, None, None, "2026-11-08")
+    assert R.added(POOL, [by_id], now).weeks == {1: 500}
+    rows = [adjust(3000, START + timedelta(hours=5)), allocate({"2026-11-01": 1000, "1": 500}, rotation + timedelta(hours=2))]
+    assert R.added(POOL, rows, now).weeks == {0: 1000, 1: 500}                                     # period ids and RC3's indexes alike
+    with tempfile.TemporaryDirectory() as tmp:
+        R.append_action(Path(tmp), R.ADJUST, POOL.id, "", delta=200, scope=R.WEEK, week=1, period="2026-11-08", at=now)
+        R.append_action(Path(tmp), R.ALLOCATE, POOL.id, "", weeks={"2026-11-01": 100}, at=now)
+        read, bad = R.read_actions(Path(tmp))
+        assert bad == 0 and read[0].period == "2026-11-08" and read[1].weeks == {"2026-11-01": 100}
+
+
+def test_several_installed_pools_are_kept_apart_and_a_date_finds_its_pool():
+    data = json.loads(R.DEFAULT_POOL.read_text(encoding="utf-8"))
+    later = dict(data, id="next-pool", name="Next", start="2026-12-06T08:00:00Z", end="2027-01-10T14:00:00Z",
+                 rotations=["2026-12-13T14:00:00Z"])
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "a.json").write_text(json.dumps(data), encoding="utf-8")
+        (Path(tmp) / "b.json").write_text(json.dumps(later), encoding="utf-8")
+        (Path(tmp) / "broken.json").write_text("{", encoding="utf-8")
+        pools, errors = R.load_pools(Path(tmp))
+    assert [p.id for p in pools] == [POOL.id, "next-pool"] and [name for name, _ in errors] == ["broken.json"]
+    first, second = pools
+    assert R.active_pool(pools, START + timedelta(days=3)) is first and R.active_pool(pools, second.start + timedelta(days=1)) is second
+    assert R.active_pool(pools, POOL.end + timedelta(hours=1)) is first                           # between pools: the latest begun
+    assert R.pool_at(pools, START + timedelta(days=8)) == (first, 1) and R.pool_at(pools, START - timedelta(days=1)) == (None, None)
+    rows = [adjust(5000, START + timedelta(hours=5))]
+    assert R.added(second, rows, second.start + timedelta(days=1)).season == 0                     # another season never takes them
+
+
+def test_the_edit_counts_summary_reads_once_for_every_pool():
+    with tempfile.TemporaryDirectory() as tmp:
+        rec = F.Recorder(Path(tmp))
+        rec.run(START + timedelta(hours=2)).chests(*range(60, 3600, 60)).end(3600)
+        R.append_action(rec.folder, R.ADJUST, POOL.id, "", delta=700, scope=R.SEASON, at=START + timedelta(hours=3))
+        summary = R.edit_summary(rec.folder, [POOL], now=START + timedelta(days=1))
+        assert summary[POOL.id]["recorded"] == 59 and summary[POOL.id]["added"].season == 700 and summary[POOL.id]["week"] == 0
+        assert R.edit_summary(rec.folder, [POOL], now=POOL.end + timedelta(days=1))[POOL.id]["week"] is None
+
+
 def test_the_curve_and_short_hours():
     points, end = R.curve(1 / 127)
     assert end == R.chests_to(0.9999, 1 / 127) == 1166 and points[0] == (0.0, 0.0) and abs(points[-1][1] - R.chance(1166, 1 / 127)) < 1e-12

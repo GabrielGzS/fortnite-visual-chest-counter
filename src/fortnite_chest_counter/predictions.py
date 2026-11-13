@@ -35,6 +35,14 @@ week's weekly rewards and the season's). A restart later in the period leaves th
 back from what you added, never below zero, and Predictions never use more chests this season than the new total (reconcile), so editing
 again after more chests, or after a Reset, never counts the same chests twice. Reset changes nothing here.
 
+Team scenarios (Solo, Duo, Trio, Squad) are a view, never saved: your actual position in each reward's own period (its week, or the
+season), in normal-odds chests, times team_factor, as if teammates had opened 80% as many chests as you all along. The chance, the bar,
+the expected number, a Gizmo's hypothetical cycles and the chests still needed all come from that modeled position; the actual ones are
+kept beside them, and Solo is exactly the actual view. A reported reward is never modeled.
+
+Seasons and periods. Every pool file in pools/ is a season; its periods are its weeks (start, rotations, end), named by a stable id: the
+UTC date the period starts. Rows store the pool id and the period id, so a later pool never takes another season's chests.
+
 Assigning added chests to weeks (ALLOCATE): optional. It moves chests you already added between "week not known" and the reward weeks
 that had begun by then; it never adds or removes a chest, and what is not assigned stays for season rewards only. The rows are folded
 in time order, so later Edit counts rows add on top of an allocation, and Undo of an allocation brings back the split before it.
@@ -190,6 +198,19 @@ class Pool:
         """The index of the week `when` falls in (a rotation begins its week); before the start the first, from the end on the last."""
         return bisect_right(self.rotations, when)
 
+    def period_id(self, index):
+        """A period's stable name: the UTC date it starts."""
+        return self.weeks()[index][0].date().isoformat()
+
+    def period_index(self, period):
+        """The index of a period id, a period index, or a digit string (rows written before v0.5.0 RC4); None if unknown."""
+        if isinstance(period, int):
+            return period if 0 <= period < len(self.weeks()) else None
+        if isinstance(period, str) and period.isdigit():
+            return self.period_index(int(period))
+        ids = [self.period_id(i) for i in range(len(self.weeks()))]
+        return ids.index(period) if period in ids else None
+
 
 def _when(text, what):
     try:
@@ -235,6 +256,38 @@ def parse_pool(data):
         raise PoolError("Treasure Hours must not overlap")
     return Pool(data["id"], int(data.get("revision", 1)), data["name"], start, end, bool(data.get("end_estimated")), rotations, tuple(rewards),
                 tuple(data.get("about", [])), tuple(data.get("sources", [])), tuple(hours_list))
+
+
+def load_pools(folder=POOLS_DIR):
+    """Every installed pool, by start. A broken file is skipped and reported, never guessed at. -> ([Pool], [(file name, error)])."""
+    pools, errors = [], []
+    for path in sorted(Path(folder).glob("*.json")):
+        try:
+            pools.append(load_pool(path))
+        except PoolError as error:
+            errors.append((path.name, str(error)))
+    return sorted(pools, key=lambda pool: pool.start), errors
+
+
+def active_pool(pools, now):
+    """The pool running now; otherwise the latest that has begun; otherwise the first. None without pools."""
+    now = now.astimezone(UTC)
+    running = [pool for pool in pools if pool.start <= now < pool.end]
+    begun = [pool for pool in pools if pool.start <= now]
+    if running:
+        return running[-1]
+    if begun:
+        return begun[-1]
+    return pools[0] if pools else None
+
+
+def pool_at(pools, when):
+    """(pool, period index) that `when` falls in, or (None, None): a date no installed pool covers is never guessed at."""
+    when = when.astimezone(UTC)
+    for pool in pools:
+        if pool.start <= when < pool.end:
+            return pool, pool.week_of(when)
+    return None, None
 
 
 def load_pool(path=DEFAULT_POOL):
@@ -306,7 +359,8 @@ class Action:
     delta: int = 0                         # ADJUST: chests added (or taken back)
     scope: object = None                   # ADJUST: SEASON or WEEK
     week: object = None                    # ADJUST with WEEK: the 0-based reward week
-    weeks: object = None                   # ALLOCATE: {week: chests} of the chests you added
+    weeks: object = None                   # ALLOCATE: {period id or index: chests} of the chests you added
+    period: object = None                  # ADJUST with WEEK: the period's stable id (RC4 on); `week` is kept for older rows
 
 
 def read_actions(folder):
@@ -331,28 +385,31 @@ def read_actions(folder):
             if row["kind"] == UNDO and not isinstance(row.get("undoes"), str):
                 raise ValueError
             if row["kind"] == ADJUST and (type(row.get("delta")) is not int or row.get("scope") not in (SEASON, WEEK)
-                                          or (row["scope"] == WEEK and (type(row.get("week")) is not int or row["week"] < 0))):
+                                          or (row["scope"] == WEEK and not ((type(row.get("week")) is int and row["week"] >= 0)
+                                                                           or isinstance(row.get("period"), str)))):
                 raise ValueError
             allocation = None
             if row["kind"] == ALLOCATE:
                 raw = row.get("weeks")
-                if not isinstance(raw, dict) or any(not str(k).isdigit() or type(v) is not int or v < 0 for k, v in raw.items()):
+                if not isinstance(raw, dict) or any(not isinstance(k, str) or type(v) is not int or v < 0 for k, v in raw.items()):
                     raise ValueError
-                allocation = {int(k): v for k, v in raw.items()}
+                allocation = dict(raw)
         except (KeyError, TypeError, ValueError):
             bad += 1
             continue
         seen.add(row["id"])
         actions.append(Action(row["id"], row["kind"], at.astimezone(UTC), row["pool"], row["reward"], row.get("undoes"), str(row.get("source", MANUAL)),
-                              row.get("delta", 0), row.get("scope"), row.get("week"), allocation))
+                              row.get("delta", 0), row.get("scope"), row.get("week"), allocation, row.get("period")))
     return actions, bad
 
 
-def append_action(folder, kind, pool, reward, undoes=None, chests=None, at=None, delta=None, scope=None, week=None, weeks=None):
+def append_action(folder, kind, pool, reward, undoes=None, chests=None, at=None, delta=None, scope=None, week=None, weeks=None, period=None):
     """One row in the profile's predictions.jsonl, on disk before returning. -> its id."""
-    if kind not in ACTION_KINDS or (kind == ADJUST and (type(delta) is not int or scope not in (SEASON, WEEK) or (scope == WEEK) != (type(week) is int))):
+    in_week = type(week) is int or isinstance(period, str)
+    if kind not in ACTION_KINDS or (kind == ADJUST and (type(delta) is not int or scope not in (SEASON, WEEK) or (scope == WEEK) != in_week)):
         raise ValueError(kind)
-    if kind == ALLOCATE and (not isinstance(weeks, dict) or any(type(w) is not int or w < 0 or type(n) is not int or n < 0 for w, n in weeks.items())):
+    if kind == ALLOCATE and (not isinstance(weeks, dict) or any(not ((type(w) is int and w >= 0) or isinstance(w, str)) or type(n) is not int or n < 0
+                                                                for w, n in weeks.items())):
         raise ValueError(kind)
     row_id = f"prediction:{uuid.uuid4().hex}"
     row = {"kind": kind, "schema": H.SCHEMA, "id": row_id, "at": (at or datetime.now(UTC)).astimezone().isoformat(timespec="milliseconds"),
@@ -362,7 +419,9 @@ def append_action(folder, kind, pool, reward, undoes=None, chests=None, at=None,
     if chests is not None:
         row["chests"] = chests                                # for reading the file by eye; the numbers are always recalculated
     if kind == ADJUST:
-        row.update(delta=delta, scope=scope, **({"week": week} if scope == WEEK else {}))
+        row.update(delta=delta, scope=scope)
+        if scope == WEEK:
+            row.update({k: v for k, v in (("week", week), ("period", period)) if v is not None})
     if kind == ALLOCATE:
         row["weeks"] = {str(w): n for w, n in sorted(weeks.items()) if n}
     H._append_line(Path(folder) / ACTIONS_FILE, H._encode(row))
@@ -393,15 +452,20 @@ def added(pool, actions, now):
         if a.kind == ADJUST and a.scope == SEASON:
             unknown = max(unknown + a.delta, 0)
         elif a.kind == ADJUST:
-            if a.week < len(bounds):
-                weeks[a.week] = max(weeks.get(a.week, 0) + a.delta, 0)
+            w = pool.period_index(a.period) if a.period is not None else pool.period_index(a.week)
+            if w is not None:
+                weeks[w] = max(weeks.get(w, 0) + a.delta, 0)
         else:
             left, weeks = unknown + sum(weeks.values()), {}
-            for w in sorted(a.weeks):
-                if w < len(bounds) and bounds[w][0] <= a.at:
-                    n = min(a.weeks[w], left)
-                    if n:
-                        weeks[w], left = n, left - n
+            wanted = {}
+            for key, n in a.weeks.items():
+                w = pool.period_index(key)
+                if w is not None and bounds[w][0] <= a.at:
+                    wanted[w] = wanted.get(w, 0) + n
+            for w in sorted(wanted):
+                n = min(wanted[w], left)
+                if n:
+                    weeks[w], left = n, left - n
             unknown = left
     weeks = {w: n for w, n in weeks.items() if n > 0}
     return Added(unknown + sum(weeks.values()), weeks, unknown, rows[-1] if rows else None)
@@ -446,10 +510,17 @@ class RewardState:
     obtained_chance: object                # the chance in its cycle when it was reported
     frozen: bool                           # obtained, and no new cycle since
     last_action: object                    # the latest standing action in this frame, for Undo
+    team: int = 1                          # the scenario these figures are modeled for (1: your actual figures)
+    actual_cycle_chests: int = 0           # your actual figures, whatever the scenario
+    actual_cycle_effective: float = 0.0
+    actual_chance: float = 0.0
+    actual_completed: int = 0
+    actual_expected: float = 0.0
 
 
-def reward_state(pool, reward, log, actions, now, extra=None):
+def reward_state(pool, reward, log, actions, now, extra=None, team=1):
     now = now.astimezone(UTC)
+    factor = team_factor(team)
     extra = extra or added(pool, actions, now)
     hours_ = pool.treasure_hours
     weeks = pool.weeks()
@@ -471,29 +542,36 @@ def reward_state(pool, reward, log, actions, now, extra=None):
     n, e = log.count(cycle_start, stop) + head, log.effective(cycle_start, stop, reward, hours_) + head
     boosted = log.boosted_count(cycle_start, stop, reward, hours_)
     milestone = chests_to(CYCLE_MILESTONE, reward.p)
-    completed = 0
+    scale = 1.0 if frozen else factor                       # a reported reward is never modeled
+    completed = actual_completed = 0
     if reward.kind == REPEATABLE:
         bounds = [start, *restarts, end]
-        completed = sum(int((log.effective(a, b, reward, hours_) + (mine_added if a == start else 0)) // milestone)
-                        for a, b in zip(bounds, bounds[1:]))
-        e %= milestone
-        n = int(e)
+        segments = [log.effective(a, b, reward, hours_) + (mine_added if a == start else 0) for a, b in zip(bounds, bounds[1:])]
+        actual_completed = sum(int(seg // milestone) for seg in segments)
+        completed = sum(int(seg * scale // milestone) for seg in segments)
+        actual_e = (segments[-1] if segments else 0.0) % milestone
+        e = (segments[-1] if segments else 0.0) * scale % milestone
+        actual_n, n = int(actual_e), int(e)
+    else:
+        actual_e, actual_n = e, n
+        e, n = e * scale, round(n * scale)
     report_chance = None
     if report is not None:
         began = max([start, *(t for t in restarts if t <= report.at)])
         report_chance = chance(log.effective(began, report.at, reward, hours_) + (mine_added if began == start else 0), reward.p)
     in_pool = (pool.start, min(now, pool.end))
-    remaining = None if frozen else {m: more_to(m, reward.p, e) for m in MILESTONES}
-    expected = log.expected(*in_pool, reward, hours_) + extra.season * reward.p
+    remaining = None if frozen else {m: more_to(m, reward.p, e) for m in MILESTONES}      # from the modeled position, in team chests
+    actual_expected = log.expected(*in_pool, reward, hours_) + extra.season * reward.p
     return RewardState(reward, (start, finish), week, len(weeks), now >= pool.start, now >= finish, cycle_start, n, e, boosted, chance(e, reward.p),
-                       milestone, remaining, completed, log.count(*in_pool), mine_added, expected, report, report_chance, frozen,
-                       mine[-1] if mine else None)
+                       milestone, remaining, completed, log.count(*in_pool), mine_added, actual_expected * factor, report, report_chance, frozen,
+                       mine[-1] if mine else None, team, actual_n, actual_e, chance(actual_e, reward.p), actual_completed, actual_expected)
 
 
-def progress(pool, log, actions, now):
+def progress(pool, log, actions, now, team=1):
+    """Every reward's state, modeled for `team` (1: your actual figures). Cheap: the page calls it again when the team changes."""
     live = effective(actions)
     extra = added(pool, live, now.astimezone(UTC))
-    return [reward_state(pool, reward, log, live, now, extra) for reward in pool.rewards]
+    return [reward_state(pool, reward, log, live, now, extra, team) for reward in pool.rewards]
 
 
 # ------------------------------------------------------------------ what it means (fixed wording, never generated)
@@ -603,6 +681,8 @@ class View:
     week_recorded: tuple                   # recorded chests in each reward week so far
     now: datetime
     bad_lines: int
+    log: object = None                     # the recorded chests and every action read, so a team scenario needs no new read
+    actions: tuple = ()
 
 
 def load_view(folder, pool, now=None, counting_now=False):
@@ -619,4 +699,16 @@ def load_view(folder, pool, now=None, counting_now=False):
     week_start, week_end = pool.weeks()[week]
     per_week = tuple(log.count(a, min(now, b)) for a, b in pool.weeks())
     return View(pool, progress(pool, log, actions, now), rate, period, log.count(pool.start, min(now, pool.end)), extra,
-                min(inside) if inside else None, week, log.count(week_start, min(now, week_end)) + extra.weeks.get(week, 0), per_week, now, bad)
+                min(inside) if inside else None, week, log.count(week_start, min(now, week_end)) + extra.weeks.get(week, 0), per_week, now, bad,
+                log, tuple(actions))
+
+
+def edit_summary(folder, pools, now=None):
+    """What the Edit counts dialog needs for every installed pool, from one read: {pool id: {"recorded", "added", "week"}}. "week" is the
+    period running now, or None when the pool is not running."""
+    from fortnite_chest_counter import progression as P
+    now = (now or datetime.now(UTC)).astimezone(UTC)
+    log = ChestLog(P.load(folder, now=now).events)
+    live = effective(read_actions(folder)[0])
+    return {pool.id: {"recorded": log.count(pool.start, min(now, pool.end)), "added": added(pool, live, now),
+                      "week": pool.week_of(now) if pool.start <= now < pool.end else None} for pool in pools}
