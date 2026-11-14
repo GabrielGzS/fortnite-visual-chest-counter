@@ -130,6 +130,12 @@ LANGUAGE_CHOICES = (("English", ["en"]), ("Portuguese (Brazil)", ["pt"]), ("Both
 HUD_CHOICES = (("standard", "Standard (every HUD the counter supported before)"),
                ("75", "Fortnite HUD Scale 75% (experimental)"))
 HUD_VALUES = tuple(key for key, _ in HUD_CHOICES)
+HUD_NAMES = {"standard": "Standard", "75": "75% (experimental)"}
+
+
+def hud_name(key):
+    """The short name of a HUD Scale value, as Settings, the activity log and diagnostics show it."""
+    return HUD_NAMES.get(key, str(key))
 
 
 # The app's "Pictures analysed per second" choice -> [detector] process_fps (config.toml still accepts any 5-30).

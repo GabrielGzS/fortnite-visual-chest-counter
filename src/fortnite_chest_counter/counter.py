@@ -737,6 +737,7 @@ def cmd_simulate(args):
     print(f"Simulating {video.name} from {start:.0f}s{' to ' + str(args.until) + 's' if args.until else ''} "
           f"({'real time' if args.realtime else 'fast'}); config {origin}; state {session.state_path}; "
           f"OBS files {session.obs_dir}; log {session.log.path}")
+    print(hud_line(cfg))
 
     est = estimator.ChestEstimator()
     source = Mp4FrameSource(video, fps, start, args.until)
@@ -1384,6 +1385,7 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
     res, in_fps = info["input_resolution"], info["input_fps"]
     CONSOLE.info((f"Connected: video {res[0]}x{res[1]} @ {in_fps} fps" if res else "Connected.")
                  + f" -> analysed at {fps} frames per second")
+    CONSOLE.info(hud_line(cfg))
     friendly_rate_note(res, kind)
     if control is not None:
         CONSOLE.emit("connected", source=source.label, kind=kind, resolution=res, input_fps=in_fps, process_fps=fps,
@@ -1413,7 +1415,8 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
     session.log.write({"event": "session_start", "app_version": __version__, "source_type": kind, "source": source.label,
                        "input_resolution": res, "input_fps": in_fps, "normalized": [sources.WIDTH, sources.HEIGHT],
                        "process_fps": fps, "session_started": now_iso(), "config": origin,
-                       "ui": "app" if control is not None else "console", "profile": profile_label(cfg)})
+                       "ui": "app" if control is not None else "console", "profile": profile_label(cfg),
+                       "hud": cfg["detector"].get("hud", "standard")})
     history = _open_history(cfg, session, kind)
     tracker = _open_tracker(cfg, session, _tracker_history(cfg, history), source)
     beat = HistoryHeartbeat(history, cfg["match"]["heartbeat_seconds"], lambda: (source.frames_processed, source.frames_dropped)) if history is not None else None
@@ -1601,6 +1604,13 @@ def cmd_devices(args):
 def profile_label(cfg):
     """The profile name recorded in logs and captures (None when an explicit --state file is used)."""
     return (cfg.get("profile") or {}).get("name")
+
+
+def hud_line(cfg):
+    """The HUD Scale this run's detector really uses (v0.5.1: a HUD Scale chosen in Settings but never saved was impossible to spot)."""
+    name = profile_label(cfg)
+    return (f"Fortnite HUD Scale: {settings.hud_name(cfg['detector'].get('hud', 'standard'))}"
+            + (f" (profile \"{name}\")" if name else ""))
 
 
 def show_counts(session):
@@ -1964,6 +1974,7 @@ def cmd_diagnostics(args):
     try:
         reg = profiles.load(cfg["state"]["path"], warn=lambda m: out(f"  ! {m}"))
         out(f"Profiles:         {len(reg['profiles'])} (active: {profiles.active(reg)['name']})")
+        out(f"HUD Scale:        {settings.hud_name(profiles.active(reg).get('hud') or cfg['detector']['hud'])} (active profile)")
     except Exception as error:
         out(f"Profiles:         could not be read ({error})")
     det = cfg["detector"]

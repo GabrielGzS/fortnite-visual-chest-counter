@@ -23,7 +23,7 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QDate, QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QDate, QEvent, QObject, QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap, QTextDocument
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -355,26 +355,73 @@ def card(title=None, hint=None):
     return frame, layout
 
 
-def page_layout(widget, title, subtitle):
-    """A scrollable page with a title. -> the content layout."""
+def page_layout(widget, title, subtitle, header=None):
+    """A scrollable page with a title. -> the content layout. `header`: widgets kept beside the title in a bar that stays at the top
+    while the page scrolls (Settings: its save status and Save button); without it the title scrolls with the page."""
     widget.setObjectName("page")
     outer = QVBoxLayout(widget)
     outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(0)
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    widget.page_scroll = scroll
     inner = QWidget()
     inner.setObjectName("page")
     layout = QVBoxLayout(inner)
     layout.setContentsMargins(30, 24, 30, 24)
     layout.setSpacing(16)
-    layout.addWidget(label(title, "pageTitle"))
+    if header:
+        bar = QWidget()
+        bar.setObjectName("page")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(30, 16, 30, 12)
+        row.setSpacing(14)
+        row.addWidget(label(title, "pageTitle"))
+        for part in header:
+            row.addWidget(part, 1 if isinstance(part, QLabel) else 0)
+        outer.addWidget(bar)
+        outer.addWidget(hline())
+        layout.setContentsMargins(30, 14, 30, 24)
+    else:
+        layout.addWidget(label(title, "pageTitle"))
     if subtitle:
         layout.addWidget(label(subtitle, "pageSub", wrap=True))
     scroll.setWidget(inner)
     outer.addWidget(scroll)
     return layout
+
+
+class WheelToPage(QObject):
+    """A mouse wheel turned over a choice or number box scrolls the page instead of changing the setting under the pointer (v0.5.1:
+    scrolling down Settings changed settings by accident). Clicks and the keyboard still change them; an open drop-down list still scrolls."""
+
+    def __init__(self, scroll):
+        super().__init__(scroll)
+        self.scroll = scroll
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Wheel:
+            QApplication.sendEvent(self.scroll.verticalScrollBar(), event)
+            return True
+        return False
+
+
+def ask_unsaved(parent, action):
+    """Settings has changes nobody saved. -> "save", "discard" or "stay"."""
+    box = QMessageBox(parent)
+    box.setWindowTitle("Unsaved settings")
+    box.setIcon(QMessageBox.Warning)
+    box.setText(f"You changed settings without saving them.\n\nSave them before you {action}?")
+    save = box.addButton("Save changes", QMessageBox.AcceptRole)
+    discard = box.addButton("Discard changes", QMessageBox.DestructiveRole)
+    stay = box.addButton("Stay on Settings", QMessageBox.RejectRole)
+    box.setDefaultButton(save)
+    box.setEscapeButton(stay)
+    box.exec()
+    clicked = box.clickedButton()
+    return "save" if clicked is save else "discard" if clicked is discard else "stay"
 
 
 def hline():
@@ -1897,8 +1944,13 @@ class SettingsPage(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win = win
-        layout = page_layout(self, "Settings", "Changes are saved in config.toml next to the app and are used the next time "
-                                               "you press Start counting.")
+        # v0.5.1: the save status and Save stay in view at the top while the page scrolls (Save used to be at the very bottom, with nothing
+        # telling you a change was not saved yet - a 75% HUD Scale chosen but never saved looked exactly like one that was)
+        self.saved = label("", "hint", wrap=True)
+        self.save_button = button("Save changes", "primary", on_click=self.save)
+        self._saved_values = None                  # what the widgets showed when the settings were last loaded or saved
+        layout = page_layout(self, "Settings", "Changes are saved in config.toml next to the app (the HUD Scale in the profile) and are "
+                                               "used the next time you press Start counting.", header=(self.saved, self.save_button))
         box, box_layout = card("Fortnite language", "The language your Fortnite is set to - the counter reads the word in the "
                                                     "chest pop-up (CHEST / BAÚ). \"Both\" checks the two words all the time: "
                                                     "only useful for mixed footage. One language avoids a small risk of false "
@@ -2019,19 +2071,72 @@ class SettingsPage(QWidget):
         row.addStretch(1)
         box_layout.addLayout(row)
         layout.addWidget(box)
-
-        row = QHBoxLayout()
-        self.saved = label("", "hint")
-        row.addWidget(self.saved, 1)
-        row.addWidget(button("Save", "primary", on_click=self.save))
-        layout.addLayout(row)
         layout.addStretch(1)
 
+        self.wheel_guard = WheelToPage(self.page_scroll)
+        for box in self.findChildren(QComboBox) + self.findChildren(QSpinBox):
+            box.setFocusPolicy(Qt.StrongFocus)                  # the wheel neither changes nor focuses it
+            box.installEventFilter(self.wheel_guard)
+            (box.valueChanged if isinstance(box, QSpinBox) else box.currentIndexChanged).connect(self._changed)
+        for box in self.findChildren(QCheckBox):
+            box.toggled.connect(self._changed)
+        self._set_status("clean")
+
+    # ---- unsaved changes
+    def _values(self):
+        """Every editable setting as the widgets show it, in saved units."""
+        return (self.language.currentData(), self.hud.currentData(), self.fps.currentData(), self.logging.isChecked(),
+                self.snapshots.isChecked(), self.lossless.isChecked(), self.match_on.isChecked(), self.heartbeat.currentData(),
+                self.remember_window.isChecked(), self.update_auto.isChecked(), self.update_bandwidth.currentData(),
+                self.update_limit.value() * (self.update_unit.currentData() or 1))
+
+    def is_dirty(self):
+        return self._saved_values is not None and self._values() != self._saved_values
+
+    def _changed(self, *_):
+        if self._saved_values is None:                          # still filling the widgets
+            return
+        if self.is_dirty():
+            self._set_status("unsaved")
+        elif self._status == "unsaved":                         # changed back to what is saved
+            self._set_status("clean")
+
+    def _set_status(self, status, text=None):
+        self._status = status
+        if status == "saved":
+            words, color, bold = ("✓ Settings saved." + (" Stop and start counting to use the new settings." if self.win.worker.running() else ""),
+                                  theme.CERTAIN, True)
+        else:
+            words, color, bold = {"clean": ("All changes saved", theme.MUTED, False), "unsaved": ("● Unsaved changes", theme.APPROX, True),
+                                  "error": (f"Not saved: {text}", theme.REJECT, True)}[status]
+        self.saved.setText(words)
+        self.saved.setStyleSheet(f"color: {color};" + (" font-weight: 600;" if bold else ""))
+        self.save_button.setEnabled(status in ("unsaved", "error"))
+
+    def confirm_leave(self, action="leave Settings"):
+        """Before the page is left (another page, a profile switch on the Dashboard, closing the app): unsaved changes are saved, discarded
+        or kept by staying, as the user chooses - never dropped silently. -> True if leaving may go ahead. A page nobody can see asks nothing."""
+        if not self.is_dirty() or not self.isVisible():
+            return True
+        choice = ask_unsaved(self, action)
+        if choice == "save":
+            return self.save()
+        if choice == "discard":
+            self.load()
+            return True
+        return False
+
+    def _hud_text(self, cfg):
+        return (f"Saved for the profile \"{cfg['profile']['name']}\": {settings.hud_name(cfg['detector']['hud'])}. "
+                "Each profile keeps its own (switch profiles on the Dashboard).")
+
     def load(self):
+        """The saved settings into the widgets: whatever was changed and not saved is replaced."""
+        self._saved_values = None
         cfg, _ = load_cfg()
         self.language.setCurrentIndex(settings.language_choice(cfg["detector"]["languages"]))
         self.hud.setCurrentIndex(max(self.hud.findData(cfg["detector"]["hud"]), 0))
-        self.hud_profile.setText(f"Saved for the profile \"{cfg['profile']['name']}\" (switch profiles on the Dashboard).")
+        self.hud_profile.setText(self._hud_text(cfg))
         fps = cfg["detector"]["process_fps"]
         self.fps.blockSignals(True)
         self.fps.clear()
@@ -2061,7 +2166,8 @@ class SettingsPage(QWidget):
         self._limit_unit_changed()
         self.update_limit.setValue(limit // 1000 if in_mb else limit)
         self._bandwidth_changed()
-        self.saved.setText("")
+        self._saved_values = self._values()
+        self._set_status("clean")
 
     def _bandwidth_changed(self, _index=None):
         mode = self.update_bandwidth.currentData()
@@ -2084,7 +2190,9 @@ class SettingsPage(QWidget):
                               "A value set in config.toml. 15 per second is what the counter was tested with.")
 
     def save(self):
+        """Write every setting (config.toml; the HUD Scale into the active profile). -> True when saved and read back as shown."""
         langs = self.language.currentData()
+        self.save_button.setEnabled(False)                      # while saving
         try:
             C.update_config_file(config_file(), "detector", {"languages": langs, "process_fps": self.fps.currentData()})
             cfg, _ = load_cfg()                                    # the HUD Scale belongs to the active profile, not to config.toml
@@ -2102,12 +2210,21 @@ class SettingsPage(QWidget):
                                                            "custom_limit_kb_per_second": self.update_limit.value() * self.update_unit.currentData()})
             if not self.remember_window.isChecked():
                 window_file().unlink(missing_ok=True)   # off = back to the default layout, also if switched on again later
+            # read back what the next Start counting will use, so "saved" is never shown for a value that did not stick
+            cfg, _ = load_cfg()
+            det = cfg["detector"]
+            if (det["languages"], det["process_fps"], det["hud"]) != (langs, self.fps.currentData(), self.hud.currentData()):
+                raise C.UserError(f"the settings read back differently (languages {det['languages']}, {det['process_fps']} per second, "
+                                  f"HUD Scale {settings.hud_name(det['hud'])}); check config.toml")
         except (C.UserError, OSError, profiles.ProfileError) as error:
+            self._set_status("error", str(error))
             show_error(self, str(error))
-            return
-        self.saved.setText("Saved." + (" Stop and start counting to use the new settings."
-                                       if self.win.worker.running() else ""))
+            return False
+        self._saved_values = self._values()
+        self.hud_profile.setText(self._hud_text(cfg))
+        self._set_status("saved")
         self.win.update_game_idle()
+        return True
 
     def _open_captures(self):
         cfg, _ = load_cfg()
@@ -4067,6 +4184,12 @@ class MainWindow(QMainWindow):
         self.go_to(self.pages.indexOf(page))
 
     def _page_changed(self, index):
+        here = self.pages.indexOf(self.settings_page)
+        if self.pages.currentIndex() == here and index != here and not self.settings_page.confirm_leave():
+            self.nav.blockSignals(True)                         # "Stay on Settings": the sidebar goes back to Settings
+            self.nav.setCurrentRow(here)
+            self.nav.blockSignals(False)
+            return
         self.pages.setCurrentIndex(index)
         page = self.pages.widget(index)
         if page is self.overlay:
@@ -5121,6 +5244,9 @@ class MainWindow(QMainWindow):
 
     # ---- closing
     def closeEvent(self, event):
+        if not self.quit_when_stopped and not self.settings_page.confirm_leave("close the app"):
+            event.ignore()
+            return
         if self.worker.running():
             if not self.quit_when_stopped:
                 if not ask(self, "Stop counting?", "The counter is running. Stop counting and close the app?\n\n"
