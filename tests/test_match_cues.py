@@ -190,11 +190,14 @@ def test_v041_templates_on_the_maintainers_footage():
 CUES75 = np.load(HERE / "fixtures" / "match" / "user_20261112_cues75.npz")
 
 
-def frame75(row):
-    bits = np.unpackbits(CUES75["masks"][row])
+CUES1114 = np.load(HERE / "fixtures" / "match" / "user_20261114_cues75.npz")
+
+
+def frame75(row, fixture=CUES75):
+    bits = np.unpackbits(fixture["masks"][row])
     frame = np.full((720, 1280, 3), BLANK, np.uint8)
     offset = 0
-    for x0, y0, x1, y1 in CUES75["boxes"]:
+    for x0, y0, x1, y1 in fixture["boxes"]:
         size = (y1 - y0) * (x1 - x0)
         mask = bits[offset:offset + size].reshape(y1 - y0, x1 - x0).astype(bool)
         offset += size
@@ -215,6 +218,27 @@ def test_hud_75_match_text_on_the_maintainers_footage():
             assert abs(scores[signal] - CUES75["scores"][i][j]) < 1e-5, (where, signal)
             assert (scores[signal] >= M.SCORE_THRESHOLD) if CUES75["expected"][i][j] else (scores[signal] <= 0.40), (where, signal, scores[signal])
     assert all(CUES75["expected"][:, j].sum() >= 2 for j in range(len(signals)))
+
+
+def test_hud_75_match_text_on_a_recording_the_templates_were_not_cut_from():
+    """v0.5.1 (research/user_cue_fixture.py 1114): WAITING FOR PLAYERS, LAUNCHING IN and YOU PLACED on the maintainer's second 75%
+    recording are read with the 75% templates (0.71-0.89; the rest <= 0.22). The Standard templates read none of them: that is why the
+    live session, which ran with Standard, left the match Partial."""
+    reader, standard = M.CueReader(hud="75"), M.CueReader()
+    signals = [str(s) for s in CUES1114["signals"]]
+    # the fixture stores the 75% templates' boxes; victory_small's box is only partly inside them, and on the death screen that template
+    # gives victory_royale its best (low) score, so only its limit is checked (no Victory on this recording)
+    whole = set(signals) - {"victory_royale"}
+    for i in range(len(CUES1114["times"])):
+        frame, where = frame75(i, CUES1114), str(CUES1114["where"][i])
+        scores = reader.read(frame, signals)
+        for j, signal in enumerate(signals):
+            if signal in whole:                               # every box it reads is in the fixture: the real frame's score exactly
+                assert abs(scores[signal] - CUES1114["scores"][i][j]) < 1e-5, (where, signal)
+            assert (scores[signal] >= M.SCORE_THRESHOLD) if CUES1114["expected"][i][j] else (scores[signal] <= 0.40), (where, signal, scores[signal])
+            if CUES1114["expected"][i][j]:
+                assert standard.read(frame, [signal])[signal] < M.SCORE_THRESHOLD, (where, signal)
+    assert [int(CUES1114["expected"][:, j].sum()) for j in range(len(signals))] == [2, 2, 2, 0]
 
 
 def test_the_tracker_reads_the_profiles_hud_templates():

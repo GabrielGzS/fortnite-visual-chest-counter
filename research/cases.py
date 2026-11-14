@@ -3,10 +3,11 @@ Real-world detection cases (tests/cases/cases.json): every confirmed failure fro
 truth labels, so each detector change is measured against all of them (misses, duplicates, false counts).
 
     python research/cases.py fetch --from "C:/.../captures"   copy the needed 10 s segments into samples/cases/ (not in Git)
-    python research/cases.py run [--case NAME ...] [--set NAME=value ...] [--json OUT]
+    python research/cases.py run [--case NAME ...] [--set NAME=value ...] [--hud standard|75] [--json OUT]
     python research/cases.py fixtures                          write tests/fixtures/popups/<case>.npz (pop-up box masks)
 
-`run` replays the full RGB frames through the real ChestEstimator (current code, default [detector] settings);
+`run` replays the full RGB frames through the real ChestEstimator (current code, default [detector] settings; a case with
+"profile_hud" runs with that HUD Scale, as its profile would, unless --hud says otherwise);
 --set overrides estimator constants first (e.g. --set SMALL_HUD_POPUPS=False) to compare variants. A detector event
 matches a truth row if it starts within [t - 0.5, t + 2.5] s; a second event on the same truth is a DUPLICATE; an event
 near no chest (or near a not_chest row) is FALSE.
@@ -137,8 +138,8 @@ def case_frames(case, root=FOOTAGE):
             p.wait()
 
 
-def run_estimator(frames, sets=()):
-    E.configure(settings.DEFAULTS["detector"])
+def run_estimator(frames, sets=(), hud="standard"):
+    E.configure(dict(settings.DEFAULTS["detector"], hud=hud))
     for k, v in sets:
         setattr(E, k, v)
     est = E.ChestEstimator()
@@ -184,7 +185,7 @@ def describe(e):
     return f"{e['time']:.2f}s {kind} {e['adjusted_tier']}{extra}"
 
 
-def run(names, sets, out=None, quiet=False):
+def run(names, sets, out=None, quiet=False, hud=None):
     cases = load_cases()
     summary = {}
     for name in names or cases:
@@ -192,7 +193,7 @@ def run(names, sets, out=None, quiet=False):
         if case.get("known_limitation"):
             continue
         try:
-            events, ms, est = run_estimator(case_frames(case), sets)
+            events, ms, est = run_estimator(case_frames(case), sets, hud or case.get("profile_hud", "standard"))
         except FileNotFoundError as error:
             print(f"{name}: SKIPPED ({error})")
             continue
@@ -203,7 +204,7 @@ def run(names, sets, out=None, quiet=False):
                          "ms_mean": round(float(np.mean(ms)), 2), "ms_p99": round(float(np.percentile(ms, 99)), 1),
                          "types": [(c["type"], c["hits"][0].get("chest_type") if c["hits"] else None) for c in chests]}
         if not quiet:
-            print(f"\n=== {name}  ({case['source']}; HUD {case['hud']})")
+            print(f"\n=== {name}  ({case['source']}; HUD {case['hud']}; profile HUD Scale {hud or case.get('profile_hud', 'standard')})")
             for c in chests:
                 hit = "; ".join(describe(e) for e in c["hits"]) or "MISSED"
                 print(f"  {c['t']:7.2f}s {c['what']:10s} {c['type']:6s} {c['text'][:44]:44s} -> {hit}")
@@ -248,6 +249,7 @@ def main():
     r.add_argument("--set", action="append", default=[])
     r.add_argument("--json")
     r.add_argument("--quiet", action="store_true")
+    r.add_argument("--hud", choices=settings.HUD_VALUES, help="every case with this HUD Scale (default: the case's profile_hud, else standard)")
     fx = sub.add_parser("fixtures")
     fx.add_argument("--case", action="append", help="only these cases (the others' files stay untouched)")
     a = ap.parse_args()
@@ -255,7 +257,7 @@ def main():
         fetch(a.src)
     elif a.cmd == "run":
         sets = [(k, ast.literal_eval(v)) for k, v in (s.split("=", 1) for s in a.set)]
-        run(a.case, sets, a.json, a.quiet)
+        run(a.case, sets, a.json, a.quiet, a.hud)
     else:
         fixtures(a.case)
 

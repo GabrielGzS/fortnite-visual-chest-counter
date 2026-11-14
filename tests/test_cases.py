@@ -7,7 +7,14 @@ pop-up decisions are the ones the full footage gives (research/cases.py run chec
 present). The other clues (prompt, sprite tag, ammo) see an empty picture here.
 
 Every confirmed failure becomes a case: add it to cases.json, run `research/cases.py fetch` + `fixtures`, add a check.
-Run:   python tests/test_cases.py     (or pytest)
+A case with "profile_hud" is footage of that Fortnite HUD Scale: it is checked with that profile setting (v0.5.1).
+
+Speed (v0.5.1): a replay is the real detector, about 16 ms a frame, and many checks replay the same case under the same rules. Each
+distinct replay - case, channel switches, HUD Scale and the value of every detector constant - now runs once per process and is reused
+(as a copy): 21 checks took 5 min 45 s before, 24 checks with six more cases take about 3 min 40 s. REPLAY_CACHE = False turns that
+off, for a check that changes the detector's code rather than its constants.
+Run:   python tests/test_cases.py          (or pytest)
+       python tests/test_cases.py 75       only the checks with "75" in their name: the HUD Scale checks, about 1 min
 """
 
 import sys
@@ -15,7 +22,9 @@ from pathlib import Path as _P
 
 sys.path.insert(0, str(_P(__file__).resolve().parent.parent / "src"))   # run without installing
 
+import copy
 import json
+import types
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +36,8 @@ from fortnite_chest_counter.detection import visual as V
 HERE = Path(__file__).resolve().parent
 CASES = json.loads((HERE / "cases" / "cases.json").read_text(encoding="utf-8"))["cases"]
 BEFORE, AFTER = 0.5, 2.5
+REPLAY_CACHE = True
+_REPLAYS = {}
 
 
 def frames(name):
@@ -40,14 +51,32 @@ def frames(name):
         yield float(t), frame
 
 
+def _value(v):
+    return ("array", v.shape, str(v.dtype), hash(v.tobytes())) if isinstance(v, np.ndarray) else repr(v)
+
+
+def _rules():
+    """The value of every upper-case constant of the estimator and the detection modules: what configure() and _with() change."""
+    mods = [E] + [m for n, m in sorted(sys.modules.items()) if n.startswith("fortnite_chest_counter.detection.") and m is not None]
+    return tuple((m.__name__, k, _value(v)) for m in mods for k, v in sorted(vars(m).items())
+                 if k.isupper() and not callable(v) and not isinstance(v, types.ModuleType))
+
+
+def _replay(name, hud, channels):
+    E.configure(dict(settings.DEFAULTS["detector"], hud=hud))
+    key = (name, hud, tuple(sorted(channels.items())), _rules())
+    if not REPLAY_CACHE or key not in _REPLAYS:
+        est = E.ChestEstimator(**channels)
+        events = []
+        for t, f in frames(name):
+            events += est.process_frame(t, f)
+        events += est.flush()
+        _REPLAYS[key] = [e for e in events if e["approx_counted"]]
+    return copy.deepcopy(_REPLAYS[key])
+
+
 def replay(name, **channels):
-    E.configure(settings.DEFAULTS["detector"])
-    est = E.ChestEstimator(**channels)
-    events = []
-    for t, f in frames(name):
-        events += est.process_frame(t, f)
-    events += est.flush()
-    return [e for e in events if e["approx_counted"]]
+    return _replay(name, "standard", channels)
 
 
 def score(name, counted):
@@ -218,20 +247,19 @@ def test_old_position_re_fire_double_counts_the_e0015_pop_up_under_noise_and_the
 
 def test_every_case_finds_every_chest_once_and_nothing_else():
     for name, case in CASES.items():
-        if not case.get("known_limitation") and not case.get("v041_gap"):
+        if not case.get("known_limitation") and not case.get("v041_gap") and not case.get("profile_hud"):
             check(name)
+    for name, case in CASES.items():                       # footage of another HUD Scale: with that profile setting, as the user runs it
+        if case.get("profile_hud"):
+            found, missed, dup, false = score(name, replay_hud(name, case["profile_hud"]))
+            assert (missed, dup, false) == (0, 0, 0), (name, found, missed, dup, false)
 
 
 def replay_hud(name, hud):
-    E.configure(dict(settings.DEFAULTS["detector"], hud=hud))
     try:
-        est, events = E.ChestEstimator(), []
-        for t, f in frames(name):
-            events += est.process_frame(t, f)
-        events += est.flush()
+        return _replay(name, hud, {})
     finally:
         E.configure(settings.DEFAULTS["detector"])
-    return [e for e in events if e["approx_counted"]]
 
 
 def test_hud_75_finds_every_chest_of_the_maintainers_cases():
@@ -251,6 +279,43 @@ def test_hud_75_finds_every_chest_of_the_maintainers_cases():
                        "user_low_margin_popup": 1, "user_bright_background_popup": 0, "user_two_rares_then_rare_line": 3,
                        "user_storm_phase_popup": 0}, certain     # NEW STORM PHASE: counted without HUD_SCALED_* (blurred channel alone)
     assert types["user_two_rares_then_rare_line"][:2] == ["rare", "rare"]           # v0.4.0: unknown, unknown
+
+
+USER1114 = {          # case: (found, CERTAIN) with the 75% profile, (found, CERTAIN) with Standard - tests/cases/user_20261114.json
+    "user1114_three_close_popups": ((3, 3), (2, 0)), "user1114_chest_storm_phase_chest": ((2, 1), (1, 0)),
+    "user1114_late_exact_popup": ((1, 1), (1, 0)), "user1114_approx_only_chest": ((1, 0), (0, 0)),
+    "user1114_shields_and_sprite_level": ((0, 0), (0, 0)), "user1114_shield_cracked": ((0, 0), (0, 0))}
+
+
+def test_hud_75_on_footage_its_templates_were_not_cut_from():
+    """v0.5.1: the maintainer's second recording at HUD Scale 75% (720p30, 4 Mbps NVENC), the first the 75% templates did not come from.
+    The whole video with the 75% profile: 17 of 17 chests, 15 CERTAIN, 0 false, 0 duplicates, the match Complete. These windows hold
+    its three close pop-ups, the chest line added after NEW STORM PHASE, the late exact match, the one APPROX-only pop-up and the
+    nearest non-chest words. Every result equals research/cases.py run on the full frames."""
+    assert {n for n in CASES if n.startswith("user1114_")} == set(USER1114)
+    for name, ((found, certain), _) in USER1114.items():
+        counted = replay_hud(name, "75")
+        got, missed, dup, false = score(name, counted)
+        assert (got, missed, dup, false) == (found, 0, 0, 0), (name, got, missed, dup, false)
+        assert sum(e["certain_counted"] for e in counted) == certain, name
+
+
+def test_standard_on_75_footage_is_what_the_maintainer_saw_live():
+    """The live session behind v0.5.1 ran with the Standard HUD Scale (the 75% choice was never saved): only the APPROX-only blurred
+    channel ("near-normal pop-up, shape not exact") finds these pop-ups, so nothing is CERTAIN and some are missed, never a false one."""
+    for name, (_, (found, certain)) in USER1114.items():
+        counted = replay(name)
+        got, missed, dup, false = score(name, counted)
+        assert (got, dup, false) == (found, 0, 0) and sum(e["certain_counted"] for e in counted) == certain == 0, (name, got, dup, false)
+        assert all(e.get("scaled_popup", {}).get("scale") == 1.0 for e in counted), name
+
+
+def test_a_storm_phase_line_added_to_a_75_pop_up_can_pass_for_a_chest_line():
+    """Known weakness, pinned (user_20261114.json known_weakness): with the 75% template NEW STORM PHASE scored up to 0.79 for a few
+    frames, over the 0.75 chest-line level, so the tracker counted the second chest 0.3 s before its real CHEST line appeared. When this
+    changes (the count dated at the real line, about 361.95 s), check the line rule and update this test."""
+    added = [e for e in replay_hud("user1114_chest_storm_phase_chest", "75") if e.get("increment")]
+    assert len(added) == 1 and added[0]["increment"]["kind"] == "new_line" and added[0]["time"] < 361.8 and added[0]["chest_type"] == "unknown"
 
 
 def test_hud_75_changes_nothing_on_the_standard_profile():
@@ -308,7 +373,9 @@ def test_portuguese_only_settings_keep_the_position_re_fire_and_no_new_channels(
 
 
 if __name__ == "__main__":
-    tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
+    # python tests/test_cases.py [WORD ...]: only the checks whose name holds one of the words, e.g. "75" for the HUD Scale checks
+    tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)
+             and (len(sys.argv) < 2 or any(word in n for word in sys.argv[1:]))]
     failed = 0
     for name, fn in tests:
         try:

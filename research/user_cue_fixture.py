@@ -3,6 +3,8 @@ Write tests/fixtures/match/user_20261112_cues.npz (v0.4.1): the cue boxes of the
 labelled moments of samples/video tests/2026-11-12 12-52-32.mp4, as true/false ink masks only (like frames.npz).
 
     python research/user_cue_fixture.py      (also writes user_20261112_cues75.npz: the HUD Scale 75% match text)
+    python research/user_cue_fixture.py 1114 only user_20261114_cues75.npz (v0.5.1): the same 75% text on the second recording,
+                                             which the 75% templates were not cut from
 
 Templates covered: connecting_shadow (CONNECTING's grey shadow on the white return-to-lobby splash) and the READY overlay's two lines
 (ready_party, ready_finding; their best is the ready_overlay signal). expected: 1 = must reach the threshold, 0 = must stay low.
@@ -36,8 +38,8 @@ MOMENTS = [(1463.5, "return-to-lobby splash, grey CONNECTING", 1, 0), (1464.5, "
            (1300.0, "play", 0, 0), (1433.8, "death screen", 0, 0), (1472.0, "lobby", 0, 0), (60.0, "play, storm", 0, 0)]
 
 
-def frame_at(t):
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(VIDEO), "-frames:v", "1", "-vf", "scale=1280:720",
+def frame_at(t, video=VIDEO):
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(video), "-frames:v", "1", "-vf", "scale=1280:720",
                           "-pix_fmt", "rgb24", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
     return np.frombuffer(raw, np.uint8).reshape(720, 1280, 3)
 
@@ -77,22 +79,35 @@ MOMENTS75 = [(495.0, "waiting island", 1, 0, 0, 0), (505.0, "waiting island", 1,
              (1472.0, "lobby", 0, 0, 0, 0)]
 
 
-def main75():
+def main75(video=VIDEO, moments=MOMENTS75, out=OUT75):
     reader = M.CueReader(hud="75")
     boxes = sorted({M._CUE[name].box for name in CUES75})
     masks, scores = [], []
-    for t, *_ in MOMENTS75:
-        f = frame_at(t)
+    for t, *_ in moments:
+        f = frame_at(t, video)
         masks.append(np.packbits(np.concatenate([M._ink_mask(f[y0:y1, x0:x1], M.WHITE).ravel() for x0, y0, x1, y1 in boxes])))
         s = reader.read(f, SIGNALS75)
         scores.append([s[k] for k in SIGNALS75])
         print(f"{t:7.1f}  " + "  ".join(f"{k} {v:.2f}" for k, v in zip(SIGNALS75, scores[-1])))
-    np.savez_compressed(OUT75, boxes=np.array(boxes), signals=np.array(SIGNALS75), masks=np.array(masks), scores=np.array(scores),
-                        expected=np.array([m[2:] for m in MOMENTS75], np.int8), where=np.array([m[1] for m in MOMENTS75]),
-                        times=np.array([m[0] for m in MOMENTS75]))
-    print(f"-> {OUT75} ({OUT75.stat().st_size / 1024:.0f} KB)")
+    np.savez_compressed(out, boxes=np.array(boxes), signals=np.array(SIGNALS75), masks=np.array(masks), scores=np.array(scores),
+                        expected=np.array([m[2:] for m in moments], np.int8), where=np.array([m[1] for m in moments]),
+                        times=np.array([m[0] for m in moments]))
+    print(f"-> {out} ({out.stat().st_size / 1024:.0f} KB)")
+
+
+# ---- v0.5.1: the second 75% recording (tests/cases/user_20261114.json), which the 75% templates were NOT cut from
+VIDEO1114 = ROOT / "samples/video tests/2026-11-14 23-27-13.mp4"
+OUT1114 = ROOT / "tests/fixtures/match/user_20261114_cues75.npz"
+#            seconds, what is on screen, expected waiting, bus, you_placed, victory
+MOMENTS1114 = [(45.0, "WAITING FOR PLAYERS", 1, 0, 0, 0), (49.0, "WAITING FOR PLAYERS", 1, 0, 0, 0), (53.0, "LAUNCHING IN", 0, 1, 0, 0),
+               (59.0, "LAUNCHING IN", 0, 1, 0, 0), (1001.0, "death screen YOU PLACED #2", 0, 0, 1, 0), (1005.0, "death screen YOU PLACED #2", 0, 0, 1, 0),
+               (30.0, "lobby", 0, 0, 0, 0), (75.0, "bus", 0, 0, 0, 0), (133.5, "play, chest pop-up", 0, 0, 0, 0), (600.0, "play", 0, 0, 0, 0),
+               (990.0, "play, purple storm", 0, 0, 0, 0), (1030.0, "spectating the team", 0, 0, 0, 0)]
 
 
 if __name__ == "__main__":
-    main()
-    main75()
+    if sys.argv[1:] == ["1114"]:
+        main75(VIDEO1114, MOMENTS1114, OUT1114)
+    else:
+        main()
+        main75()

@@ -116,6 +116,32 @@ def test_hud75_active_time():
     assert round(records[0].active_seconds - true_m1) == 27
 
 
+# ---- v0.5.1: the second 75% recording (tests/cases/user_20261114.json), which the 75% templates were NOT cut from
+FIXTURE1114 = HERE / "fixtures" / "match" / "user_20261114_observations.json.gz"
+FIXTURE1114_75 = HERE / "fixtures" / "match" / "user_20261114_observations_hud75.json.gz"
+TRUTH1114 = json.loads((HERE / "cases" / "user_20261114.json").read_text(encoding="utf-8"))
+
+
+def test_hud75_second_recording_the_match_is_complete():
+    """WAITING FOR PLAYERS (44-50 s), LAUNCHING IN and YOU PLACED #2 (1000 s) are read at 75%, so the one match is Complete."""
+    records, transitions, data = replay(FIXTURE1114_75)
+    assert data["source"]["sha256"] == TRUTH1114["sha256"] and data["source"]["hud"] == "75" and len(data["observations"]) == 1049
+    got = [(r.match_number, r.completion, r.ended_by, r.opened_t, r.played_from_t, r.ended_t, r.closed_t, r.active_seconds) for r in records]
+    assert got == [(1, "complete", "placed", 45.0, 62.0, 1000.0, 1048.0, 937.0)], got
+    truth = TRUTH1114["matches"][0]
+    assert records[0].observed_from_start and abs(records[0].ended_t - truth["ended_t"]) <= 1.0 and records[0].opened_t - truth["observed_from"] <= 2
+    assert [(round(t.t), t.reason) for t in transitions if t.state in (S.PRE_GAME, S.ELIMINATED)] == [(46, "countdown_seen"), (1001, "you_placed_seen")]
+
+
+def test_standard_on_the_second_recording_is_the_partial_match_seen_live():
+    """With the Standard HUD Scale (what the live session ran) neither the countdown nor YOU PLACED is read: Partial, ended by stopping."""
+    records, transitions, data = replay(FIXTURE1114)
+    assert data["source"]["hud"] == "standard"
+    got = [(r.completion, r.ended_by, r.observed_from_start, r.ended_t) for r in records]
+    assert got == [("partial", "stopped", False, None)], got
+    assert not any(t.state == S.PRE_GAME for t in transitions)
+
+
 if __name__ == "__main__":
     passed = 0
     for name, test in list(globals().items()):

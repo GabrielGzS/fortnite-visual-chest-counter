@@ -1,0 +1,50 @@
+{
+  "about": "Ground truth for the maintainer's second recording, the v0.5.1 evidence (docs/V0_5_1_VALIDATION.md): the first footage of Fortnite HUD Scale 75% that the 75% templates were NOT cut from (those come from 2026-11-12 12-52-32). Times are video seconds. Candidates: every frame's pop-up box scored with the standard and the 75% CHEST templates (blurred >= 0.70 anywhere in the box) and every lavender burst in the box; each candidate and each listed screen was confirmed by looking at the frames (a new pop-up opens with a light streak through the XP line; a camera turn changes only the background). A pop-up hidden by an overlay for its whole life would be missing. std / hud75 = what v0.5.0 (ec94cb1) counted with the profile's HUD Scale set to Standard / 75% (research/pipeline_baseline.py, whole video).",
+  "video": "samples/video tests/2026-11-14 23-27-13.mp4",
+  "sha256": "d0939dd3b58502f0a893aa27d1d3247c74bfd63268539bf1c5325e197094197c",
+  "source": "maintainer's own PC game at Fortnite HUD Scale 75% (2560x1440), OBS local recording with the stream encoder: 1920x1080 canvas, 1280x720 output, 30 fps, H.264 High NVENC CBR 4,000 kbps (ffprobe: 1280x720, 30/1, 4.00 Mbps), 1,048 s; English, one match",
+  "chests": [
+    {"t": 132.9, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "APPROX 133.07", "hud75": "CERTAIN 133.33"},
+    {"t": 178.2, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "APPROX 178.27", "hud75": "CERTAIN 178.27"},
+    {"t": 185.6, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "APPROX 185.60", "hud75": "CERTAIN 186.20"},
+    {"t": 214.4, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "APPROX 216.20", "hud75": "CERTAIN 215.93"},
+    {"t": 226.7, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "APPROX 226.87", "hud75": "CERTAIN 226.87"},
+    {"t": 244.9, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "APPROX 246.33", "hud75": "CERTAIN 246.33"},
+    {"t": 293.15, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "missed", "hud75": "CERTAIN 293.80"},
+    {"t": 296.5, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST (1.2 s after the previous pop-up faded)", "std": "APPROX 297.40", "hud75": "CERTAIN 297.40"},
+    {"t": 300.0, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "APPROX 301.20", "hud75": "CERTAIN 301.27"},
+    {"t": 305.7, "what": "new_popup", "type": "sprite", "text": "+900 XP / SPRITE CHEST", "std": "APPROX 305.80", "hud75": "CERTAIN 305.87"},
+    {"t": 347.8, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST (one pop-up while the camera turns)", "std": "missed", "hud75": "CERTAIN 348.53"},
+    {"t": 360.0, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST; MAXIMUM AMMO and NEW STORM PHASE lines are then added below it", "std": "missed", "hud75": "CERTAIN 360.60"},
+    {"t": 361.95, "what": "new_line", "type": "chest", "text": "a second CHEST line added below NEW STORM PHASE (total +1,750 -> +2,350)", "std": "missed", "hud75": "APPROX 361.53 (the NEW STORM PHASE line was taken for this chest line, see known_weakness)"},
+    {"t": 373.7, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "APPROX 373.67", "hud75": "CERTAIN 374.20"},
+    {"t": 380.6, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST (one pop-up while the camera turns)", "std": "APPROX 380.67", "hud75": "CERTAIN 382.20 (the exact match passed 0.75 late)"},
+    {"t": 387.3, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "APPROX 387.53", "hud75": "CERTAIN 387.87"},
+    {"t": 761.5, "what": "new_popup", "type": "chest", "text": "+600 XP / CHEST", "std": "missed", "hud75": "APPROX 761.47 (exact 0.70 < 0.75)"}
+  ],
+  "not_chest": [
+    {"t": 144.7, "text": "+200 XP / FULL SHIELDS"}, {"t": 147.9, "text": "+150 XP / SPRITE LEVEL"}, {"t": 171.6, "text": "+900 XP / NEW STORM PHASE"},
+    {"t": 233.9, "text": "+200 XP / WEAKPOINT STREAK"}, {"t": 247.6, "text": "+150 XP / SPRITE LEVEL"}, {"t": 266.8, "text": "+200 XP / WEAKPOINT STREAK"},
+    {"t": 274.6, "text": "+300 XP / AMMO BOX"}, {"t": 338.9, "text": "+1,000 XP / SPRITE EXTRACTED"}, {"t": 414.1, "text": "+200 XP / SHIELD CRACKED"},
+    {"t": 415.6, "text": "+200 XP / SHIELD CRACKED"}, {"t": 419.0, "text": "+200 XP / SHIELD CRACKED"}, {"t": 691.2, "text": "+200 XP / FULL SHIELDS"},
+    {"t": 751.9, "text": "+200 XP / WEAKPOINT STREAK"}, {"t": 771.6, "text": "+900 XP / NEW STORM PHASE"}, {"t": 855.7, "text": "+200 XP / SHIELD CRACKED"},
+    {"t": 857.5, "text": "+200 XP / SHIELD CRACKED"}, {"t": 882.8, "text": "+200 XP / SHIELD CRACKED"}
+  ],
+  "screens": [
+    {"t": [18, 43], "what": "lobby"},
+    {"t": [44, 50], "what": "WAITING FOR PLAYERS (75% HUD text)"},
+    {"t": [52, 61], "what": "LAUNCHING IN countdown (75% HUD text)"},
+    {"t": [1000, 1019], "what": "YOU PLACED #2 with ELIMINATED BY, then STAY WITH TEAM"},
+    {"t": [1019, 1048], "what": "spectating the team until the recording ends"}
+  ],
+  "matches": [
+    {"id": "m1", "completion": "complete", "why": "the waiting island, the bus countdown and YOU PLACED are all on the recording", "observed_from": 44, "ended_t": 1000, "ended_by": "placed",
+     "std": "partial, ended_by stopped, observed_from_start false (the 75% countdown and YOU PLACED are not read with the Standard templates)",
+     "hud75": "complete, ended_by placed, played_from 62, ended 1000, 938 s"}
+  ],
+  "summary": {
+    "std": "12 of 17 found, 0 CERTAIN, 0 duplicates, 0 false; the match Partial: what the maintainer saw live, so the live session ran with the Standard HUD Scale",
+    "hud75": "17 of 17 found, 15 CERTAIN, 0 duplicates, 0 false; the match Complete"
+  },
+  "known_weakness": "361.5 s: with the 75% template the NEW STORM PHASE line added to a chest pop-up scored 0.73-0.79 (blurred) for a few frames, over the stacked tracker's 0.75 chest-line level (Standard template 0.63-0.71). The tracker counted it as an added chest line 0.4 s before the real second CHEST line (0.85-0.88) appeared, which then fell in the 0.6 s settle time. The total is right here only because a real chest followed; without one, that line would be one false APPROX. One example, so no threshold is changed (tests/cases user1114_chest_storm_phase_chest pins it)."
+}

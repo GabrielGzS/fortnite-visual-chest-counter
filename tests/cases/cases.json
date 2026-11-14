@@ -1,5 +1,5 @@
 {
-  "about": "Real-world detection cases (docs/INVESTIGATION_2026-11-08.md). Every confirmed failure becomes a case. Times are CLIP seconds of the capture's clip. truth: one row per chest opening (what: new_popup = a new pop-up appears, new_line = a chest line is added to a pop-up already on screen, multiplier = a line's X2/X3 changes) and per non-chest pop-up change that must NOT count (what: not_chest). type: chest | rare | sprite (the word on the line). Footage: research/cases.py fetch copies the needed segments into samples/cases/ (not in Git); tests/fixtures/popups/<case>.npz holds the pop-up box masks so tests/test_cases.py runs without footage. Cases with \"video\" instead of \"capture\" are windows of a plain recording under samples/ (times are video seconds). \"v041_gap\" pins what v0.4.0 does on a confirmed failure (tests/test_cases.py checks it exactly); remove it when a v0.4.1 change fixes the case, so the case then has to pass like every other.",
+  "about": "Real-world detection cases (docs/INVESTIGATION_2026-11-08.md). Every confirmed failure becomes a case. Times are CLIP seconds of the capture's clip. truth: one row per chest opening (what: new_popup = a new pop-up appears, new_line = a chest line is added to a pop-up already on screen, multiplier = a line's X2/X3 changes) and per non-chest pop-up change that must NOT count (what: not_chest). type: chest | rare | sprite (the word on the line). Footage: research/cases.py fetch copies the needed segments into samples/cases/ (not in Git); tests/fixtures/popups/<case>.npz holds the pop-up box masks so tests/test_cases.py runs without footage. Cases with \"video\" instead of \"capture\" are windows of a plain recording under samples/ (times are video seconds). \"v041_gap\" pins what v0.4.0 does on a confirmed failure (tests/test_cases.py checks it exactly); remove it when a v0.4.1 change fixes the case, so the case then has to pass like every other. \"profile_hud\" (v0.5.1): the case is footage of that Fortnite HUD Scale, so it is checked with that profile setting ([detector] hud) and, for contrast, pinned under Standard.",
   "cases": {
     "thiefs_small_hud": {
       "capture": "20261108_024147",
@@ -637,6 +637,161 @@
         "certain": 0,
         "why": "the CROWN BONUS lines held the blurred score at 0.62-0.69, above the 0.55 re-arm level, so the channel was still disarmed"
       }
+    },
+    "user1114_three_close_popups": {
+      "video": "samples/video tests/2026-11-14 23-27-13.mp4",
+      "window": [
+        292.0,
+        304.0
+      ],
+      "source": "maintainer's own game at Fortnite HUD Scale 75%, OBS 720p30 NVENC 4 Mbps CBR (tests/cases/user_20261114.json); the 75% templates were NOT cut from it",
+      "hud": 0.95,
+      "profile_hud": "75",
+      "live": "v0.5.0 Standard: 2 of 3, APPROX only (293.15 missed). 75%: 3 of 3 CERTAIN",
+      "truth": [
+        {
+          "t": 293.15,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST"
+        },
+        {
+          "t": 296.5,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST, 1.2 s after the previous pop-up faded"
+        },
+        {
+          "t": 300.0,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST"
+        }
+      ]
+    },
+    "user1114_chest_storm_phase_chest": {
+      "video": "samples/video tests/2026-11-14 23-27-13.mp4",
+      "window": [
+        358.5,
+        366.0
+      ],
+      "source": "maintainer's own game at Fortnite HUD Scale 75%, OBS 720p30 NVENC 4 Mbps CBR (tests/cases/user_20261114.json); the 75% templates were NOT cut from it",
+      "hud": 0.95,
+      "profile_hud": "75",
+      "live": "v0.5.0 Standard: nothing. 75%: both, the first CERTAIN, the second APPROX at 361.53 - by the NEW STORM PHASE line, 0.4 s before the real CHEST line (user_20261114.json known_weakness)",
+      "truth": [
+        {
+          "t": 360.0,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST"
+        },
+        {
+          "t": 360.75,
+          "what": "not_chest",
+          "text": "MAXIMUM AMMO line added below CHEST"
+        },
+        {
+          "t": 361.45,
+          "what": "not_chest",
+          "text": "NEW STORM PHASE line added below MAXIMUM AMMO"
+        },
+        {
+          "t": 361.95,
+          "what": "new_line",
+          "type": "chest",
+          "text": "a second CHEST line added below NEW STORM PHASE (+1,750 -> +2,350 XP)"
+        }
+      ]
+    },
+    "user1114_late_exact_popup": {
+      "video": "samples/video tests/2026-11-14 23-27-13.mp4",
+      "window": [
+        379.5,
+        384.5
+      ],
+      "source": "maintainer's own game at Fortnite HUD Scale 75%, OBS 720p30 NVENC 4 Mbps CBR (tests/cases/user_20261114.json); the 75% templates were NOT cut from it",
+      "hud": 0.95,
+      "profile_hud": "75",
+      "live": "v0.5.0 Standard: once, APPROX. 75%: once, CERTAIN, when the exact match passed 0.75 at 382.2 (one pop-up while the camera turns)",
+      "truth": [
+        {
+          "t": 380.6,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST"
+        }
+      ]
+    },
+    "user1114_approx_only_chest": {
+      "video": "samples/video tests/2026-11-14 23-27-13.mp4",
+      "window": [
+        759.5,
+        766.5
+      ],
+      "source": "maintainer's own game at Fortnite HUD Scale 75%, OBS 720p30 NVENC 4 Mbps CBR (tests/cases/user_20261114.json); the 75% templates were NOT cut from it",
+      "hud": 0.95,
+      "profile_hud": "75",
+      "live": "v0.5.0 Standard: missed. 75%: APPROX (exact 0.70 under the 0.75 trigger; blurred 0.87)",
+      "truth": [
+        {
+          "t": 761.5,
+          "what": "new_popup",
+          "type": "chest",
+          "text": "+600 XP / CHEST"
+        }
+      ]
+    },
+    "user1114_shields_and_sprite_level": {
+      "video": "samples/video tests/2026-11-14 23-27-13.mp4",
+      "window": [
+        143.5,
+        151.0
+      ],
+      "source": "maintainer's own game at Fortnite HUD Scale 75%, OBS 720p30 NVENC 4 Mbps CBR (tests/cases/user_20261114.json); the 75% templates were NOT cut from it",
+      "hud": 0.95,
+      "profile_hud": "75",
+      "live": "not counted (Standard and 75%)",
+      "truth": [
+        {
+          "t": 144.7,
+          "what": "not_chest",
+          "text": "+200 XP / FULL SHIELDS"
+        },
+        {
+          "t": 147.9,
+          "what": "not_chest",
+          "text": "+150 XP / SPRITE LEVEL"
+        }
+      ]
+    },
+    "user1114_shield_cracked": {
+      "video": "samples/video tests/2026-11-14 23-27-13.mp4",
+      "window": [
+        413.0,
+        421.5
+      ],
+      "source": "maintainer's own game at Fortnite HUD Scale 75%, OBS 720p30 NVENC 4 Mbps CBR (tests/cases/user_20261114.json); the 75% templates were NOT cut from it",
+      "hud": 0.95,
+      "profile_hud": "75",
+      "live": "not counted (Standard and 75%); the closest non-chest words to CHEST on this recording (75%: exact 0.57, blurred 0.74)",
+      "truth": [
+        {
+          "t": 414.1,
+          "what": "not_chest",
+          "text": "+200 XP / SHIELD CRACKED"
+        },
+        {
+          "t": 415.6,
+          "what": "not_chest",
+          "text": "+200 XP / SHIELD CRACKED"
+        },
+        {
+          "t": 419.0,
+          "what": "not_chest",
+          "text": "+200 XP / SHIELD CRACKED"
+        }
+      ]
     }
   }
 }

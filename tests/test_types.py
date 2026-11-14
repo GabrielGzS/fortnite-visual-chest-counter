@@ -147,11 +147,12 @@ def test_line_classifier_reads_normal_rare_and_sprite_and_never_guesses_normal()
 def test_counted_chests_of_every_case_get_the_right_type_or_unknown():
     """Every chest of the real cases: the type read from its line must equal the labelled type - a wrong type is a
     failure; 'unknown' is allowed but counted."""
-    wrong, unknown, total = [], 0, 0
+    wrong, unknown, total, unknown_hud = [], 0, 0, 0
     for name, case in test_cases.CASES.items():
         if case.get("known_limitation"):
             continue
-        counted = test_cases.replay(name)
+        hud = case.get("profile_hud")                    # footage of another HUD Scale: read with that profile setting (v0.5.1)
+        counted = test_cases.replay_hud(name, hud) if hud else test_cases.replay(name)
         truths = [r for r in case["truth"] if r["what"] != "not_chest"]
         for r in truths:
             near = [e for e in counted if r["t"] - test_cases.BEFORE <= e["time"] <= r["t"] + test_cases.AFTER]
@@ -160,11 +161,14 @@ def test_counted_chests_of_every_case_get_the_right_type_or_unknown():
             e = min(near, key=lambda e: abs(e["time"] - r["t"]))
             total += 1
             if e.get("chest_type") == CT.UNKNOWN:
-                unknown += 1
+                unknown += 1 if not hud else 0
+                unknown_hud += 1 if hud else 0
             elif e.get("chest_type") != r["type"]:
                 wrong.append((name, r["t"], r["type"], e.get("chest_type")))
     assert not wrong, wrong
     assert total >= 28 and unknown <= 3, (total, unknown)
+    # 75% footage (tests/cases/user_20261114.json): the pop-up counted late, near its end, and the chest line NEW STORM PHASE took over
+    assert unknown_hud <= 2, unknown_hud
 
 
 def test_app_shows_the_type_split_of_the_selected_profile():
