@@ -4,6 +4,9 @@ A small WebSocket client (RFC 6455), standard library only.
 Just what talking to OBS's built-in server needs: a plain ws:// connection (OBS offers no TLS), text messages, ping/pong
 and close. No compression, no extensions, client side only. Received bytes are buffered and only complete frames are
 parsed, so a receive timeout can never leave a half-read frame behind.
+
+Remote Sharing (remote/) uses the same client over TLS: connect() also takes an ssl_context (wss://), extra request
+headers and several subprotocols. Without them a connection is made exactly as before.
 """
 
 import base64
@@ -25,6 +28,14 @@ class ConnectionClosed(WebSocketError):
     def __init__(self, code=None, reason=""):
         self.code, self.reason = code, reason
         super().__init__(f"connection closed (code {code}{': ' + reason if reason else ''})")
+
+
+class HandshakeRefused(WebSocketError):
+    """The server answered the upgrade with an HTTP status instead of 101 (for example 401 Unauthorized)."""
+
+    def __init__(self, status, status_line):
+        self.status = status
+        super().__init__(f"not a WebSocket server (it answered: {status_line[:80]!r})")
 
 
 def _mask(data, key):
@@ -49,22 +60,32 @@ class WebSocket:
         self._fragments = None                  # (opcode, bytearray) while a fragmented message arrives
 
     @classmethod
-    def connect(cls, host, port, path="/", subprotocol=None, timeout=3.0):
+    def connect(cls, host, port, path="/", subprotocol=None, timeout=3.0, ssl_context=None, headers=None):
+        """subprotocol: one name or a list of them. ssl_context: wrap the connection in TLS (certificate and host name
+        checked by the context). headers: extra request headers, e.g. {"Authorization": ...} - never logged here."""
         sock = socket.create_connection((host, port), timeout=timeout)
         try:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            if ssl_context is not None:
+                sock = ssl_context.wrap_socket(sock, server_hostname=host)
             key = base64.b64encode(os.urandom(16)).decode("ascii")
             host_header = f"[{host}]" if ":" in host else host
-            lines = [f"GET {path} HTTP/1.1", f"Host: {host_header}:{port}", "Upgrade: websocket", "Connection: Upgrade",
+            if not (ssl_context is not None and port == 443):
+                host_header += f":{port}"
+            lines = [f"GET {path} HTTP/1.1", f"Host: {host_header}", "Upgrade: websocket", "Connection: Upgrade",
                      f"Sec-WebSocket-Key: {key}", "Sec-WebSocket-Version: 13"]
             if subprotocol:
-                lines.append(f"Sec-WebSocket-Protocol: {subprotocol}")
+                names = [subprotocol] if isinstance(subprotocol, str) else list(subprotocol)
+                lines.append(f"Sec-WebSocket-Protocol: {', '.join(names)}")
+            for name, value in (headers or {}).items():
+                lines.append(f"{name}: {value}")
             sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("ascii"))
             ws = cls(sock)
             status_line, headers = ws._read_http_head(timeout)
             parts = status_line.split(" ", 2)
             if len(parts) < 2 or parts[1] != "101":
-                raise WebSocketError(f"not a WebSocket server (it answered: {status_line[:80]!r})")
+                status = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else None
+                raise HandshakeRefused(status, status_line)
             if headers.get("sec-websocket-accept") != accept_key(key):
                 raise WebSocketError("the server's WebSocket handshake answer is wrong")
             return ws

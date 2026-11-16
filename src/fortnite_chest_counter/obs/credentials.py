@@ -45,8 +45,9 @@ def available():
     return _advapi() is not None
 
 
-def save_password(password, target=TARGET):
-    """Store (or replace) the password. An empty password deletes the entry. Raises OSError if Windows refuses."""
+def save_password(password, target=TARGET, comment="OBS WebSocket password", username="obs-websocket"):
+    """Store (or replace) the password. An empty password deletes the entry. Raises OSError if Windows refuses.
+    Remote Sharing keeps its secrets the same way, under its own targets (remote/sharing.py)."""
     if not password:
         forget_password(target)
         return
@@ -57,9 +58,9 @@ def save_password(password, target=TARGET):
         raise OSError("Windows Credential Manager is not available")
     blob = password.encode("utf-16-le")
     buffer = (ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)
-    cred = _CREDENTIALW(Flags=0, Type=_CRED_TYPE_GENERIC, TargetName=target, Comment="OBS WebSocket password",
+    cred = _CREDENTIALW(Flags=0, Type=_CRED_TYPE_GENERIC, TargetName=target, Comment=comment,
                         CredentialBlobSize=len(blob), CredentialBlob=ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
-                        Persist=_CRED_PERSIST_LOCAL_MACHINE, UserName="obs-websocket")
+                        Persist=_CRED_PERSIST_LOCAL_MACHINE, UserName=username)
     if not api.CredWriteW(ctypes.byref(cred), 0):
         raise ctypes.WinError(ctypes.get_last_error())
 

@@ -131,11 +131,41 @@ def _validate(data):
         entry = {"id": pid, "name": name, "created_at": p.get("created_at"), "source": _clean_source(p.get("source"))}
         if p.get("hud") in HUD_VALUES:                   # an unknown value is dropped: the profile then uses [detector] hud
             entry["hud"] = p["hud"]
+        remote = _clean_remote(p.get("remote"))
+        if remote is not None:                           # a damaged one is dropped: Remote Sharing is then off for it
+            entry["remote"] = remote
         profiles.append(entry)
     if DEFAULT_ID not in seen:
         profiles.insert(0, _default_entry())
     active = data.get("active") if data.get("active") in seen else DEFAULT_ID
     return {"version": 1, "active": active, "profiles": profiles}
+
+
+_LINK_ID = re.compile(r"^[A-Za-z0-9_-]{4,32}$")
+_CHANNEL = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+MAX_STORED_LINKS = 64                                    # active (at most 16) + revoked ones kept so their ids stay known
+
+
+def _clean_remote(remote):
+    """A profile's Remote Sharing data: {"enabled": bool, "channel": id, "links": [{"id", "label", "sha256",
+    "created_at", "revoked"?}]}. Only the SHA-256 of each viewer token is kept here; the secret the tokens come from and the
+    publisher key are in Windows Credential Manager (remote/sharing.py). -> a clean dict, or None if absent or unusable.
+    v0.5.1 and older drop this field when they save profiles.json."""
+    if not isinstance(remote, dict) or not isinstance(remote.get("channel"), str) or not _CHANNEL.match(remote["channel"]):
+        return None
+    links = []
+    for link in remote.get("links") if isinstance(remote.get("links"), list) else []:
+        if not isinstance(link, dict) or not isinstance(link.get("id"), str) or not _LINK_ID.match(link["id"]) \
+                or not isinstance(link.get("sha256"), str) or not _HEX64.match(link["sha256"]) \
+                or any(link["id"] == seen["id"] for seen in links):
+            continue
+        clean = {"id": link["id"], "label": str(link.get("label") or "")[:MAX_NAME], "sha256": link["sha256"],
+                 "created_at": link.get("created_at") if isinstance(link.get("created_at"), str) else None}
+        if link.get("revoked") is True:
+            clean["revoked"] = True
+        links.append(clean)
+    return {"enabled": remote.get("enabled") is True, "channel": remote["channel"], "links": links[-MAX_STORED_LINKS:]}
 
 
 def _rebuild(base_state_path):
@@ -304,6 +334,22 @@ def set_hud(base_state_path, profile_id, hud):
     if entry.get("hud") == hud and registry_path(base_state_path).exists():
         return
     entry["hud"] = hud
+    save(base_state_path, reg)
+
+
+def set_remote(base_state_path, profile_id, remote):
+    """Store a profile's Remote Sharing data (see _clean_remote; None removes it). Writes only on a change."""
+    clean = None if remote is None else _clean_remote(remote)
+    if remote is not None and clean is None:
+        raise ProfileError("unusable Remote Sharing data")
+    reg = load(base_state_path)
+    entry = get(reg, profile_id)
+    if entry.get("remote") == clean and registry_path(base_state_path).exists():
+        return
+    if clean is None:
+        entry.pop("remote", None)
+    else:
+        entry["remote"] = clean
     save(base_state_path, reg)
 
 

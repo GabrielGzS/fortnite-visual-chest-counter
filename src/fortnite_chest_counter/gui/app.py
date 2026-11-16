@@ -41,6 +41,7 @@ from fortnite_chest_counter.gui.save_state import SaveState
 from fortnite_chest_counter.gui.worker import Worker, run_command
 from fortnite_chest_counter.obs import credentials as obs_credentials
 from fortnite_chest_counter.obs.link import TextOutputLink
+from fortnite_chest_counter.remote.link import RemoteLink
 from fortnite_chest_counter.preview import PreviewReader, block_name
 from fortnite_chest_counter.progress import Eta, clock_text, describe
 from fortnite_chest_counter.update import install as update_install
@@ -4408,6 +4409,9 @@ class MainWindow(QMainWindow):
         self.obs_link = TextOutputLink().start()            # optional OBS WebSocket output; off unless configured
         self._obs_version = -1
         self._obs_logged = None                             # last OBS WebSocket state written to the activity log
+        self.remote_link = RemoteLink(config_file())        # Remote Sharing to the user's own relay; started in after_start
+        self._remote_version = -1
+        self._remote_logged = None                          # last Remote Sharing state written to the activity log
 
         root = QWidget()
         outer = QHBoxLayout(root)
@@ -4813,6 +4817,7 @@ class MainWindow(QMainWindow):
                        "counting": ("Counting", theme.CERTAIN), "stopping": ("Stopping", theme.APPROX),
                        "error": ("Not counting", theme.REJECT)}[mode]
         d.set_pill(text, color)
+        self.remote_link.set_counting(mode == "counting")   # counting/idle comes from here, not from the counter file
         running = mode in ("connecting", "counting", "stopping")
         d.start.setText({"connecting": "Cancel", "counting": "Stop counting", "stopping": "Stopping..."}.get(mode, "Start counting"))
         restyle(d.start, "danger" if mode in ("connecting", "counting") else "primary")
@@ -4868,6 +4873,10 @@ class MainWindow(QMainWindow):
         if version != self._obs_version:
             self._obs_version = version
             self.obs_status_changed(status)
+        version, status = self.remote_link.status()
+        if version != self._remote_version:
+            self._remote_version = version
+            self.remote_status_changed(status)
         self._update_ticks += 1
         if self._update_ticks % 4 == 0 and self.updates.poll():
             self.update_changed()
@@ -4875,6 +4884,7 @@ class MainWindow(QMainWindow):
     # ---- updates (update_manager.py holds the state; checking and preparing run on their own threads)
     def after_start(self, installing=False):
         """Called once the window is up. Not from the constructor, so the self-test can never touch the network."""
+        self.remote_link.start()                       # no connection unless a relay, a key and sharing for the profile are set
         try:
             update_install.clear_orphaned_journal()
             if installing:                             # the updater started this copy to prove itself: its verdict comes later
@@ -5016,6 +5026,22 @@ class MainWindow(QMainWindow):
         self.obs_link.configure(ws["enabled"], ws["host"], ws["port"], password, ws["source"], ws["source_uuid"], overlay)
         if reconnect:
             self.obs_link.reconnect()
+
+    def remote_status_changed(self, status):
+        """Remote Sharing (preview: set up with the console's `remote` command until it has its own page): one line in the
+        activity log when its state changes. Never shows a key or a viewer link."""
+        state, previous = status["state"], self._remote_logged
+        if state == previous or state == "connecting" or (state == "retrying" and previous == "retrying"):
+            return
+        self._remote_logged = state
+        if state == "off" and previous in (None, "off"):
+            return
+        text = {"connected": f"connected: sharing {status['profile']} with {status['relay']}",
+                "off": f"off. {status['detail']}"}.get(state, status["detail"] or state)
+        if status.get("warning"):
+            text += f" {status['warning']}"
+        self.add_log({"type": "warn" if state in ("key_rejected", "taken_over", "retrying") else "info",
+                      "text": f"Remote Sharing: {text}"})
 
     def obs_status_changed(self, status):
         line = self.dashboard.obs_line
@@ -5635,6 +5661,7 @@ class MainWindow(QMainWindow):
         if self.preview_reader is not None:
             self.preview_reader.close()
         self.obs_link.stop(timeout=0.5)
+        self.remote_link.stop(timeout=0.5)                  # viewers see "offline" with the last count
         super().closeEvent(event)
         QApplication.quit()
 

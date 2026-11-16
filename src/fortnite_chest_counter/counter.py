@@ -2292,6 +2292,67 @@ def cmd_profiles(args):
               f" | APPROX {settings.format_count(state['approximate'], display['use_thousands_separator'])}")
 
 
+def cmd_remote(args):
+    """(Preview, until the app has its Remote Sharing page.) Send the active profile's counter to YOUR relay: the relay
+    address, this PC's publisher key, and per profile sharing on/off and read-only viewer links. The desktop app does the
+    sending while it is open; this only changes the setup it reads."""
+    from fortnite_chest_counter.remote import protocol as RP
+    from fortnite_chest_counter.remote import sharing
+    banner()
+    cfg, _, warnings = settings.load_config(getattr(args, "config", None), config_overrides(args))
+    for w in warnings:
+        CONSOLE.warn(w)
+    base = cfg["state"]["path"]
+    try:
+        reg = profiles.load(base, warn=CONSOLE.warn)
+        entry = profiles.find(reg, args.profile) if getattr(args, "profile", None) else profiles.active(reg)
+        if args.action == "url":
+            url = (args.value or "").strip()
+            problem = RP.relay_url_problem(url)
+            if problem:
+                raise UserError(f"The relay address {problem}.")
+            update_config_file(config_path(args), "remote", {"url": url})
+            cfg["remote"]["url"] = url
+            CONSOLE.info("Relay address saved." if url else "Relay address removed: Remote Sharing makes no connections.")
+        elif args.action == "key":
+            if not args.stdin:
+                raise UserError("The key is read from standard input so it never appears on screen, e.g.\n"
+                                "  type keyfile.txt | fortnite-chest-counter remote key --stdin")
+            sharing.save_publisher_key(sys.stdin.readline())
+            CONSOLE.info("Publisher key saved in Windows Credential Manager (never shown or written to a file).")
+        elif args.action == "forget-key":
+            sharing.forget_publisher_key()
+            CONSOLE.info("Publisher key removed from this PC.")
+        elif args.action in ("on", "off"):
+            sharing.set_enabled(base, entry["id"], args.action == "on")
+            CONSOLE.info(f"Remote Sharing {'on' if args.action == 'on' else 'off'} for {entry['name']}.")
+        elif args.action == "link-add":
+            link_id, token = sharing.add_link(base, entry["id"], args.label)
+            remote = sharing.remote_of(base, entry["id"])
+            print(f"\nViewer link {link_id} ({args.label}) for {entry['name']}: read-only; keep it out of public chat.")
+            if cfg["remote"]["url"]:
+                print(f"OBS Browser Source URL:\n\n  {RP.overlay_url(cfg['remote']['url'], remote['channel'], link_id, token)}\n")
+            else:
+                print("Set the relay address (remote url wss://...) to get its overlay address.")
+        elif args.action == "link-revoke":
+            sharing.revoke_link(base, entry["id"], args.value or "")
+            CONSOLE.info(f"Viewer link {args.value} revoked: the app closes overlays that use it the next time it is connected.")
+    except (profiles.ProfileError, sharing.SharingError) as error:
+        raise UserError(str(error))
+    except OSError as error:
+        raise UserError(f"Windows Credential Manager refused the change ({error}).")
+    key = sharing.load_publisher_key()
+    remote = sharing.remote_of(base, entry["id"])
+    print("\nRemote Sharing (preview)")
+    print(f"  Relay address   : {cfg['remote']['url'] or '(none - no connections are made)'}")
+    print(f"  Publisher key   : {'stored in Windows Credential Manager' if key else '(none on this PC)'}")
+    if key and args.show_setup_code:
+        print(f"  Setup code      : {RP.setup_code(key)}   (the relay's PUBLISHER_KEY_SHA256; not the key itself)")
+    print(f"  Profile         : {entry['name']} - sharing {'on' if remote and remote['enabled'] else 'off'}")
+    for link in (remote or {}).get("links", []):
+        print(f"    link {link['id']:<10} {link['label']:<16} {'revoked' if link.get('revoked') else 'active'}")
+
+
 def cmd_evaluate(args):
     events = [json.loads(line) for line in Path(args.log).read_text(encoding="utf-8").splitlines() if line.strip()]
     events = [e for e in events if e.get("source") not in ("manual", None) and "time" in e]
@@ -2401,6 +2462,15 @@ def build_parser():
     p = sub.add_parser("profiles", parents=[common], help="list the count profiles (one per person)")
     p.add_argument("--activate", metavar="NAME", help="make this profile the active one")
     p.set_defaults(func=cmd_profiles)
+    p = sub.add_parser("remote", parents=[common],
+                       help="(preview) Remote Sharing setup: your relay, this PC's key, sharing per profile, viewer links")
+    p.add_argument("action", nargs="?", default="status",
+                   choices=["status", "url", "key", "forget-key", "on", "off", "link-add", "link-revoke"])
+    p.add_argument("value", nargs="?", help="url: the relay's wss:// address (\"\" removes it); link-revoke: the link id")
+    p.add_argument("--stdin", action="store_true", help="key: read the publisher key from standard input")
+    p.add_argument("--label", default="OBS", help="link-add: a name for the viewer link")
+    p.add_argument("--show-setup-code", action="store_true", help="also print the setup code (the key's SHA-256)")
+    p.set_defaults(func=cmd_remote)
     p = sub.add_parser("evaluate", help="(development) score a session log against verified knowledge")
     p.add_argument("--name", required=True)
     p.add_argument("--log", required=True)

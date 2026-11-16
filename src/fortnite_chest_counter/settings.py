@@ -88,6 +88,9 @@ DEFAULTS = {
         "source": "",                           # the OBS Text source to update (its name)
         "source_uuid": "",                      # its OBS id, so a rename in OBS is followed (set by the app)
     },
+    "remote": {
+        "url": "",                              # Remote Sharing: YOUR relay's wss:// address; empty = no network at all
+    },
     "app": {
         "remember_window": True,                # the desktop app reopens with the size, position and maximised state it closed with
         "show_preview": True,                   # the Dashboard's live preview; only what the counter already analyses
@@ -211,6 +214,10 @@ def _check(section, key, value):
                     "must be a PC name or IP address, e.g. \"127.0.0.1\"")
         if key in ("source", "source_uuid"):
             return (isinstance(value, str), "must be text in quotes")
+    if section == "remote" and key == "url":
+        from fortnite_chest_counter.remote.protocol import relay_url_problem
+        problem = relay_url_problem(value) if isinstance(value, str) else "must be text in quotes"
+        return (problem is None, problem or "")
     if section == "update" and key == "download_bandwidth":
         return (value in BANDWIDTH_MODES, f"must be one of {list(BANDWIDTH_MODES)}")
     if section == "update" and key == "custom_limit_kb_per_second":
