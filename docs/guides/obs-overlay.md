@@ -17,14 +17,16 @@ about once a second, so the text on stream changes within about one to two secon
 
 ## Choose what viewers see
 
-The app's **Overlay** page:
+The app's **Overlay** page, **Display** tab:
 
 - **What OBS shows:** both numbers on two lines, both on one line, the estimated total only, or confirmed chests only - each
   with an example using your current numbers.
 - **Wording:** `#` is where the number goes (`Chests opened: #`, `Chest Hunt: #/500`). For one line, `#C` = confirmed and
   `#A` = estimated total. **Original wording** restores the defaults. Any text, symbols and emoji work (with an OBS font that
   has them).
-- **Preview** shows exactly what the file will contain; **Apply** updates OBS at once, even while counting.
+- **Preview** shows exactly what the file will contain; **Save changes** (top of the page) updates OBS at once, even while counting.
+  Until you save, the page says **Unsaved changes**; **Discard changes** goes back to what is saved. Leaving the page with
+  unsaved changes asks whether to save them.
 
 The app cannot hide a Text source you already added in OBS: if a number on stream looks wrong, that source probably reads
 another file.
@@ -37,8 +39,9 @@ written either way - nothing else changes.
 
 1. In OBS: **Tools > WebSocket Server Settings** > tick **Enable WebSocket server** (port **4455**). Leave
    **Enable Authentication** on and click **Show Connect Info** to see the password.
-2. In the app: **Overlay** page > **OBS WebSocket** > tick **Update a Text source in OBS directly**, paste the password,
-   click **Connect**.
+2. In the app: **Overlay** page > **OBS WebSocket** tab > tick **Update a Text source in OBS directly**, paste the password,
+   click **Save and connect**. (The password goes to Windows Credential Manager. **Connect** alone reconnects with the
+   saved settings; **Forget password** asks first and deletes it at once.)
 3. Pick your **Text source** in the list (Refresh lists them). Use a Text source **without** "Read from file" - or, if it
    reads the file, click **Use direct updates** (the app never changes that setting by itself).
 

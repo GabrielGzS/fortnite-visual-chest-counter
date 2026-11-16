@@ -252,6 +252,135 @@ def test_diagnostics_report_the_active_profiles_hud_scale():
         assert "HUD Scale:        75% (experimental) (active profile)" in buf.getvalue(), buf.getvalue()
 
 
+# ------------------------------------------------------------------ tabs: one page, one Save
+
+TAB_OF = {"language": 0, "hud": 0, "fps": 0, "match_on": 1, "heartbeat": 1, "logging": 1, "snapshots": 1, "lossless": 1,
+          "remember_window": 2, "update_auto": 2, "update_bandwidth": 2, "update_limit": 2, "update_unit": 2}
+
+
+def config_bytes(w):
+    path = w.dir / "config.toml"
+    return path.read_bytes() if path.exists() else None
+
+
+def test_every_setting_is_on_exactly_one_tab():
+    with shown() as (w, page, _):
+        assert [page.tab_buttons.button(i).text() for i in range(4)] == ["Gameplay", "Tracking", "Application", "Advanced"]
+        for name, tab in TAB_OF.items():
+            widget = getattr(page, name)
+            holders = [i for i, scroll in enumerate(page.tab_scrolls) if scroll.widget().isAncestorOf(widget)]
+            assert holders == [tab], f"{name} is on tabs {holders}"
+
+
+def test_switching_tabs_keeps_unsaved_changes_and_asks_nothing():
+    with shown() as (w, page, asked):
+        hud_75(page)
+        page.show_tab(2)
+        page.update_auto.setChecked(not page.update_auto.isChecked())
+        wanted = page.update_auto.isChecked()
+        for index in (1, 3, 0, 2):
+            page.show_tab(index)
+        assert asked == [] and page.hud.currentData() == "75" and page.is_dirty()
+        assert page.save() is True and page.current_tab() == 2, "Save keeps the tab on screen"
+        cfg = settings.load_config(w.dir / "config.toml")[0]
+        assert active_hud(w) == "75" and cfg["update"]["check_automatically"] is wanted
+
+
+def test_discard_shows_the_saved_settings_on_every_tab_and_keeps_the_tab():
+    with shown() as (w, page, _):
+        hud_75(page)
+        page.show_tab(1)
+        page.match_on.setChecked(not page.match_on.isChecked())
+        assert page.discard_button.isEnabled()
+        page.discard_button.click()
+        assert page.current_tab() == 1 and page.hud.currentData() == "standard" and not page.is_dirty()
+        assert not page.discard_button.isEnabled() and page.saved.text() == "All changes saved"
+
+
+def test_a_failed_save_writes_nothing_at_all():
+    with shown() as (w, page, _):
+        before = config_bytes(w)
+        registry = w.dir / "state" / "profiles.json"
+        registry_before = registry.read_bytes() if registry.exists() else None
+        page.fps.setCurrentIndex((page.fps.currentIndex() + 1) % page.fps.count())
+        hud_75(page)
+        with patch.object(profiles, "set_hud", side_effect=profiles.ProfileError("locked")):
+            assert page.save() is False
+        assert config_bytes(w) == before, "the pictures-per-second change written first was put back"
+        assert (registry.read_bytes() if registry.exists() else None) == registry_before and page.is_dirty()
+        assert page.save() is True and active_hud(w) == "75"
+
+
+def test_saving_only_the_hud_scale_leaves_config_toml_alone():
+    with shown() as (w, page, _):
+        before = config_bytes(w)
+        hud_75(page)
+        assert page.save() is True and config_bytes(w) == before and active_hud(w) == "75"
+
+
+# ------------------------------------------------------------------ the rules of one Save (Qt-free)
+
+def test_save_state_rules():
+    from fortnite_chest_counter.gui.save_state import SaveState
+    shown_status, values = [], {"a": 1, "b": [1, 2]}
+    state = SaveState(lambda: dict(values), lambda status, text: shown_status.append((status, text)))
+    values["a"] = 5
+    state.changed()
+    assert not state.is_dirty() and state.changes() == {} and shown_status == [], "nothing counts while the page fills its widgets"
+    state.loaded()
+    assert state.status == "clean" and not state.is_dirty()
+    values["a"] = 6
+    state.changed()
+    assert state.status == "unsaved" and state.changes() == {"a": 6}
+    values["a"] = 5
+    state.changed()
+    assert state.status == "clean", "changed back is no change"
+    values["b"] = [3]
+    state.changed()
+    state.failed("disk full")
+    assert state.status == "error" and state.is_dirty() and shown_status[-1] == ("error", "disk full")
+    values["b"] = [1, 2]
+    state.changed()
+    assert state.status == "clean" and not state.is_dirty(), "back to exactly what is saved, after a failed save too"
+    values["b"] = [3]
+    state.changed()
+    state.rebase("a", 9)                                   # saved elsewhere meanwhile: the user's own edit of b stays
+    assert state.saved_value("a") == 9 and state.changes() == {"a": 5, "b": [3]} and state.status == "unsaved"
+    values["a"] = 9
+    values["b"] = [1, 2]
+    state.changed()
+    assert state.status == "clean" and not state.is_dirty()
+    values["b"] = [4]
+    state.saved("saved!")
+    assert state.status == "saved" and not state.is_dirty() and state.saved_value("b") == [4]
+
+
+def test_config_sections_are_written_together_or_not_at_all():
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        path = Path(tmp) / "config.toml"
+        path.write_bytes(b"# mine\r\n[display]\r\nshow = \"certain\"\r\n")
+        original = path.read_bytes()
+        try:
+            C.update_config_sections(path, {"logging": {"enabled": False}, "detector": {"process_fps": 999}})
+            raise AssertionError("an invalid value must be refused")
+        except C.UserError as error:
+            assert "process_fps" in str(error) and "Nothing was changed" in str(error) and ".candidate" not in str(error)
+        assert path.read_bytes() == original and not list(Path(tmp).glob("*.candidate")) and not list(Path(tmp).glob("*.tmp"))
+        before = C.update_config_sections(path, {"logging": {"enabled": False}, "detector": {"process_fps": 10}})
+        assert before == original
+        cfg = settings.load_config(path)[0]
+        assert cfg["logging"]["enabled"] is False and cfg["detector"]["process_fps"] == 10 and cfg["display"]["show"] == "certain"
+        assert path.read_text(encoding="utf-8").startswith("# mine"), "comments and other lines are kept"
+        C.restore_config_file(path, before)
+        assert path.read_bytes() == original, "put back byte for byte"
+        missing = Path(tmp) / "new" / "config.toml"
+        assert C.update_config_sections(missing, {"logging": {"enabled": False}}) is None and missing.exists()
+        C.restore_config_file(missing, None)
+        assert not missing.exists()
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     failed = 0

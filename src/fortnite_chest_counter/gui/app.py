@@ -13,6 +13,7 @@ import ctypes
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -36,6 +37,7 @@ from fortnite_chest_counter import match_analytics, match_history, paths, predic
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import charts, release_notes, theme
 from fortnite_chest_counter.gui import update_manager as UM
+from fortnite_chest_counter.gui.save_state import SaveState
 from fortnite_chest_counter.gui.worker import Worker, run_command
 from fortnite_chest_counter.obs import credentials as obs_credentials
 from fortnite_chest_counter.obs.link import TextOutputLink
@@ -393,6 +395,66 @@ def page_layout(widget, title, subtitle, header=None):
     return layout
 
 
+def tabbed_page_layout(widget, title, subtitle, header, tabs):
+    """A page with tabs (Settings, Overlay): the title and `header` (the save status and its buttons) in a bar that never scrolls,
+    the subtitle and a row of tabs under it, then one scrolling area per tab. The tabs look like the Dashboard's and Analytics'
+    view buttons. -> one content layout per tab. Sets widget.tab_buttons, widget.tab_stack, widget.tab_scrolls and
+    widget.page_scroll (the scrolling area of the tab on screen)."""
+    widget.setObjectName("page")
+    outer = QVBoxLayout(widget)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(0)
+    bar = QWidget()
+    bar.setObjectName("page")
+    row = QHBoxLayout(bar)
+    row.setContentsMargins(30, 16, 30, 12)
+    row.setSpacing(14)
+    row.addWidget(label(title, "pageTitle"))
+    for part in header:
+        row.addWidget(part, 1 if isinstance(part, QLabel) else 0)
+    outer.addWidget(bar)
+    outer.addWidget(hline())
+    top = QWidget()
+    top.setObjectName("page")
+    top_layout = QVBoxLayout(top)
+    top_layout.setContentsMargins(30, 12, 30, 0)
+    top_layout.setSpacing(8)
+    if subtitle:
+        top_layout.addWidget(label(subtitle, "pageSub", wrap=True))
+    segments = QHBoxLayout()
+    segments.setSpacing(4)
+    widget.tab_buttons = QButtonGroup(widget)
+    for index, name in enumerate(tabs):
+        tab = button(name, "segment")
+        tab.setCheckable(True)
+        widget.tab_buttons.addButton(tab, index)
+        segments.addWidget(tab)
+    segments.addStretch(1)
+    top_layout.addLayout(segments)
+    outer.addWidget(top)
+    outer.addWidget(hline())
+    widget.tab_stack = QStackedWidget()
+    widget.tab_scrolls, layouts = [], []
+    for _ in tabs:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner = QWidget()
+        inner.setObjectName("page")
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(30, 16, 30, 24)
+        layout.setSpacing(16)
+        scroll.setWidget(inner)
+        widget.tab_stack.addWidget(scroll)
+        widget.tab_scrolls.append(scroll)
+        layouts.append(layout)
+    outer.addWidget(widget.tab_stack, 1)
+    widget.tab_buttons.button(0).setChecked(True)
+    widget.page_scroll = widget.tab_scrolls[0]
+    return layouts
+
+
 class WheelToPage(QObject):
     """A mouse wheel turned over a choice or number box scrolls the page instead of changing the setting under the pointer (v0.5.1:
     scrolling down Settings changed settings by accident). Clicks and the keyboard still change them; an open drop-down list still scrolls."""
@@ -409,14 +471,14 @@ class WheelToPage(QObject):
 
 
 def ask_unsaved(parent, action):
-    """Settings has changes nobody saved. -> "save", "discard" or "stay"."""
+    """A settings page (Settings, Overlay) has changes nobody saved. -> "save", "discard" or "stay"."""
     box = QMessageBox(parent)
     box.setWindowTitle("Unsaved settings")
     box.setIcon(QMessageBox.Warning)
     box.setText(f"You changed settings without saving them.\n\nSave them before you {action}?")
     save = box.addButton("Save changes", QMessageBox.AcceptRole)
     discard = box.addButton("Discard changes", QMessageBox.DestructiveRole)
-    stay = box.addButton("Stay on Settings", QMessageBox.RejectRole)
+    stay = box.addButton(f"Stay on {getattr(parent, 'page_name', 'Settings')}", QMessageBox.RejectRole)
     box.setDefaultButton(save)
     box.setEscapeButton(stay)
     box.exec()
@@ -1639,14 +1701,131 @@ class Dashboard(QWidget):
         self.notice.show()
 
 
-class OverlayPage(QWidget):
-    """Configure Counter.bat, as a page: what OBS shows (always the same file) and its wording."""
+_NOT_WRITTEN = object()          # a save step that never ran: nothing of it to put back
+
+
+class SavedPage(QWidget):
+    """
+    A page of saved settings with tabs and ONE Save for all of them (Settings, Overlay). The save status, Discard changes and Save
+    changes stay in view above the tabs. Switching tabs only changes what is on screen: unsaved changes on every tab stay and nothing
+    asks. Leaving the page or closing the app with unsaved changes asks: save, discard or stay (confirm_leave). A save writes only
+    what changed, all or nothing, and reports success only after reading it back; a failed save keeps the changes on the page.
+    Buttons that act at once (Connect, Refresh, Copy path, Check for updates, ...) are not settings and never mark the page unsaved.
+
+    A page builds its widgets into the layouts _build() returns, calls _watch_inputs() last, and implements _values() (every editable
+    setting, {name: value} in saved units), load() (between save_state.loading() and save_state.loaded()) and save().
+    """
+    page_name = "Settings"
+    unreadable = frozenset()            # (section, key) of values in config.toml that did not load when the page was filled
+
+    @staticmethod
+    def _unreadable(warnings):
+        """(section, key) of the values in config.toml that did not load (a typo, a value out of range). The page shows the default
+        the counter uses instead, and the next save writes that default, so the warning goes away - as saving always did."""
+        found = set()
+        for warning in warnings:
+            match = re.search(r": \[([^\]]+)\] ([A-Za-z0-9_]+) = ", warning)
+            if match:
+                found.add((match.group(1), match.group(2)))
+        return frozenset(found)
+
+    def _build(self, title, subtitle, tabs):
+        self.saved = label("", "hint", wrap=True)
+        self.discard_button = button("Discard changes", tip="Show the saved settings again, on every tab", on_click=self.discard)
+        self.save_button = button("Save changes", "primary", on_click=self.save)
+        self.save_state = SaveState(self._values, self._show_status)
+        layouts = tabbed_page_layout(self, title, subtitle, (self.saved, self.discard_button, self.save_button), tabs)
+        self.tab_buttons.idClicked.connect(self.show_tab)
+        return layouts
+
+    def _watch_inputs(self):
+        """Every input on every tab updates the save status; a mouse wheel over a choice or number box scrolls its tab instead."""
+        for scroll in self.tab_scrolls:
+            content = scroll.widget()
+            guard = WheelToPage(scroll)
+            for box in content.findChildren(QComboBox) + content.findChildren(QSpinBox):
+                box.setFocusPolicy(Qt.StrongFocus)                  # the wheel neither changes nor focuses it
+                box.installEventFilter(guard)
+                (box.valueChanged if isinstance(box, QSpinBox) else box.currentIndexChanged).connect(self._changed)
+            for box in content.findChildren(QCheckBox) + content.findChildren(QRadioButton):
+                box.toggled.connect(self._changed)
+            for edit in content.findChildren(QLineEdit):
+                if not edit.isReadOnly() and not isinstance(edit.parent(), (QSpinBox, QComboBox)):
+                    edit.textChanged.connect(self._changed)
+        self._show_status("clean")
+
+    def show_tab(self, index):
+        """Only changes what is on screen."""
+        self.tab_stack.setCurrentIndex(index)
+        self.tab_buttons.button(index).setChecked(True)
+        self.page_scroll = self.tab_scrolls[index]
+
+    def current_tab(self):
+        return self.tab_stack.currentIndex()
+
+    # ---- unsaved changes
+    def _changed(self, *_):
+        self.save_state.changed()
+
+    def is_dirty(self):
+        return self.save_state.is_dirty()
+
+    def _saved_text(self):
+        return "✓ Saved."
+
+    def _show_status(self, status, text=""):
+        if status == "saved":
+            words, color, bold = text or self._saved_text(), theme.CERTAIN, True
+        else:
+            words, color, bold = {"clean": ("All changes saved", theme.MUTED, False), "unsaved": ("● Unsaved changes", theme.APPROX, True),
+                                  "error": (f"Not saved: {text}", theme.REJECT, True)}[status]
+        self.saved.setText(words)
+        self.saved.setStyleSheet(f"color: {color};" + (" font-weight: 600;" if bold else ""))
+        pending = status in ("unsaved", "error")
+        self.save_button.setEnabled(pending)
+        self.discard_button.setEnabled(pending)
+        self._status_shown(status)
+
+    def _status_shown(self, status):
+        """For a page whose buttons depend on the save status (Overlay: Connect / Save and connect)."""
+
+    def discard(self):
+        """Back to what is saved, on every tab. The tab on screen stays."""
+        self.load()
+
+    def confirm_leave(self, action=None):
+        """Before the page is left (another page, closing the app): unsaved changes are saved, discarded or kept by staying, as the user
+        chooses - never dropped silently. -> True if leaving may go ahead. A page nobody can see asks nothing."""
+        if not self.is_dirty() or not self.isVisible():
+            return True
+        choice = ask_unsaved(self, action or f"leave {self.page_name}")
+        if choice == "save":
+            return self.save()
+        if choice == "discard":
+            self.load()
+            return True
+        return False
+
+
+class OverlayPage(SavedPage):
+    """
+    What viewers see, in two tabs: Display (the ONE text file OBS reads, its wording) and OBS WebSocket (the same text put straight into
+    an OBS Text source). One Save for both; a saved change is used at once, also while counting - the counter re-reads the wording
+    within a second, and OBS is reconnected only when its address or password changed. Connect, Refresh, Copy path and Use direct
+    updates act at once with the SAVED settings; Forget password asks first.
+    """
+    page_name = "Overlay"
+    TABS = ("Display", "OBS WebSocket")
 
     def __init__(self, win):
         super().__init__()
         self.win = win
-        layout = page_layout(self, "Overlay", "What your viewers see. The counter writes ONE text file; OBS shows it with a "
-                                              "Text source. Fonts, colours and size are set in OBS.")
+        self._loading = False
+        self.display = {}
+        self._source = ("", "")                 # the OBS Text source picked on this page (name, OBS id), saved or not
+        display, obs_tab = self._build("Overlay", "What your viewers see. The counter writes ONE text file; OBS shows it with a Text "
+                                                  "source. Fonts, colours and size are set in OBS. Saved changes are used at once, "
+                                                  "also while counting.", self.TABS)
         box, box_layout = card("What OBS shows")
         self.modes = QButtonGroup(self)
         self.mode_buttons = {}
@@ -1655,8 +1834,7 @@ class OverlayPage(QWidget):
             self.modes.addButton(radio, i)
             self.mode_buttons[mode] = radio
             box_layout.addWidget(radio)
-            radio.toggled.connect(self._changed)
-        layout.addWidget(box)
+        display.addWidget(box)
 
         box, box_layout = card("Wording", "Put # where the number goes, e.g.  Chests opened: #   or   Chest Hunt: #/500")
         form = QGridLayout()
@@ -1673,25 +1851,23 @@ class OverlayPage(QWidget):
                                            (self.line_label, self.line_text))):
             form.addWidget(lab, row, 0)
             form.addWidget(edit, row, 1)
-            edit.textChanged.connect(self._changed)
         form.setColumnStretch(1, 1)
         box_layout.addLayout(form)
         self.line_hint = label("For one line: #C = confirmed number, #A = estimated total.", "hint")
         box_layout.addWidget(self.line_hint)
         self.thousands = QCheckBox("Thousands separator (1,234 instead of 1234)")
-        self.thousands.toggled.connect(self._changed)
         box_layout.addWidget(self.thousands)
         row = QHBoxLayout()
         row.addWidget(button("Original wording", "link", on_click=self._defaults))
         row.addStretch(1)
         box_layout.addLayout(row)
-        layout.addWidget(box)
+        display.addWidget(box)
 
         box, box_layout = card("Preview", "Exactly what the text file contains (shown on black, like a stream overlay).")
         self.preview = label("", "overlayBox")
         self.preview.setTextFormat(Qt.PlainText)
         box_layout.addWidget(self.preview)
-        layout.addWidget(box)
+        display.addWidget(box)
 
         box, box_layout = card("OBS setup", 'In OBS: add a "Text (GDI+)" source, tick "Read from file" and choose this file. '
                                             "It never changes, whatever you pick above.")
@@ -1702,19 +1878,15 @@ class OverlayPage(QWidget):
         row.addWidget(button("Copy path", on_click=self._copy_path))
         row.addWidget(button("Open folder", on_click=lambda: open_path(Path(self.obs_path.text()).parent)))
         box_layout.addLayout(row)
-        layout.addWidget(box)
-
-        row = QHBoxLayout()
-        self.saved = label("", "hint")
-        row.addWidget(self.saved, 1)
-        row.addWidget(button("Undo changes", on_click=self.load))
-        row.addWidget(button("Apply", "primary", on_click=self.apply))
-        layout.addLayout(row)
+        self.copy_note = label("", "hint")
+        box_layout.addWidget(self.copy_note)
+        display.addWidget(box)
+        display.addStretch(1)
 
         box, box_layout = card("OBS WebSocket (optional)",
                                "Instead of OBS reading the text file (it looks about once a second), the app can put the "
                                "same text straight into a Text source in OBS: every change shows at once and no file path "
-                               "is needed. The text file is still written either way. Changes here apply immediately.")
+                               "is needed. The text file is still written either way.")
         self.ws_enabled = QCheckBox("Update a Text source in OBS directly (OBS WebSocket)")
         self.ws_enabled.toggled.connect(self._ws_toggled)
         box_layout.addWidget(self.ws_enabled)
@@ -1756,16 +1928,27 @@ class OverlayPage(QWidget):
                                 on_click=lambda: self.win.obs_link.use_direct_updates())
         self.ws_direct.hide()
         row.addWidget(self.ws_direct, 0, Qt.AlignTop)
-        self.ws_connect = button("Connect", "primary", on_click=self._ws_connect)
+        self.ws_connect = button("Connect", "primary", tip="Connect to OBS now with the saved settings", on_click=self._ws_connect)
         row.addWidget(self.ws_connect, 0, Qt.AlignTop)
         box_layout.addLayout(row)
-        layout.addWidget(box)
-        layout.addStretch(1)
-        self._loading = False
+        obs_tab.addWidget(box)
+        obs_tab.addStretch(1)
+        self._watch_inputs()
+
+    # ---- the saved settings
+    def _values(self):
+        """Every editable setting in saved units. The wording counts as the [display] settings it would save (so a text that changes
+        nothing in the file is no change); a typed password counts only as "a new password was typed", never as its text."""
+        return {"display": {**self.display, **self.display_changes()}, "ws_enabled": self.ws_enabled.isChecked(),
+                "ws_host": self.ws_host.text().strip(), "ws_port": self.ws_port.value(), "ws_source": self._source,
+                "ws_new_password": bool(self.ws_password.text())}
 
     def load(self):
+        """The saved overlay settings into both tabs: whatever was changed and not saved is replaced. The tab on screen stays."""
         self._loading = True
-        cfg, _ = load_cfg()
+        self.save_state.loading()
+        cfg, warnings = load_cfg()
+        self.unreadable = self._unreadable(warnings)
         self.display = cfg["display"]
         self.obs_path.setText(str((paths.APP_DIR / cfg["state"]["obs_dir"] / "chest_counter.txt").resolve()))
         self.mode_buttons[C.display_mode(self.display)].setChecked(True)
@@ -1774,62 +1957,180 @@ class OverlayPage(QWidget):
         self.line_text.setText(C.markers_from_line(self.display["combined_status_format"]))
         self.thousands.setChecked(self.display["use_thousands_separator"])
         ws = cfg["obs_websocket"]
-        self.ws_enabled.blockSignals(True)
         self.ws_enabled.setChecked(ws["enabled"])
-        self.ws_enabled.blockSignals(False)
-        self.ws_box.setEnabled(ws["enabled"])
-        self.ws_connect.setEnabled(ws["enabled"])
+        self._ws_toggled(ws["enabled"])
         self.ws_host.setText(ws["host"])
         self.ws_port.setValue(ws["port"])
         self.ws_password.clear()
         self._ws_password_hint()
+        self._source = (ws["source"], ws["source_uuid"])
         self._loading = False
-        self.saved.setText("")
         self._changed()
+        self.save_state.loaded()
+        self.copy_note.setText("")
         self.show_obs_status(self.win.obs_link.status()[1])
 
-    # ---- OBS WebSocket card
+    def _saved_text(self):
+        return "✓ Overlay saved."
+
+    def save(self, connect=False):
+        """
+        Write what changed - [display] and [obs_websocket] in ONE checked write of config.toml, a newly typed OBS password into Windows
+        Credential Manager - read it back, and only then use it: the OBS text files are rewritten when the wording changed and the
+        counter is not running (a running counter re-reads it within a second), and OBS is reconnected only when its address or
+        password changed (`connect`: Save and connect, always). All or nothing: if the password cannot be stored, config.toml is put
+        back as it was. An empty password box never touches the saved password. -> True when saved.
+        """
+        values, changes = self._values(), self.save_state.changes()
+        self.save_button.setEnabled(False)
+        sections, obs = {}, {}
+        before = self.save_state.saved_value("display") or {}
+        sections["display"] = {k: v for k, v in values["display"].items() if before.get(k) != v or ("display", k) in self.unreadable}
+        for name, key in (("ws_enabled", "enabled"), ("ws_host", "host"), ("ws_port", "port")):
+            if name in changes:
+                obs[key] = changes[name]
+        if "ws_source" in changes:
+            obs["source"], obs["source_uuid"] = changes["ws_source"]
+        shown = {"enabled": values["ws_enabled"], "host": values["ws_host"], "port": values["ws_port"],
+                 "source": values["ws_source"][0], "source_uuid": values["ws_source"][1]}
+        repaired = {key: shown[key] for section, key in self.unreadable if section == "obs_websocket" and key in shown}
+        sections["obs_websocket"] = {**repaired, **obs}          # a repaired default is written, but it changes nothing OBS uses
+        typed = self.ws_password.text()
+        original, old_password = _NOT_WRITTEN, None
+        try:
+            if "host" in obs and (not obs["host"] or any(c.isspace() for c in obs["host"])):
+                raise C.UserError("enter the PC that runs OBS: 127.0.0.1 for this PC, or that PC's IPv4 address (for example "
+                                  "192.168.1.50)")
+            if len(typed) > obs_credentials.MAX_PASSWORD:
+                raise C.UserError(f"the OBS password is longer than {obs_credentials.MAX_PASSWORD} characters")
+            if any(sections.values()):
+                original = C.update_config_sections(config_file(), {s: v for s, v in sections.items() if v})
+            if typed:
+                old_password = obs_credentials.load_password()
+                try:
+                    obs_credentials.save_password(typed)
+                except (OSError, ValueError) as error:
+                    raise C.UserError(f"the password could not be saved in Windows Credential Manager ({error})") from error
+                if obs_credentials.load_password() != typed:
+                    raise C.UserError("the password did not read back from Windows Credential Manager")
+            cfg, _ = load_cfg()
+        except (C.UserError, OSError) as error:
+            self._undo_save(original, old_password)
+            self.save_state.failed(str(error))
+            show_error(self, f"The Overlay settings were not saved: {error}")
+            return False
+        wording = "display" in changes
+        reconnect = connect or bool(typed) or "host" in obs or "port" in obs
+        self.unreadable = frozenset()                            # every default shown was written
+        self.display = cfg["display"]
+        self._loading = True
+        self.ws_password.clear()                   # stored: the box goes back to "Saved - type a new one to replace it"
+        self._loading = False
+        self._ws_password_hint()
+        running = self.win.worker.running()
+        self.save_state.saved("✓ Overlay saved." + ("" if not wording else " The counter updates the OBS text within a second."
+                                                     if running else " The OBS text file was updated."))
+        # used only now that it is saved and read back
+        if wording:
+            if not running:
+                self.win.write_obs_files()
+            self.win.refresh_viewers()
+        if obs or typed or connect:
+            self.win.apply_obs_settings(reconnect=reconnect)
+        self._changed()
+        return True
+
+    def _undo_save(self, original, old_password):
+        """A save step failed: put back what the earlier steps wrote (best effort; the error is reported either way)."""
+        if old_password is not None:
+            try:
+                obs_credentials.save_password(old_password)       # "" = there was none: deleted again
+            except (OSError, ValueError):
+                pass
+        if original is not _NOT_WRITTEN:
+            try:
+                C.restore_config_file(config_file(), original)
+            except OSError:
+                pass
+
+    # ---- Display tab
+    def _mode(self):
+        return next(m for m, b in self.mode_buttons.items() if b.isChecked())
+
+    def display_changes(self):
+        """The [display] settings the page shows (only the wording of the chosen layout; an empty box keeps the saved text)."""
+        mode = self._mode()
+        texts = {"use_thousands_separator": self.thousands.isChecked()}
+        if mode == "inline":
+            if self.line_text.text().strip():
+                texts["combined_status_format"] = C.line_from_markers(self.line_text.text())
+        else:
+            if mode in ("certain", "stacked") and self.certain_text.text().strip():
+                texts["certain_text"] = C.text_from_hash(self.certain_text.text())
+            if mode in ("approx", "stacked") and self.approx_text.text().strip():
+                texts["approx_text"] = C.text_from_hash(self.approx_text.text())
+        return {**C.MODE_SETTINGS[mode], **texts}
+
+    def _state(self):
+        certain, approx = self.win.counts
+        return {"certain": certain, "approximate": approx}
+
+    def _changed(self, *_):
+        if self._loading:
+            return
+        mode = self._mode()
+        self.certain_label.setVisible(mode in ("certain", "stacked"))
+        self.certain_text.setVisible(mode in ("certain", "stacked"))
+        self.approx_label.setVisible(mode in ("approx", "stacked"))
+        self.approx_text.setVisible(mode in ("approx", "stacked"))
+        for widget in (self.line_label, self.line_text, self.line_hint):
+            widget.setVisible(mode == "inline")
+        state = self._state()
+        self.preview.setText(C.overlay_text({**self.display, **self.display_changes()}, state))
+        for m, radio in self.mode_buttons.items():
+            example = C.overlay_text({**self.display, **C.MODE_SETTINGS[m]}, state).replace("\n", "  /  ")
+            radio.setText(f"{C.MODE_DESCRIPTIONS[m][0].upper()}{C.MODE_DESCRIPTIONS[m][1:]}      e.g.  {example}")
+        super()._changed()
+
+    def _defaults(self):
+        d = settings.DEFAULTS["display"]
+        self.certain_text.setText(C.hash_from_text(d["certain_text"]))
+        self.approx_text.setText(C.hash_from_text(d["approx_text"]))
+        self.line_text.setText(C.markers_from_line(d["combined_status_format"]))
+
+    def _copy_path(self):
+        QApplication.clipboard().setText(self.obs_path.text())
+        self.copy_note.setText("Path copied - paste it into the OBS Text source.")
+
+    # ---- OBS WebSocket tab
+    def _status_shown(self, status):
+        self.ws_connect.setText("Save and connect" if status in ("unsaved", "error") else "Connect")
+        self.ws_connect.setToolTip("Save the changes on this page, then connect to OBS" if status in ("unsaved", "error") else
+                                   "Connect to OBS now with the saved settings")
+
     def _ws_password_hint(self):
         saved = obs_credentials.has_password()
         self.ws_password.setPlaceholderText("Saved - type a new one to replace it" if saved else
                                             "From OBS: Show Connect Info (leave empty if OBS asks for none)")
         self.ws_forget.setVisible(saved)
 
-    def _ws_save(self, values):
-        try:
-            C.update_config_file(config_file(), "obs_websocket", values)
-            return True
-        except (C.UserError, OSError) as error:
-            show_error(self, str(error))
-            return False
-
     def _ws_toggled(self, on):
-        if self._loading:
-            return
-        if self._ws_save({"enabled": on}):
-            self.ws_box.setEnabled(on)
-            self.ws_connect.setEnabled(on)
-            self.win.apply_obs_settings()
+        """Only what the tab shows; it is saved with Save changes."""
+        self.ws_box.setEnabled(on)
+        self.ws_connect.setEnabled(on)
 
     def _ws_connect(self):
-        host = self.ws_host.text().strip()
-        if not host or any(c.isspace() for c in host):
-            show_error(self, 'Enter the PC that runs OBS: 127.0.0.1 for this PC, or that PC\'s IPv4 address (for example '
-                             '192.168.1.50).')
-            return
-        typed = self.ws_password.text()
-        if typed:
-            try:
-                obs_credentials.save_password(typed)
-            except (OSError, ValueError) as error:
-                show_error(self, f"The password could not be saved in Windows Credential Manager ({error}).")
-                return
-            self.ws_password.clear()
-            self._ws_password_hint()
-        if self._ws_save({"host": host, "port": self.ws_port.value()}):
+        """Connect now with the saved settings. With unsaved changes on the page: Save and connect (a failed save does not connect)."""
+        if self.is_dirty():
+            self.save(connect=True)
+        else:
             self.win.apply_obs_settings(reconnect=True)
 
     def _ws_forget(self):
+        """Deletes the saved OBS password at once (it is a credential, not a setting waiting for Save) - after asking."""
+        if not ask(self, "Forget the OBS password?", "The OBS WebSocket password kept in Windows Credential Manager is deleted now.\n\n"
+                                                     "Your other overlay settings stay as they are.", "Forget password", danger=True):
+            return
         try:
             obs_credentials.forget_password()
         except OSError as error:
@@ -1849,10 +2150,19 @@ class OverlayPage(QWidget):
         data = self.ws_source.itemData(index)
         if not data:
             return
-        if self._ws_save({"source": data["name"], "source_uuid": data["uuid"]}):
-            self.win.apply_obs_settings()
+        self._source = (data["name"], data["uuid"])
+        self._changed()
+
+    def source_followed(self, name, uuid):
+        """OBS renamed the source (or its id became known) and the app saved that: it is the saved source now. A different source
+        picked here and not saved yet stays picked."""
+        if self._source == self.save_state.saved_value("ws_source"):
+            self._source = (name, uuid)
+        self.save_state.rebase("ws_source", (name, uuid))
 
     def show_obs_status(self, status):
+        """What the OBS link reports (often, in the background). It never changes a setting on the page: the source list keeps showing
+        the source picked here, saved or not."""
         name, color = OBS_STATES.get(status["state"], (status["state"], theme.MUTED))
         details = status.get("message", "")
         if status.get("obs") and status["state"] not in ("off", "connecting"):
@@ -1863,7 +2173,7 @@ class OverlayPage(QWidget):
         self.ws_source.blockSignals(True)
         self.ws_source.clear()
         found = status.get("sources") or []
-        current = status.get("source") or load_cfg()[0]["obs_websocket"]["source"]
+        current = self._source[0]
         if not found:
             self.ws_source.addItem(current or "(connect to list OBS's Text sources)", None)
         else:
@@ -1876,81 +2186,19 @@ class OverlayPage(QWidget):
                     self.ws_source.setCurrentIndex(self.ws_source.count() - 1)
         self.ws_source.blockSignals(False)
 
-    def _mode(self):
-        return next(m for m, b in self.mode_buttons.items() if b.isChecked())
 
-    def changes(self):
-        mode = self._mode()
-        texts = {"use_thousands_separator": self.thousands.isChecked()}
-        if mode == "inline":
-            if self.line_text.text().strip():
-                texts["combined_status_format"] = C.line_from_markers(self.line_text.text())
-        else:
-            if mode in ("certain", "stacked") and self.certain_text.text().strip():
-                texts["certain_text"] = C.text_from_hash(self.certain_text.text())
-            if mode in ("approx", "stacked") and self.approx_text.text().strip():
-                texts["approx_text"] = C.text_from_hash(self.approx_text.text())
-        return {**C.MODE_SETTINGS[mode], **texts}
+class SettingsPage(SavedPage):
+    page_name = "Settings"
+    TABS = ("Gameplay", "Tracking", "Application", "Advanced")
 
-    def _state(self):
-        certain, approx = self.win.counts
-        return {"certain": certain, "approximate": approx}
-
-    def _changed(self):
-        if self._loading:
-            return
-        mode = self._mode()
-        self.certain_label.setVisible(mode in ("certain", "stacked"))
-        self.certain_text.setVisible(mode in ("certain", "stacked"))
-        self.approx_label.setVisible(mode in ("approx", "stacked"))
-        self.approx_text.setVisible(mode in ("approx", "stacked"))
-        for widget in (self.line_label, self.line_text, self.line_hint):
-            widget.setVisible(mode == "inline")
-        preview = {**self.display, **self.changes()}
-        self.preview.setText(C.overlay_text(preview, self._state()))
-        state = self._state()
-        for m, radio in self.mode_buttons.items():
-            example = C.overlay_text({**self.display, **C.MODE_SETTINGS[m]}, state).replace("\n", "  /  ")
-            radio.setText(f"{C.MODE_DESCRIPTIONS[m][0].upper()}{C.MODE_DESCRIPTIONS[m][1:]}      e.g.  {example}")
-        pending = any(self.display.get(k) != v for k, v in self.changes().items())
-        self.saved.setText("Not applied yet." if pending else "")
-
-    def _defaults(self):
-        d = settings.DEFAULTS["display"]
-        self.certain_text.setText(C.hash_from_text(d["certain_text"]))
-        self.approx_text.setText(C.hash_from_text(d["approx_text"]))
-        self.line_text.setText(C.markers_from_line(d["combined_status_format"]))
-
-    def _copy_path(self):
-        QApplication.clipboard().setText(self.obs_path.text())
-        self.saved.setText("Path copied - paste it into the OBS Text source.")
-
-    def apply(self):
-        changes = self.changes()
-        try:
-            C.update_config_file(config_file(), "display", changes)
-        except (C.UserError, OSError) as error:
-            show_error(self, str(error))
-            return
-        if not self.win.worker.running():
-            self.win.write_obs_files()
-        self.load()
-        self.saved.setText("Applied. " + ("The counter updates the OBS text within a second."
-                                          if self.win.worker.running() else "The OBS text file was updated."))
-        self.win.refresh_viewers()
-
-
-class SettingsPage(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win = win
         # v0.5.1: the save status and Save stay in view at the top while the page scrolls (Save used to be at the very bottom, with nothing
         # telling you a change was not saved yet - a 75% HUD Scale chosen but never saved looked exactly like one that was)
-        self.saved = label("", "hint", wrap=True)
-        self.save_button = button("Save changes", "primary", on_click=self.save)
-        self._saved_values = None                  # what the widgets showed when the settings were last loaded or saved
-        layout = page_layout(self, "Settings", "Changes are saved in config.toml next to the app (the HUD Scale in the profile) and are "
-                                               "used the next time you press Start counting.", header=(self.saved, self.save_button))
+        gameplay, tracking, application, advanced = self._build(
+            "Settings", "Changes are saved in config.toml next to the app (the HUD Scale in the profile) and are used the next time you "
+                        "press Start counting.", self.TABS)
         box, box_layout = card("Fortnite language", "The language your Fortnite is set to - the counter reads the word in the "
                                                     "chest pop-up (CHEST / BAÚ). \"Both\" checks the two words all the time: "
                                                     "only useful for mixed footage. One language avoids a small risk of false "
@@ -1961,7 +2209,7 @@ class SettingsPage(QWidget):
         for text, langs in settings.LANGUAGE_CHOICES:
             self.language.addItem(text, langs)
         box_layout.addWidget(self.language)
-        layout.addWidget(box)
+        gameplay.addWidget(box)
 
         box, box_layout = card("Fortnite HUD Scale (this profile)",
                                "The HUD Scale set in Fortnite (Settings > Game UI > HUD Scale) changes the size of the chest pop-up and "
@@ -1974,7 +2222,7 @@ class SettingsPage(QWidget):
         box_layout.addWidget(self.hud)
         self.hud_profile = label("", "hint", wrap=True)
         box_layout.addWidget(self.hud_profile)
-        layout.addWidget(box)
+        gameplay.addWidget(box)
 
         box, box_layout = card("Pictures analysed per second",
                                "How many pictures of your gameplay the counter checks every second. A chest pop-up is "
@@ -1985,31 +2233,7 @@ class SettingsPage(QWidget):
         box_layout.addWidget(self.fps)
         self.fps_hint = label("", "hint", wrap=True)
         box_layout.addWidget(self.fps_hint)
-        layout.addWidget(box)
-
-        box, box_layout = card("Session logs", "Logs are small text files in the logs folder. They are what you send when "
-                                               "reporting a problem.")
-        self.logging = QCheckBox("Keep a log of every counting session")
-        self.snapshots = QCheckBox("Also save a small picture of every chest pop-up (to report missed or wrong chests)")
-        box_layout.addWidget(self.logging)
-        box_layout.addWidget(self.snapshots)
-        self.logging.toggled.connect(self.snapshots.setEnabled)
-        layout.addWidget(box)
-
-        box, box_layout = card("Diagnostic recording (advanced)",
-                               "Keeps exactly what the counter analyses, so a missed or wrong chest can be replayed and "
-                               "checked later - and every future version can be tested on it. Turn it on and off in the "
-                               "Dashboard's Console view, also while counting; press Ctrl+Alt+M while you play when the counter misses a chest.")
-        self.lossless = QCheckBox("Lossless: the replay sees exactly what the counter saw (about twice the disk space)")
-        box_layout.addWidget(self.lossless)
-        row = QHBoxLayout()
-        row.addWidget(button("Open captures folder", on_click=self._open_captures))
-        row.addWidget(button("Review captures...", tip="Replay every capture through the current detector and compare it "
-                                                       "with what was counted live and with your labels",
-                             on_click=lambda: ReviewDialog(self).exec()))
-        row.addStretch(1)
-        box_layout.addLayout(row)
-        layout.addWidget(box)
+        gameplay.addWidget(box)
 
         box, box_layout = card("Match tracking (experimental)",
                                "Follows your matches while counting, for match statistics. English games only for now. It never changes "
@@ -2028,12 +2252,36 @@ class SettingsPage(QWidget):
                                    "choose. A longer interval writes less to the disk, but after a crash more of the last moments count as uncertain.",
                                    "hint", wrap=True))
         self._match_mode = "off"
-        layout.addWidget(box)
+        tracking.addWidget(box)
+
+        box, box_layout = card("Session logs", "Logs are small text files in the logs folder. They are what you send when "
+                                               "reporting a problem.")
+        self.logging = QCheckBox("Keep a log of every counting session")
+        self.snapshots = QCheckBox("Also save a small picture of every chest pop-up (to report missed or wrong chests)")
+        box_layout.addWidget(self.logging)
+        box_layout.addWidget(self.snapshots)
+        self.logging.toggled.connect(self.snapshots.setEnabled)
+        tracking.addWidget(box)
+
+        box, box_layout = card("Diagnostic recording (advanced)",
+                               "Keeps exactly what the counter analyses, so a missed or wrong chest can be replayed and "
+                               "checked later - and every future version can be tested on it. Turn it on and off in the "
+                               "Dashboard's Console view, also while counting; press Ctrl+Alt+M while you play when the counter misses a chest.")
+        self.lossless = QCheckBox("Lossless: the replay sees exactly what the counter saw (about twice the disk space)")
+        box_layout.addWidget(self.lossless)
+        row = QHBoxLayout()
+        row.addWidget(button("Open captures folder", on_click=self._open_captures))
+        row.addWidget(button("Review captures...", tip="Replay every capture through the current detector and compare it "
+                                                       "with what was counted live and with your labels",
+                             on_click=lambda: ReviewDialog(self).exec()))
+        row.addStretch(1)
+        box_layout.addLayout(row)
+        tracking.addWidget(box)
 
         box, box_layout = card("Window")
         self.remember_window = QCheckBox("Remember window size and position (the app reopens the way you closed it)")
         box_layout.addWidget(self.remember_window)
-        layout.addWidget(box)
+        application.addWidget(box)
 
         box, box_layout = card("Updates", "Nothing is downloaded or installed unless you choose to. Your counts, profiles and settings are kept.")
         self.update_auto = QCheckBox("Check for updates automatically when the app opens")
@@ -2061,7 +2309,7 @@ class SettingsPage(QWidget):
         self.update_status = label("", "hint", wrap=True)
         row.addWidget(self.update_status, 1)
         box_layout.addLayout(row)
-        layout.addWidget(box)
+        application.addWidget(box)
 
         box, box_layout = card("Advanced", "Everything else (for example which evidence counts) is in config.toml. "
                                            "Edit it only if you know why; a typo shows a warning and uses the default.")
@@ -2070,70 +2318,36 @@ class SettingsPage(QWidget):
         row.addWidget(button("Open program folder", on_click=lambda: open_path(paths.APP_DIR)))
         row.addStretch(1)
         box_layout.addLayout(row)
-        layout.addWidget(box)
-        layout.addStretch(1)
+        advanced.addWidget(box)
+        for layout in (gameplay, tracking, application, advanced):
+            layout.addStretch(1)
+        self._watch_inputs()
 
-        self.wheel_guard = WheelToPage(self.page_scroll)
-        for box in self.findChildren(QComboBox) + self.findChildren(QSpinBox):
-            box.setFocusPolicy(Qt.StrongFocus)                  # the wheel neither changes nor focuses it
-            box.installEventFilter(self.wheel_guard)
-            (box.valueChanged if isinstance(box, QSpinBox) else box.currentIndexChanged).connect(self._changed)
-        for box in self.findChildren(QCheckBox):
-            box.toggled.connect(self._changed)
-        self._set_status("clean")
-
-    # ---- unsaved changes
+    # ---- the saved settings
     def _values(self):
-        """Every editable setting as the widgets show it, in saved units."""
-        return (self.language.currentData(), self.hud.currentData(), self.fps.currentData(), self.logging.isChecked(),
-                self.snapshots.isChecked(), self.lossless.isChecked(), self.match_on.isChecked(), self.heartbeat.currentData(),
-                self.remember_window.isChecked(), self.update_auto.isChecked(), self.update_bandwidth.currentData(),
-                self.update_limit.value() * (self.update_unit.currentData() or 1))
-
-    def is_dirty(self):
-        return self._saved_values is not None and self._values() != self._saved_values
-
-    def _changed(self, *_):
-        if self._saved_values is None:                          # still filling the widgets
-            return
-        if self.is_dirty():
-            self._set_status("unsaved")
-        elif self._status == "unsaved":                         # changed back to what is saved
-            self._set_status("clean")
-
-    def _set_status(self, status, text=None):
-        self._status = status
-        if status == "saved":
-            words, color, bold = ("✓ Settings saved." + (" Stop and start counting to use the new settings." if self.win.worker.running() else ""),
-                                  theme.CERTAIN, True)
-        else:
-            words, color, bold = {"clean": ("All changes saved", theme.MUTED, False), "unsaved": ("● Unsaved changes", theme.APPROX, True),
-                                  "error": (f"Not saved: {text}", theme.REJECT, True)}[status]
-        self.saved.setText(words)
-        self.saved.setStyleSheet(f"color: {color};" + (" font-weight: 600;" if bold else ""))
-        self.save_button.setEnabled(status in ("unsaved", "error"))
-
-    def confirm_leave(self, action="leave Settings"):
-        """Before the page is left (another page, a profile switch on the Dashboard, closing the app): unsaved changes are saved, discarded
-        or kept by staying, as the user chooses - never dropped silently. -> True if leaving may go ahead. A page nobody can see asks nothing."""
-        if not self.is_dirty() or not self.isVisible():
-            return True
-        choice = ask_unsaved(self, action)
-        if choice == "save":
-            return self.save()
-        if choice == "discard":
-            self.load()
-            return True
-        return False
+        """Every editable setting as the widgets show it, in saved units: (config.toml section, key) -> value, and the profile's
+        HUD Scale."""
+        return {("detector", "languages"): self.language.currentData(), ("detector", "process_fps"): self.fps.currentData(),
+                ("logging", "enabled"): self.logging.isChecked(), ("logging", "save_snapshots"): self.snapshots.isChecked(),
+                ("capture", "quality"): "lossless" if self.lossless.isChecked() else "standard",
+                # "shadow" is a developer setting in config.toml: leaving the box unticked must not quietly replace it
+                ("match", "mode"): "on" if self.match_on.isChecked() else "shadow" if self._match_mode == "shadow" else "off",
+                ("match", "heartbeat_seconds"): self.heartbeat.currentData(),
+                ("app", "remember_window"): self.remember_window.isChecked(),
+                ("update", "check_automatically"): self.update_auto.isChecked(),
+                ("update", "download_bandwidth"): self.update_bandwidth.currentData(),
+                ("update", "custom_limit_kb_per_second"): self.update_limit.value() * (self.update_unit.currentData() or 1),
+                "hud": self.hud.currentData()}
 
     def _hud_text(self, cfg):
         return (f"Saved for the profile \"{cfg['profile']['name']}\": {settings.hud_name(cfg['detector']['hud'])}. "
                 "Each profile keeps its own (switch profiles on the Dashboard).")
 
     def load(self):
-        """The saved settings into the widgets: whatever was changed and not saved is replaced."""
-        self._saved_values = None
-        cfg, _ = load_cfg()
+        """The saved settings into the widgets: whatever was changed and not saved is replaced. The tab on screen stays."""
+        self.save_state.loading()
+        cfg, warnings = load_cfg()
+        self.unreadable = self._unreadable(warnings)
         self.language.setCurrentIndex(settings.language_choice(cfg["detector"]["languages"]))
         self.hud.setCurrentIndex(max(self.hud.findData(cfg["detector"]["hud"]), 0))
         self.hud_profile.setText(self._hud_text(cfg))
@@ -2166,8 +2380,68 @@ class SettingsPage(QWidget):
         self._limit_unit_changed()
         self.update_limit.setValue(limit // 1000 if in_mb else limit)
         self._bandwidth_changed()
-        self._saved_values = self._values()
-        self._set_status("clean")
+        self.save_state.loaded()
+
+    def _saved_text(self):
+        return "✓ Settings saved." + (" Stop and start counting to use the new settings." if self.win.worker.running() else "")
+
+    def save(self):
+        """
+        Write what changed - config.toml in ONE checked write, the HUD Scale into the active profile - and read it back. All or nothing:
+        if the profile cannot be written, or a value does not read back as shown, config.toml and the profile list are put back as
+        they were and nothing is reported as saved. -> True when saved and read back as shown.
+        """
+        values, changes = self._values(), self.save_state.changes()
+        self.save_button.setEnabled(False)                      # while saving
+        sections = {}
+        for key in [k for k in changes if isinstance(k, tuple)] + [k for k in self.unreadable if k in values]:
+            sections.setdefault(key[0], {})[key[1]] = values[key]
+        original, registry = _NOT_WRITTEN, _NOT_WRITTEN
+        try:
+            if sections:
+                original = C.update_config_sections(config_file(), sections)
+            cfg, _ = load_cfg()                                    # the HUD Scale belongs to the active profile, not to config.toml
+            if "hud" in changes:
+                path = profiles.registry_path(cfg["profile"]["state_base"])
+                registry = (path, path.read_bytes() if path.exists() else None)
+                profiles.set_hud(cfg["profile"]["state_base"], cfg["profile"]["id"], self.hud.currentData())
+            # read back what the next Start counting will use, so "saved" is never shown for a value that did not stick
+            cfg, _ = load_cfg()
+            det = cfg["detector"]
+            if (det["languages"], det["process_fps"], det["hud"]) != (self.language.currentData(), self.fps.currentData(), self.hud.currentData()):
+                raise C.UserError(f"the settings read back differently (languages {det['languages']}, {det['process_fps']} per second, "
+                                  f"HUD Scale {settings.hud_name(det['hud'])}); check config.toml")
+        except (C.UserError, OSError, profiles.ProfileError) as error:
+            self._undo_save(original, registry)
+            self.save_state.failed(str(error))
+            show_error(self, str(error))
+            return False
+        self._match_mode = values[("match", "mode")]
+        self.unreadable = frozenset()                            # every default shown was written
+        # used only now that everything is saved
+        if ("app", "remember_window") in changes and not self.remember_window.isChecked():
+            window_file().unlink(missing_ok=True)   # off = back to the default layout, also if switched on again later
+        self.hud_profile.setText(self._hud_text(cfg))
+        self.save_state.saved(self._saved_text())
+        self.win.update_game_idle()
+        return True
+
+    def _undo_save(self, original, registry):
+        """A save step failed: config.toml and the profile list back as they were (best effort; the error is reported either way)."""
+        if registry is not _NOT_WRITTEN:
+            path, data = registry
+            try:
+                if data is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    C.atomic_write_bytes(path, data)
+            except OSError:
+                pass
+        if original is not _NOT_WRITTEN:
+            try:
+                C.restore_config_file(config_file(), original)
+            except OSError:
+                pass
 
     def _bandwidth_changed(self, _index=None):
         mode = self.update_bandwidth.currentData()
@@ -2188,43 +2462,6 @@ class SettingsPage(QWidget):
         index = settings.fps_choice(self.fps.currentData())
         self.fps_hint.setText(settings.FPS_PRESETS[index][2] if index is not None else
                               "A value set in config.toml. 15 per second is what the counter was tested with.")
-
-    def save(self):
-        """Write every setting (config.toml; the HUD Scale into the active profile). -> True when saved and read back as shown."""
-        langs = self.language.currentData()
-        self.save_button.setEnabled(False)                      # while saving
-        try:
-            C.update_config_file(config_file(), "detector", {"languages": langs, "process_fps": self.fps.currentData()})
-            cfg, _ = load_cfg()                                    # the HUD Scale belongs to the active profile, not to config.toml
-            profiles.set_hud(cfg["profile"]["state_base"], cfg["profile"]["id"], self.hud.currentData())
-            C.update_config_file(config_file(), "logging", {"enabled": self.logging.isChecked(),
-                                                            "save_snapshots": self.snapshots.isChecked()})
-            C.update_config_file(config_file(), "capture", {"quality": "lossless" if self.lossless.isChecked() else "standard"})
-            # "shadow" is a developer setting in config.toml: leaving the box unticked must not quietly replace it
-            mode = "on" if self.match_on.isChecked() else "shadow" if self._match_mode == "shadow" else "off"
-            C.update_config_file(config_file(), "match", {"mode": mode, "heartbeat_seconds": self.heartbeat.currentData()})
-            self._match_mode = mode
-            C.update_config_file(config_file(), "app", {"remember_window": self.remember_window.isChecked()})
-            C.update_config_file(config_file(), "update", {"check_automatically": self.update_auto.isChecked(),
-                                                           "download_bandwidth": self.update_bandwidth.currentData(),
-                                                           "custom_limit_kb_per_second": self.update_limit.value() * self.update_unit.currentData()})
-            if not self.remember_window.isChecked():
-                window_file().unlink(missing_ok=True)   # off = back to the default layout, also if switched on again later
-            # read back what the next Start counting will use, so "saved" is never shown for a value that did not stick
-            cfg, _ = load_cfg()
-            det = cfg["detector"]
-            if (det["languages"], det["process_fps"], det["hud"]) != (langs, self.fps.currentData(), self.hud.currentData()):
-                raise C.UserError(f"the settings read back differently (languages {det['languages']}, {det['process_fps']} per second, "
-                                  f"HUD Scale {settings.hud_name(det['hud'])}); check config.toml")
-        except (C.UserError, OSError, profiles.ProfileError) as error:
-            self._set_status("error", str(error))
-            show_error(self, str(error))
-            return False
-        self._saved_values = self._values()
-        self.hud_profile.setText(self._hud_text(cfg))
-        self._set_status("saved")
-        self.win.update_game_idle()
-        return True
 
     def _open_captures(self):
         cfg, _ = load_cfg()
@@ -4184,9 +4421,9 @@ class MainWindow(QMainWindow):
         self.go_to(self.pages.indexOf(page))
 
     def _page_changed(self, index):
-        here = self.pages.indexOf(self.settings_page)
-        if self.pages.currentIndex() == here and index != here and not self.settings_page.confirm_leave():
-            self.nav.blockSignals(True)                         # "Stay on Settings": the sidebar goes back to Settings
+        here, leaving = self.pages.currentIndex(), self.pages.currentWidget()
+        if index != here and isinstance(leaving, SavedPage) and not leaving.confirm_leave():
+            self.nav.blockSignals(True)                         # "Stay on Settings / Overlay": the sidebar goes back to that page
             self.nav.setCurrentRow(here)
             self.nav.blockSignals(False)
             return
@@ -4707,7 +4944,6 @@ class MainWindow(QMainWindow):
             self.obs_link.reconnect()
 
     def obs_status_changed(self, status):
-        self.overlay.show_obs_status(status)
         line = self.dashboard.obs_line
         if status["state"] == "off":
             line.hide()
@@ -4729,8 +4965,10 @@ class MainWindow(QMainWindow):
                 try:
                     C.update_config_file(config_file(), "obs_websocket", {"source": status["source"],
                                                                           "source_uuid": status.get("uuid", "")})
+                    self.overlay.source_followed(status["source"], status.get("uuid", ""))   # the Overlay page's saved value too
                 except (C.UserError, OSError):
                     pass
+        self.overlay.show_obs_status(status)
 
     def handle(self, message):
         kind = message.get("type")
@@ -5244,7 +5482,8 @@ class MainWindow(QMainWindow):
 
     # ---- closing
     def closeEvent(self, event):
-        if not self.quit_when_stopped and not self.settings_page.confirm_leave("close the app"):
+        page = self.pages.currentWidget()
+        if not self.quit_when_stopped and isinstance(page, SavedPage) and not page.confirm_leave("close the app"):
             event.ignore()
             return
         if self.worker.running():

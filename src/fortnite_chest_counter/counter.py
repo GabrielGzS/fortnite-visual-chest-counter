@@ -1682,9 +1682,19 @@ def toml_string(text):
 
 def update_config_file(path, section, values):
     """Set `key = value` lines in one [section] of config.toml, keeping every other line and comment. Creates the
-    file from config.example.toml (or empty) if it does not exist. The result is checked by loading it; if that would
-    produce a warning for a value we wrote, the original file is restored and UserError is raised."""
-    import re
+    file from config.example.toml (or empty) if it does not exist. The result is checked before it replaces config.toml
+    (update_config_sections); if a value we wrote would not load as written, nothing is changed and UserError is raised."""
+    update_config_sections(path, {section: values})
+    return Path(path)
+
+
+def update_config_sections(path, sections):
+    """Several `[section] key = value` edits of config.toml as ONE change (the app's Settings and Overlay pages save this way):
+    every edit is made in memory and the result is loaded from a candidate file next to config.toml first. Only a candidate
+    that reads back exactly as asked replaces config.toml, in one atomic write - so a failed save changes nothing, never half
+    the settings. Every other line and comment is kept; a missing config.toml is created from config.example.toml (or empty).
+    -> what config.toml held before (bytes, or None if there was no file), for restore_config_file() when a later step of the
+    same save fails. Raises UserError (nothing was changed) or OSError."""
     path = Path(path)
     original = path.read_bytes() if path.exists() else None
     if original is not None:
@@ -1692,6 +1702,54 @@ def update_config_file(path, section, values):
     else:
         example = path.with_name("config.example.toml")
         lines = example.read_text(encoding="utf-8-sig").splitlines() if example.exists() else []
+    for section, values in sections.items():
+        _set_config_lines(lines, section, values)
+    text = "\n".join(lines) + "\n"
+    candidate = path.with_name(path.name + ".candidate")
+    try:
+        atomic_write(candidate, text)
+        cfg, _, warnings = settings.load_config(candidate)
+    finally:
+        candidate.unlink(missing_ok=True)
+    bad = [w.replace(str(candidate), str(path)) for w in warnings
+           if any(f"[{section}] {k} =" in w for section, values in sections.items() for k in values)]
+    if bad or any(cfg[section][k] != v for section, values in sections.items() for k, v in values.items()):
+        raise UserError("That text could not be saved (" + ("; ".join(bad) or "it did not read back the same") + "). Nothing was changed.")
+    atomic_write(path, text)
+    return original
+
+
+def restore_config_file(path, original):
+    """Undo update_config_sections() because a later step of the same save failed: config.toml byte for byte as it was (or no
+    file, if there was none)."""
+    path = Path(path)
+    if original is None:
+        path.unlink(missing_ok=True)
+        return
+    atomic_write_bytes(path, original)
+
+
+def atomic_write_bytes(path, data):
+    """atomic_write for exact bytes (putting a file back as it was)."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    for _ in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    os.replace(tmp, path)
+
+
+def _set_config_lines(lines, section, values):
+    """Set `key = value` lines of one [section] in config.toml's lines (changed in place), keeping every other line and comment;
+    a missing section is added at the end, a missing key at the end of its section."""
+    import re
     header = re.compile(r"^\s*\[([^\]]+)\]\s*(#.*)?$")
     start = next((i for i, l in enumerate(lines) if (m := header.match(l)) and m.group(1).strip() == section), None)
     if start is None:
@@ -1709,16 +1767,6 @@ def update_config_file(path, section, values):
                 insert -= 1                              # keep the blank line before the next section
             lines.insert(insert, f"{key} = {text}")
             end += 1
-    atomic_write(path, "\n".join(lines) + "\n")
-    cfg, _, warnings = settings.load_config(path)
-    bad = [w for w in warnings if any(f"] {k} =" in w for k in values)]
-    if bad or any(cfg[section][k] != v for k, v in values.items()):
-        if original is None:
-            path.unlink(missing_ok=True)
-        else:
-            atomic_write(path, original.decode("utf-8-sig"))
-        raise UserError("That text could not be saved (" + ("; ".join(bad) or "it did not read back the same") + "). Nothing was changed.")
-    return path
 
 
 def text_from_hash(text):

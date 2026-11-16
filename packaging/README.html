@@ -274,11 +274,11 @@ this does not work while OBS is using the card. If the app says the device canno
 <div class="note warn"><b>Less tested:</b> this has been tested against a simulated OBS server, and not yet with OBS on a second PC.</div>
 
 <h2 id="custom">Customize what viewers see</h2>
-<p>Open the <b>Overlay</b> page in the app:</p>
+<p>Open the <b>Overlay</b> page in the app, <b>Display</b> tab:</p>
 <ul>
   <li><b>What OBS shows</b>: both numbers on two lines, both on one line, only the estimated total, or only the confirmed chests. Each choice shows an example with your current numbers.</li>
   <li><b>Wording</b>: put <code>#</code> where the number goes, e.g. <code>Chests opened: #</code> or <code>Chest Hunt: #/500</code>. For the one-line choice, <code>#C</code> is the confirmed number and <code>#A</code> the estimated total. <b>Original wording</b> brings the default text back.</li>
-  <li><b>Preview</b> shows exactly what the text file will contain. Click <b>Apply</b>: OBS updates at once, even while counting.</li>
+  <li><b>Preview</b> shows exactly what the text file will contain. Click <b>Save changes</b> at the top of the page: OBS updates at once, even while counting. Until then the page says <b>Unsaved changes</b>, and <b>Discard changes</b> goes back to what is saved.</li>
 </ul>
 <p>OBS always reads the same file (<code>chest_counter.txt</code>), whatever you choose, so you never change the OBS source. Any text, symbols and emoji work (emoji need an OBS font that has them).</p>
 <div class="note"><b>The app cannot hide a Text source you already added in OBS.</b> If you see a number you did not choose, that source reads a different file: point it at <code>obs_output\chest_counter.txt</code> or hide it. The app&rsquo;s Dashboard always shows both numbers &mdash; that is for you, not for viewers.</div>
