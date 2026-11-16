@@ -1,7 +1,9 @@
 // Fortnite Visual Chest Counter - reference relay (protocol v1). Deploys into YOUR Cloudflare account, on the Workers Free plan:
 // one Worker, one SQLite-backed Durable Object class, and the overlay page as static assets (free and not counted as requests).
 {
-  "name": "fcc-relay",
+  // the Worker's name, and its address: https://live.<your-subdomain>.workers.dev. Workers Builds requires the Worker name in the
+  // Cloudflare dashboard to equal this one, so keep `live` in the Deploy form (or change it in both places).
+  "name": "live",
   "main": "src/index.js",
   "compatibility_date": "2025-09-01",
   "assets": {
