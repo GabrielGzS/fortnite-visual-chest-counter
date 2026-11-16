@@ -108,6 +108,11 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
     and kept between sessions.
   - **Game:** this match only: its status and details beside the **Live preview**, its chests and chests per minute, and
     **Fix this match** (**−1**, **+1**, **Undo**) for a chest the counter missed, a broken chest or a wrong count.
+    **Add estimated broken chests when a match ends** (off by default, 20 %): a broken chest shows no pop-up, so the counter
+    cannot see it. When this is on and a *complete* match ends (start and end seen), that share of the chests detected in
+    it is added to APPROX as *estimated* broken chests, minus the Broken chest +1s you already made for it. Never CERTAIN,
+    once per match, shown apart from your +1s (Overview line, Analytics), and **Undo** takes it back. It is an estimate:
+    single matches vary a lot. Needs match tracking.
   - **Console:** **Activity**, every decision as it happens - **green** = certain chest, **yellow** = counted in APPROX
     only, **red** = looked like a chest pop-up but not counted - with the reason, plus **Diagnostic recording**. The
     button shows a number when there are warnings you have not seen.

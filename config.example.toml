@@ -128,6 +128,14 @@ mode = "on"
 # once a second whatever this is. A longer interval writes less, but after a crash more of the last moments count as uncertain.
 heartbeat_seconds = 60
 
+[chest_estimate]
+# End-of-match chest estimate (the app's Dashboard > Game view sets this). A broken chest shows no pop-up, so the counter cannot see
+# it. When this is on and a COMPLETE match ends (start and end seen, English confirmed; needs [match] mode = "on"), `percent` of the
+# chests detected in that match is added to APPROX as estimated broken chests - minus the "Broken chest" +1s you already made for it.
+# Never CERTAIN, once per match, kept apart from your +1s in the history and Analytics. An estimate, not evidence: off by default.
+enabled = false
+percent = 20
+
 [live]
 # Where the video comes from (the app's Video source list sets this for you; most used first):
 #   "stream"     = a Twitch / YouTube livestream URL (set "url" below) - no OBS needed. Video can arrive in bursts or

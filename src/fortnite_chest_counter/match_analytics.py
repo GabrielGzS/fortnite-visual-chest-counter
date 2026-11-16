@@ -32,7 +32,7 @@ MIN_OBSERVED_RATE_SECONDS = 300            # under five minutes of play, a chest
 MIN_COMPLETE_RATE_SECONDS = 300            # the same, across all complete matches together: short matches still count towards it
 MIN_MATCH_RATE_SECONDS = 60                # one match, live or in the list: under a minute of play the figure says nothing yet
 RECENT_MATCHES = 25
-READ_KINDS = H.MATCH_KINDS | H.CORRECTION_KINDS | {"transition", "counter_change", "chest", "chest_type"}      # everything but the heartbeats, which are most of the file
+READ_KINDS = H.MATCH_KINDS | H.CORRECTION_KINDS | H.ESTIMATE_KINDS | {"transition", "counter_change", "chest", "chest_type"}      # everything but the heartbeats, which are most of the file
 ENDINGS = {"placed": "Placed", "victory": "Victory Royale", "left_or_unknown": "Left or not seen", "stopped": "Counting stopped", "lost": "Video lost",
            "discontinuity": "Video jumped", H.INTERRUPTED: "App closed unexpectedly"}
 # A match that ended with no YOU PLACED or Victory on screen, by what was seen next. It says where play went, never why: quitting, a disconnect and an
@@ -75,6 +75,7 @@ class RecentMatch:
     manual_removed: int = 0
     broken_chests: int = 0                 # of those +1s, the ones you said were broken chests
     active_seconds: object = None          # alive on the bus or the map (v0.4.0, for Personal Bests)
+    estimated: int = 0                     # end-of-match estimate added for this match (match_estimate.py); approx above already includes it
 
 
 @dataclass
@@ -106,6 +107,7 @@ class Summary:
     waiting_islands: int = 0               # records the countdown proved were the waiting island: kept in history, no match
     broken_chests: int = 0                 # +1s you said were broken chests, made for complete and partial matches: reported by you, not detected
     broken_per_complete_match: object = None   # their average over complete matches, or None without one
+    estimated_chests: int = 0              # end-of-match estimates still standing for complete and partial matches: estimated, never detected
     damaged_rows: int = 0
     newer_rows: int = 0
     recent: list = field(default_factory=list)
@@ -195,12 +197,15 @@ def summarize(history, recent=RECENT_MATCHES, include_manual=False):
             totals[1] += approx
 
     # Corrections made for a match. Statistics take a -1 always and a +1 only when asked; the count shown takes both, like the counter.
+    # An end-of-match estimate is treated like a +1: in the count shown, in the statistics only when asked.
     for_match = {key: value for key, value in H.corrections_by_match(history.chest_corrections).items() if key in credited}
+    estimated = {key: value for key, value in H.estimates_by_match(history.chest_corrections).items() if key in credited}
     shown, stats = {}, {}
     for key, (certain, approx) in credited.items():
         added, removed, _ = for_match.get(key, (0, 0, 0))
-        shown[key] = [certain, max(approx + added - removed, certain)]
-        stats[key] = [certain, max(approx - removed + (added if include_manual else 0), certain)]
+        extra = estimated.get(key, 0)
+        shown[key] = [certain, max(approx + added - removed + extra, certain)]
+        stats[key] = [certain, max(approx - removed + (added + extra if include_manual else 0), certain)]
 
     kept = [match for match in usable if not match["not_a_match"]]
     summary.excluded = len(usable) - len(kept)
@@ -213,6 +218,7 @@ def summarize(history, recent=RECENT_MATCHES, include_manual=False):
     summary.unconfirmed_seconds = _total(unconfirmed, "observed_seconds")
 
     summary.broken_chests = sum(for_match.get((m["run_id"], m["match_number"]), (0, 0, 0))[2] for m in complete + partial)
+    summary.estimated_chests = sum(estimated.get((m["run_id"], m["match_number"]), 0) for m in complete + partial)
     if complete:
         summary.broken_per_complete_match = sum(for_match.get((m["run_id"], m["match_number"]), (0, 0, 0))[2] for m in complete) / len(complete)
     for match in complete + partial:
@@ -263,7 +269,7 @@ def summarize(history, recent=RECENT_MATCHES, include_manual=False):
                                                bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ending_text(match),
                                                match["run_id"], match["match_number"], bool(match["not_a_match"]),
                                                match_rate(figures[0], figures[1], match.get("active_seconds")) if fair else None, added, removed, broken,
-                                               _number(match.get("active_seconds"))))
+                                               _number(match.get("active_seconds")), estimated=estimated.get(key, 0)))
     summary.recent = summary.all_matches[:recent]
     return summary
 

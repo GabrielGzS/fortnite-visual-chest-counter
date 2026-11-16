@@ -52,6 +52,10 @@ SNAPSHOT_FIELDS = ("match_number", "opened_t", "played_from_t", "observed_second
 RUN_KINDS = frozenset({"run_start", "run_end"})
 MATCH_KINDS = RUN_KINDS | {"match_opened", "match_closed", "correction", "gap"}     # enough to list matches, without the bulk
 CORRECTION_KINDS = frozenset({"chest_correction", "chest_correction_undone", "chest_correction_reason"})
+# The end-of-match chest estimate (match_estimate.py): one row per estimated match, in matches.jsonl - versions before it skip unknown
+# kinds there silently (in chests.jsonl they would count as damaged lines). It is read together with the corrections, flagged "estimate".
+ESTIMATE_KINDS = frozenset({"chest_estimate"})
+ESTIMATED = "estimated_broken"
 # Why a chest count was corrected. Only "missed" and "false_positive" are claims about the detector: Fortnite can count a chest with nothing
 # on screen to detect, so "not_visible" is no failure, and "manual" means the reason is not known. "broken_chest" (M9H) is a chest Fortnite
 # counted when a chest was broken rather than opened: no failure either, and kept apart so broken chests can be counted. Stored as these ids.
@@ -315,12 +319,33 @@ def append_chest_correction(folder, correction_id, run_id, delta, reason, counte
     _append_line(Path(folder) / CHESTS, _encode(row))
 
 
+def append_chest_estimate(folder, estimate_id, run_id, delta, counter_token, certain, approximate, detector_approximate, match_number, base, percent,
+                          broken_logged):
+    """An end-of-match estimate (match_estimate.py): `delta` estimated broken chests added to APPROX for one match, with what it was
+    worked out from. In matches.jsonl (see ESTIMATE_KINDS). Raises OSError if it cannot be saved."""
+    _append_line(Path(folder) / MATCHES, _encode({"kind": "chest_estimate", "schema": SCHEMA, "id": estimate_id, "run_id": run_id, "at": _now(),
+                                                  "delta": delta, "reason": ESTIMATED, "counter_token": counter_token, "certain_total": certain,
+                                                  "approximate_total": approximate, "detector_approximate": detector_approximate,
+                                                  "match_number": match_number, "base": base, "percent": percent, "broken_logged": broken_logged}))
+
+
+def estimates_by_match(corrections):
+    """{(run_id, match_number): estimated chests} of the end-of-match estimates still standing (not undone)."""
+    out = {}
+    for c in corrections:
+        if c.get("estimate") and not c["undone"]:
+            key = (c.get("run_id"), c.get("match_number"))
+            out[key] = out.get(key, 0) + c["delta"]
+    return out
+
+
 def corrections_by_match(corrections):
-    """{(run_id, match_number): [added, removed, broken chests among the added]} of the corrections still standing that were made for a match."""
+    """{(run_id, match_number): [added, removed, broken chests among the added]} of the corrections still standing that were made for a match.
+    Your own +1s and -1s only: an end-of-match estimate is estimates_by_match()."""
     out = {}
     for c in corrections:
         number = c.get("match_number")
-        if not c["undone"] and isinstance(number, int) and not isinstance(number, bool):
+        if not c["undone"] and not c.get("estimate") and isinstance(number, int) and not isinstance(number, bool):
             tally = out.setdefault((c.get("run_id"), number), [0, 0, 0])
             tally[0 if c["delta"] > 0 else 1] += 1
             tally[2] += c["delta"] > 0 and c.get("reason") == BROKEN_CHEST
@@ -338,28 +363,36 @@ def set_correction_reason(folder, correction_id, reason):
 
 
 def _merge_corrections(rows):
+    """Corrections (chests.jsonl) and end-of-match estimates (matches.jsonl) as one list, oldest first, each with "undone"; estimates
+    carry "estimate": True. An estimate is undone and deduplicated exactly like a +1."""
     merged = {}
     for row in rows:
         if row["kind"] == "chest_correction" and row.get("delta") in (1, -1):
             merged.setdefault(row["id"], {**row, "undone": False})
+        elif row["kind"] == "chest_estimate" and type(row.get("delta")) is int and row["delta"] > 0:
+            merged.setdefault(row["id"], {**row, "undone": False, "estimate": True})
     for row in rows:
         if row["kind"] == "chest_correction_undone" and row.get("undoes") in merged:
             merged[row["undoes"]]["undone"] = True
-        elif row["kind"] == "chest_correction_reason" and row.get("corrects") in merged:
+        elif row["kind"] == "chest_correction_reason" and row.get("corrects") in merged and not merged[row["corrects"]].get("estimate"):
             merged[row["corrects"]]["reason"] = row.get("reason")
-    return list(merged.values())
+    return sorted(merged.values(), key=lambda c: str(c.get("at") or ""))          # two files: put them back in the order they were made
 
 
 def read_chest_corrections(folder):
-    """Every correction ever made in this profile, oldest first, with its latest reason and whether it was undone."""
-    return _merge_corrections(list(_rows(Path(folder) / CHESTS, CORRECTION_KINDS, History())))
+    """Every correction and end-of-match estimate ever made in this profile, oldest first, with its latest reason and whether it was undone."""
+    folder = Path(folder)
+    return _merge_corrections(list(_rows(folder / CHESTS, CORRECTION_KINDS, History())) + list(_rows(folder / MATCHES, ESTIMATE_KINDS, History())))
 
 
 def correction_totals(corrections, counter_token=None):
-    """What still stands. Given a token, only this life of the counter: a Reset or Edit counts replaces the total, and with it earlier corrections."""
+    """What still stands. Given a token, only this life of the counter: a Reset or Edit counts replaces the total, and with it earlier corrections.
+    "net" includes end-of-match estimates (they are in APPROX too); "added", "removed" and the reasons are your own +1s and -1s only."""
     standing = [c for c in corrections if not c["undone"] and (counter_token is None or c.get("counter_token") == counter_token)]
-    reasons = [c.get("reason") for c in standing]
-    return {"net": sum(c["delta"] for c in standing), "added": sum(c["delta"] == 1 for c in standing), "removed": sum(c["delta"] == -1 for c in standing), "standing": standing,
+    manual = [c for c in standing if not c.get("estimate")]
+    reasons = [c.get("reason") for c in manual]
+    return {"net": sum(c["delta"] for c in standing), "added": sum(c["delta"] == 1 for c in manual), "removed": sum(c["delta"] == -1 for c in manual),
+            "estimated": sum(c["delta"] for c in standing if c.get("estimate")), "standing": standing,
             "reversed": sum(c["undone"] for c in corrections), "detector_misses": reasons.count(MISSED), "detector_false_positives": reasons.count(FALSE_POSITIVE),
             "not_visible": reasons.count(NOT_VISIBLE), "broken_chests": reasons.count(BROKEN_CHEST),
             "unknown": len(reasons) - reasons.count(MISSED) - reasons.count(FALSE_POSITIVE) - reasons.count(NOT_VISIBLE) - reasons.count(BROKEN_CHEST)}
@@ -461,6 +494,7 @@ def read(folder, only=None, warn=None):
     """Everything in a profile's history. `only` limits it to some row kinds, skipping the rest cheaply. Reading never creates or changes a file."""
     folder, history = Path(folder), History()
     opened, closed, corrections, chests = {}, {}, {}, {}
+    estimate_rows = []
     for row in _rows(folder / MATCHES, only, history):
         try:
             kind, run_id = row["kind"], row["run_id"]
@@ -489,6 +523,8 @@ def read(folder, only=None, warn=None):
                 history.gaps.append(row)
             elif kind == "correction":
                 corrections[run_id, row["match_number"]] = row["not_a_match"]
+            elif kind in ESTIMATE_KINDS:
+                estimate_rows.append(row)
         except (KeyError, TypeError, ValueError, AttributeError):
             history.bad_lines += 1
     correction_rows = []
@@ -509,7 +545,7 @@ def read(folder, only=None, warn=None):
     history.matches = [{**row, "not_a_match": corrections.get(key, False), "history_incomplete": bool(row.get("history_incomplete")) or key in incomplete} for key, row in closed.items()]
     history.open_matches = [row for key, row in opened.items() if key not in closed]
     history.chests = list(chests.values())
-    history.chest_corrections = _merge_corrections(correction_rows)
+    history.chest_corrections = _merge_corrections(correction_rows + estimate_rows)
     if history.newer_rows and warn is not None:
         warn(f"{history.newer_rows} match history rows were written by a newer version; they were left alone and skipped")
     return history

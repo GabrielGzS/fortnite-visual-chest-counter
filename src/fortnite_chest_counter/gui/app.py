@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
 
 from fortnite_chest_counter import counter as C
 from fortnite_chest_counter.console import CHEST_LABELS
-from fortnite_chest_counter import match_analytics, match_history, paths, predictions, profiles, progression, records, settings, timeline
+from fortnite_chest_counter import match_analytics, match_estimate, match_history, paths, predictions, profiles, progression, records, settings, timeline
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import charts, release_notes, theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -453,6 +453,17 @@ def tabbed_page_layout(widget, title, subtitle, header, tabs):
     widget.tab_buttons.button(0).setChecked(True)
     widget.page_scroll = widget.tab_scrolls[0]
     return layouts
+
+
+class WheelOnlyWhenFocused(QObject):
+    """A number box on the Dashboard, which saves at once: the mouse wheel changes it only after it was clicked, so scrolling past it never
+    changes a setting."""
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Wheel and not watched.hasFocus():
+            event.ignore()
+            return True
+        return False
 
 
 class WheelToPage(QObject):
@@ -1511,8 +1522,31 @@ class Dashboard(QWidget):
             manual.addWidget(widget)
         manual.addStretch(1)
         game.addLayout(manual)
+        estimate = QHBoxLayout()                              # the end-of-match chest estimate (match_estimate.py): saved at once, like the Dashboard's other choices
+        self.estimate_on = QCheckBox("Add estimated broken chests when a match ends")
+        self.estimate_on.setToolTip("Broken chests show no pop-up, so the counter cannot see them. When a complete match ends (start and end seen), "
+                                    "this adds the chosen share of the chests detected in it to APPROX: an estimate, never CERTAIN, kept apart from "
+                                    "your +1s. The Broken chest +1s you made for that match count towards it. Needs match tracking.")
+        self.estimate_percent = QSpinBox()
+        self.estimate_percent.setRange(1, 100)
+        self.estimate_percent.setSuffix(" %")
+        self.estimate_percent.setKeyboardTracking(False)     # typing 25 is one change, not 2 and then 25
+        self.estimate_percent.setFocusPolicy(Qt.StrongFocus)
+        self.estimate_percent.installEventFilter(WheelOnlyWhenFocused(self.estimate_percent))
+        self.estimate_percent.setToolTip("The share of the chests detected in a match to add when it ends. 20 % matched the broken chests logged by hand "
+                                         "in our own history on average; single matches ranged from 2 % to 51 %.")
+        estimate.addWidget(self.estimate_on)
+        estimate.addWidget(self.estimate_percent)
+        estimate.addStretch(1)
+        game.addLayout(estimate)
+        self.estimate_note = label("", "hint", wrap=True)
+        self.estimate_note.hide()
+        game.addWidget(self.estimate_note)
         self.game_target = None                               # the match the buttons act on: the open one, else the last one of this run
         self.game_manual_by_match = {}                        # match number -> [+1s, -1s] standing, this run
+        self.game_broken_by_match = {}                        # match number -> Broken chest +1s standing, this run (an estimate tops them up)
+        self.game_estimate_by_match = {}                      # match number -> end-of-match estimate added, this run
+        self._estimate_last = None                            # the last end-of-match estimate result of this run, for its note
         self._game_last, self._game_last_match = ({}, None), None
         self.game_last = label("", "hint", wrap=True)
         self.game_last.hide()
@@ -1661,16 +1695,43 @@ class Dashboard(QWidget):
         self.game_minus.setEnabled(counting and (not known or chests["approx"] > chests["certain"]))
 
         self.show_game_rate(f"{rate.approx_per_minute:.2f}" if rate else None, "APPROX per minute of play" if rate else "Needs a minute of play" if known else "")
+        self.show_estimate_note(match, detected if known else None)
+
+    def show_estimate_note(self, match=None, detected=None):
+        """What the end-of-match estimate will add when this match ends, or what it added to the last one - always worded as an estimate.
+        `detected`: the open match's own chests, before any correction."""
+        on, percent = self.estimate_on.isChecked(), self.estimate_percent.value()
+        self.estimate_percent.setEnabled(on)
+        text = ""
+        if on and load_cfg()[0]["match"]["mode"] != "on":
+            text = "Needs match tracking: Settings > Tracking > Track matches."
+        elif on:
+            number, last = (match or {}).get("match_number"), self._estimate_last
+            if detected is not None and number is not None and (last is None or last.get("match_number") != number):
+                removed = self.game_manual_by_match.get(number, (0, 0))[1]
+                broken = self.game_broken_by_match.get(number, 0)
+                base, _, add = match_estimate.amount(detected["approx"], removed, broken, percent)
+                text = (f"When this match ends complete: about +{add} estimated broken chests ({percent} % of {base} detected"
+                        + (f", minus your {broken} Broken chest +1s" if broken else "") + ").")
+            elif last is not None:
+                text = match_estimate.describe(last)
+            else:
+                text = f"At the end of each complete match, {percent} % of its detected chests is added to APPROX as estimated broken chests."
+        self.estimate_note.setText(text)
+        self.estimate_note.setVisible(bool(text))
 
     def show_game_rate(self, text, hint):
         self.game_rate.value.setText(UNKNOWN_VALUE if text is None else text)
         self.game_rate.sub.setText(hint)
 
     def _show_last_match(self, last):
-        added, removed = self.game_manual_by_match.get((last or {}).get("match_number"), (0, 0))
-        if last and (added or removed):
-            last = {**last, "approx": max(last["approx"] + added - removed, last["certain"])}
-        text = last_match_text(last) + (f"   ·   incl. {manual_text(added, removed)}" if last_match_text(last) and (added or removed) else "")
+        number = (last or {}).get("match_number")
+        added, removed = self.game_manual_by_match.get(number, (0, 0))
+        estimated = self.game_estimate_by_match.get(number, 0)
+        if last and (added or removed or estimated):
+            last = {**last, "approx": max(last["approx"] + added - removed + estimated, last["certain"])}
+        parts = ([manual_text(added, removed)] if added or removed else []) + ([f"+{fmt(estimated)} estimated"] if estimated else [])
+        text = last_match_text(last) + (f"   ·   incl. {', '.join(parts)}" if last_match_text(last) and parts else "")
         if text:                                             # a weak record does not replace the last real one
             self.game_last.setText(text)
             self.game_last.show()
@@ -2530,6 +2591,9 @@ def analytics_notes(summary):
     if summary.manual_added or summary.manual_removed:
         notes.append(f"Manual corrections: +{fmt(summary.manual_added)}, −{fmt(summary.manual_removed)}. Those made in the Game view belong to their match and are in its "
                      "APPROX count; those made on Overview change only your totals.")
+    if summary.estimated_chests:
+        notes.append(f"Estimated broken chests (end-of-match estimate): +{fmt(summary.estimated_chests)}. They are in their matches' APPROX counts, never in "
+                     "CERTAIN, and count in chests per minute only with the box below ticked, like your +1s.")
     if summary.matches_left_out_of_rates:
         notes.append(f"{plural(summary.matches_left_out_of_rates, 'match')} left out of chests per minute: some of their chests were not recorded, or their play time is unknown.")
     if summary.missing_approx or summary.missing_certain:
@@ -3171,6 +3235,7 @@ class AnalyticsPage(QWidget):
             more = "+" if match.chests_may_be_missing else ""
             net = match.manual_added - match.manual_removed
             mine = f" ({'+' if net > 0 else '−' if net < 0 else '±'}{abs(net)})" if match.manual_added or match.manual_removed else ""
+            mine += f" (+{fmt(match.estimated)} est.)" if match.estimated else ""
             quality, color = ("Not a match", theme.DIM) if match.excluded else QUALITY_LOOK[match.quality]
             cells = (match.started_at.strftime("%b %d, %H:%M") if match.started_at else UNKNOWN_VALUE,
                      UNKNOWN_VALUE if seen is None else seen if match.duration_is_full else f"{seen} seen",
@@ -3178,7 +3243,10 @@ class AnalyticsPage(QWidget):
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)
                 if column == 3 and mine:
-                    item.setToolTip(f"Includes your corrections:{manual_part(match.manual_added, match.manual_removed, match.broken_chests)}")
+                    item.setToolTip(("Includes your corrections:" + manual_part(match.manual_added, match.manual_removed, match.broken_chests)
+                                     if match.manual_added or match.manual_removed else "Includes") +
+                                    (f"{' and' if match.manual_added or match.manual_removed else ''} {fmt(match.estimated)} estimated broken "
+                                     f"chest{'' if match.estimated == 1 else 's'} (end-of-match estimate, not detected)" if match.estimated else ""))
                 if column == 5:
                     item.setForeground(QColor(color))
                     if match.interrupted:
@@ -4370,6 +4438,9 @@ class MainWindow(QMainWindow):
         rec = self.dashboard.rec_mode
         rec.setCurrentIndex(max(rec.findData(load_cfg()[0]["capture"]["mode"]), 0))
         rec.currentIndexChanged.connect(lambda _: self.recording_changed())
+        self.load_estimate_setting()
+        self.dashboard.estimate_on.toggled.connect(self.estimate_changed)
+        self.dashboard.estimate_percent.valueChanged.connect(self.estimate_changed)
         self.update_recording_ui()
         self.refresh_viewers()
         self.refresh_sources()
@@ -4759,6 +4830,9 @@ class MainWindow(QMainWindow):
         if mode == "connecting":
             self.marks_this_session = 0
             d.game_manual_by_match.clear()                    # match numbers start again with each run
+            d.game_broken_by_match.clear()
+            d.game_estimate_by_match.clear()
+            d._estimate_last = None
             d.game_target = None
         if not running:
             self.recording = None
@@ -4995,6 +5069,8 @@ class MainWindow(QMainWindow):
             self.show_match(message)
         elif kind == "correction":
             self.correction_done(message)
+        elif kind == "estimate":
+            self.estimate_done(message)
         elif kind == "error":
             self.error_seen = True
             self.dashboard.show_banner(str(message.get("text", "")))
@@ -5320,14 +5396,62 @@ class MainWindow(QMainWindow):
         if result.get("status") == "refused":
             self.add_log({"type": "warn", "text": f"Correction not applied: {result.get('message', '')}"})
         elif result.get("status") == "applied":
-            what = "undone" if result.get("undoes") else "applied"
+            undo = bool(result.get("undoes"))
+            what = "undone" if undo else "applied"
             number = result.get("match_number")
-            self.add_log({"type": "info", "text": f"Manual correction {what}: APPROX {result.get('delta', 0):+d}" + (f", match {number}." if number else ".")})
-            if number is not None:
-                tally = self.dashboard.game_manual_by_match.setdefault(number, [0, 0])
-                original = -result["delta"] if result.get("undoes") else result["delta"]          # undoing a +1 takes back that +1
-                tally[0 if original > 0 else 1] += -1 if result.get("undoes") else 1
-                self.dashboard.refresh_game_manual()
+            d = self.dashboard
+            if result.get("reason") == match_history.ESTIMATED:              # Undo of an end-of-match estimate
+                self.add_log({"type": "info", "text": f"End-of-match estimate undone: APPROX {result.get('delta', 0):+d}" + (f", match {number}." if number else ".")})
+                if number is not None:
+                    d.game_estimate_by_match[number] = max(d.game_estimate_by_match.get(number, 0) + result["delta"], 0)
+                    d.refresh_game_manual()
+            else:
+                self.add_log({"type": "info", "text": f"Manual correction {what}: APPROX {result.get('delta', 0):+d}" + (f", match {number}." if number else ".")})
+                if number is not None:
+                    tally = d.game_manual_by_match.setdefault(number, [0, 0])
+                    original = -result["delta"] if undo else result["delta"]          # undoing a +1 takes back that +1
+                    tally[0 if original > 0 else 1] += -1 if undo else 1
+                    if result.get("reason") == match_history.BROKEN_CHEST:            # the estimate tops these up
+                        d.game_broken_by_match[number] = max(d.game_broken_by_match.get(number, 0) + (-1 if undo else 1), 0)
+                    d.refresh_game_manual()
+        self.refresh_corrections()
+
+    # ---- the end-of-match chest estimate (Dashboard > Game; match_estimate.py)
+    def load_estimate_setting(self):
+        d, wanted = self.dashboard, load_cfg()[0]["chest_estimate"]
+        for widget in (d.estimate_on, d.estimate_percent):
+            widget.blockSignals(True)
+        d.estimate_on.setChecked(bool(wanted["enabled"]))
+        d.estimate_percent.setValue(wanted["percent"])
+        for widget in (d.estimate_on, d.estimate_percent):
+            widget.blockSignals(False)
+        d.show_estimate_note()
+
+    def estimate_changed(self, *_):
+        """Saved at once, like the Dashboard's other choices, and sent to a running counter: it applies to the next match that ends."""
+        d = self.dashboard
+        values = {"enabled": d.estimate_on.isChecked(), "percent": d.estimate_percent.value()}
+        try:
+            C.update_config_file(config_file(), "chest_estimate", values)
+        except (C.UserError, OSError) as error:
+            show_error(self, f"The estimate setting could not be saved: {error}")
+            self.load_estimate_setting()
+            return
+        if self.worker.running():
+            self.worker.send("estimate " + json.dumps(values))
+        d.show_estimate_note()
+
+    def estimate_done(self, result):
+        """The counter added (or had nothing to add for) a match's end-of-match estimate."""
+        d, number = self.dashboard, result.get("match_number")
+        if result.get("status") not in ("applied", "none") or number is None:
+            return
+        d._estimate_last = result
+        if result["status"] == "applied":
+            d.game_estimate_by_match[number] = d.game_estimate_by_match.get(number, 0) + result["delta"]
+        self.add_log({"type": "info", "text": match_estimate.describe(result) + ("" if result.get("recorded", True) else " (not added to the match history)")})
+        d.refresh_game_manual()
+        d.show_estimate_note()
         self.refresh_corrections()
 
     def _history_folder(self):
@@ -5348,19 +5472,26 @@ class MainWindow(QMainWindow):
         d.correction_row.setVisible(bool(standing))
         if not standing:
             return
-        d.correction_text.setText(f"Detector {fmt(approx - totals['net'])}   ·   Manual {totals['net']:+d}   ·   Total {fmt(approx)}")
+        estimated = totals.get("estimated", 0)
+        d.correction_text.setText(f"Detector {fmt(approx - totals['net'])}   ·   Manual {totals['net'] - estimated:+d}"
+                                  + (f"   ·   Estimated +{fmt(estimated)}" if estimated else "") + f"   ·   Total {fmt(approx)}")
         last = self.last_correction
         box = d.correction_reason
         box.blockSignals(True)
         box.clear()
-        for key, text in CORRECTION_WHY[last["delta"]]:
-            box.addItem(text, key)
-        box.setCurrentIndex(max(box.findData(last.get("reason")), 0))
+        if last.get("estimate"):                               # an end-of-match estimate has no reason to choose; Undo takes it back
+            box.addItem("Estimated broken chests (end of match)", None)
+            box.setEnabled(False)
+        else:
+            for key, text in CORRECTION_WHY[last["delta"]]:
+                box.addItem(text, key)
+            box.setCurrentIndex(max(box.findData(last.get("reason")), 0))
+            box.setEnabled(True)
         box.blockSignals(False)
 
     def correction_reason_chosen(self, _index=None):
         last = self.last_correction
-        if last is None:
+        if last is None or last.get("estimate"):
             return
         reason = self.dashboard.correction_reason.currentData()
         self.correction_memory[last["delta"]] = reason

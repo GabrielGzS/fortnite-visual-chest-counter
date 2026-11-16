@@ -458,7 +458,7 @@ class CounterSession:
                 return refused("A correction is +1 or -1.")
             if reason not in CORRECTION_REASONS[delta]:
                 return refused(f"Unknown reason for a {delta:+d} correction.")
-        if delta < 0 and st["approximate"] - 1 < st["certain"]:
+        if delta < 0 and st["approximate"] + delta < st["certain"]:          # a -1, or undoing an end-of-match estimate (-n)
             return refused("APPROX cannot go below CERTAIN. If a CERTAIN chest was wrong, use Edit counts.")
         if delta > 0 and st["approximate"] >= MAX_STARTING_COUNT:
             return refused("The counter is already at its maximum.")
@@ -484,6 +484,51 @@ class CounterSession:
                 self._warn_once("correction-history", f"a chest correction was applied to your counts but could not be added to the match history ({error})")
         return {"status": "applied", "message": "", "id": correction_id, "delta": delta, "undoes": undoes, "recorded": recorded, "certain": st["certain"], "approx": st["approximate"],
                 "match_number": match_number, "reason": target.get("reason") if undoes is not None else reason}
+
+    def apply_estimate(self, match, percent):
+        """The end-of-match chest estimate (match_estimate.py) for a match that has just settled (MatchTracker.settled_match). Exactly
+        once per match: its id comes from the run and the match number and is checked against this run and the history, so a repeated
+        offer, a resent request or a restart can never add it twice. APPROX only; the counter file, the OBS text and the history move
+        together, as for a correction. -> a result for the app ("applied", "none" when there is nothing to add, "already"), or None
+        when this match does not qualify or there is no match history (match tracking is not "on")."""
+        from fortnite_chest_counter import match_estimate as E
+        from fortnite_chest_counter import match_history as H
+        if self.history is None or not E.eligible(match) or not E.valid_percent(percent):
+            return None
+        self.sync_external_changes()
+        st = self.state
+        run_id, number = self.history.run_id, match["match_number"]
+        estimate_id = E.estimate_id(run_id, number)
+        folder = _history_folder(self.cfg) if self.persist else None
+        known = H.read_chest_corrections(folder) if folder else []
+        if estimate_id in self._corrections_done or any(c["id"] == estimate_id for c in known):
+            return {"status": "already", "id": estimate_id, "match_number": number, "certain": st["certain"], "approx": st["approximate"]}
+        _, removed, broken = H.corrections_by_match(known).get((run_id, number), (0, 0, 0))
+        base, target, add = E.amount(match.get("approx") or 0, removed, broken, percent)
+        add = max(0, min(add, MAX_STARTING_COUNT - st["approximate"]))
+        self._corrections_done.add(estimate_id)
+        result = {"id": estimate_id, "match_number": number, "estimate": True, "delta": add, "base": base, "target": target, "percent": percent,
+                  "broken_logged": broken, "reason": H.ESTIMATED}
+        if not add:
+            return {**result, "status": "none", "recorded": False, "certain": st["certain"], "approx": st["approximate"]}
+        token = counter_token(st)
+        net = H.correction_totals(known, token)["net"]
+        st["approximate"] += add
+        self.save()
+        self.write_obs()
+        self.log.write({"event": "chest_estimate", "estimate_id": estimate_id, "match_number": number, "delta": add, "base": base, "percent": percent,
+                        "broken_logged": broken, "source": "estimate", "counts_after": {"certain": st["certain"], "approximate": st["approximate"]},
+                        "logged_at": now_iso()})
+        self.history.counter_changed("estimate", st["certain"], st["approximate"])     # so a crash later does not read it as chests missing from history
+        recorded = folder is not None
+        if folder is not None:
+            try:
+                H.append_chest_estimate(folder, estimate_id, run_id, add, token, st["certain"], st["approximate"], st["approximate"] - net - add,
+                                        number, base, percent, broken)
+            except OSError as error:
+                recorded = False
+                self._warn_once("estimate-history", f"an end-of-match estimate was added to your counts but could not be added to the match history ({error})")
+        return {**result, "status": "applied", "recorded": recorded, "certain": st["certain"], "approx": st["approximate"]}
 
     def apply_type_updates(self, updates):
         """The detector read a counted chest's type better after counting it (estimator.take_type_updates): move that
@@ -1008,6 +1053,7 @@ class AppControl:
         self._marks = deque()                   # "mark [label]" lines: the app's Mark button / hotkey
         self._captures = deque()                # "capture off|marks|events|session": the app's Recording choice
         self._corrections = deque()             # "correct {json}": the app's +1, -1 and Undo
+        self._estimates = deque()               # "estimate {json}": Dashboard > Game's end-of-match estimate on/off and percentage
         self._stream = stream if stream is not None else sys.stdin
         threading.Thread(target=self._read, daemon=True, name="app-control").start()
 
@@ -1029,6 +1075,12 @@ class AppControl:
             requests.append(self._corrections.popleft())
         return requests
 
+    def take_estimate_settings(self):
+        settings_sent = []
+        while self._estimates:
+            settings_sent.append(self._estimates.popleft())
+        return settings_sent
+
     def _read(self):
         try:
             for line in self._stream:
@@ -1046,6 +1098,13 @@ class AppControl:
                         continue
                     if isinstance(request, dict):
                         self._corrections.append(request)
+                if command.lower() == "estimate":
+                    try:
+                        request = json.loads(rest)
+                    except ValueError:
+                        continue
+                    if isinstance(request, dict):
+                        self._estimates.append(request)
             else:
                 self.reason = "the app closed"
         except Exception:
@@ -1240,6 +1299,48 @@ def _apply_corrections(control, session):
         session.announce()
 
 
+def _estimate_start(cfg):
+    """The end-of-match estimate's settings for this run (config.toml [chest_estimate]); only with match history ([match] mode = "on")."""
+    from fortnite_chest_counter import match_estimate as E
+    wanted = cfg.get("chest_estimate") or {}
+    percent = wanted.get("percent")
+    return {"enabled": bool(wanted.get("enabled")) and cfg["match"]["mode"] == "on",
+            "percent": percent if E.valid_percent(percent) else E.DEFAULT_PERCENT, "tracking": cfg["match"]["mode"] == "on"}
+
+
+def _estimate_settings(control, current):
+    """What Dashboard > Game sent since the last frame (a change while counting applies from the next match that settles)."""
+    from fortnite_chest_counter import match_estimate as E
+    for sent in control.take_estimate_settings() if control is not None else []:
+        percent = sent.get("percent")
+        current = {**current, "enabled": bool(sent.get("enabled")) and current["tracking"],
+                   "percent": percent if E.valid_percent(percent) else current["percent"]}
+    return current
+
+
+def _apply_estimate(tracker, session, estimate, t, final=False):
+    """A match that settled since the last frame gets its end-of-match estimate, if it is on (the setting at this moment counts).
+    A settled match is given out once, so turning it on later never estimates an earlier match. Never fatal: counting goes on."""
+    from fortnite_chest_counter import match_estimate as E
+    if tracker is None or t is None:
+        return
+    match = tracker.settled_match(t, final=final)
+    if match is None or not estimate["enabled"]:
+        return
+    try:
+        result = session.apply_estimate(match, estimate["percent"])
+    except Exception as error:
+        session._warn_once("estimate", f"the end-of-match estimate could not be applied ({type(error).__name__}: {error}); counting is not affected")
+        return
+    if result is None:
+        return
+    CONSOLE.emit("estimate", **result)
+    if result["status"] in ("applied", "none"):
+        CONSOLE.info(E.describe(result))
+    if result["status"] == "applied":
+        session.announce()
+
+
 def _history_folder(cfg):
     """The active profile's history, or, for an explicit --state file, one named after that file so two counters side by side stay apart."""
     profile = cfg.get("profile")
@@ -1419,6 +1520,7 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                        "hud": cfg["detector"].get("hud", "standard")})
     history = _open_history(cfg, session, kind)
     tracker = _open_tracker(cfg, session, _tracker_history(cfg, history), source)
+    estimate = _estimate_start(cfg)                         # end-of-match chest estimate (match_estimate.py), live counting only
     beat = HistoryHeartbeat(history, cfg["match"]["heartbeat_seconds"], lambda: (source.frames_processed, source.frames_dropped)) if history is not None else None
     last_t = None
     interval = live["status_interval_seconds"]
@@ -1462,6 +1564,8 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
                 for ev in applied:
                     tracker.chest(ev)
                 tracker.offer(t, frame)
+                estimate = _estimate_settings(control, estimate)
+                _apply_estimate(tracker, session, estimate, t)
             if beat is not None:
                 beat.offer(t, tracker)
             now_m = time.monotonic()
@@ -1548,6 +1652,9 @@ def _run_live(args, cfg, origin, live, kind, fps, estimator, sources, guard=None
         if tracker is not None:                            # after the counts are safe
             for ev in flushed:
                 tracker.chest(ev)
+            # a complete match that ended just before Stop still gets its estimate, with its final chests; before close(),
+            # which records the match Stop cuts off (that one never qualifies)
+            _apply_estimate(tracker, session, _estimate_settings(control, estimate), last_t, final=True)
             tracker.close(stop_reason)
         source.close(wait=not closing)
         for thread in closing_threads:                     # recordings switched off mid-session: let them finish

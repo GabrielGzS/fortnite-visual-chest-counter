@@ -38,6 +38,7 @@ MODE = "shadow"
 SAMPLE_SECONDS = 1.0
 SAMPLE_TOLERANCE = 1e-6                    # frame times are sums of 1/fps: fifteen of them can add up to 0.9999999 s
 SOURCE_LOST_REASONS = frozenset({"video source stopped"})
+SETTLE_SECONDS = 10.0                      # settled_match(): the detector finishes a chest up to ~6 s late (prompt-only events); its match waits
 
 
 class MatchTracker:
@@ -56,6 +57,7 @@ class MatchTracker:
         self._counted = []                 # (time, certain, approx) of every chest counted in this run, for the live per-match numbers
         self._out_at = None                # when the open match's player was first out
         self._closed = None                # the match that closed last, for its final numbers
+        self._settled = set()              # match numbers already given out by settled_match()
         self._last_sample_t = self._last_seen_t = self._break_t = None
         self._samples, self._sample_s, self._total_s, self._max_s, self._source_s = 0, 0.0, 0.0, 0.0, 0.0
         self._chests = {"delivered": 0, "no_picture": 0, "dropped_at_break": 0}
@@ -106,6 +108,26 @@ class MatchTracker:
                       **self.stats())
         except Exception as error:
             self._fail("close", error)
+
+    def settled_match(self, t, final=False):
+        """The match that closed last, with its final numbers, once its late chests are in: SETTLE_SECONDS of video after it closed,
+        as soon as the next match has opened, or now (`final`: counting is stopping - call it BEFORE close(), which would replace it
+        with the match it cuts off). Given out once per match, so the end-of-match estimate can never be offered twice.
+        -> the numbers of _last_match(), or None. Never raises."""
+        if self.failed or self._closed is None:
+            return None
+        try:
+            closed = self._closed
+            number = closed.get("match_number")
+            if number in self._settled:
+                return None
+            reopened = self._machine.open_match_number not in (None, number)
+            if not (final or reopened or t >= closed["closed_t"] + SETTLE_SECONDS):
+                return None
+            self._settled.add(number)
+            return self._last_match()
+        except Exception:                  # a read for the estimate; it must never stop tracking
+            return None
 
     @property
     def keeps_history(self):

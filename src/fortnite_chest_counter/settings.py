@@ -67,6 +67,10 @@ DEFAULTS = {
         "mode": "on",                           # off | shadow (recognise matches for the session log only) | on (also keep match history)
         "heartbeat_seconds": 60,                # how often match history saves running totals: 30 | 60 | 300 | 600
     },
+    "chest_estimate": {                         # Dashboard > Game: estimated broken chests added when a complete match ends (match_estimate.py)
+        "enabled": False,                       # an estimate, never evidence: off unless chosen
+        "percent": 20,                          # of the chests detected in the match, 1-100 (your Broken chest +1s for it count towards it)
+    },
     "live": {
         "source": "stream",                     # stream | desktop | obs-camera | device | window | file
         "device": "OBS Virtual Camera",         # DirectShow device name for --source device
@@ -227,6 +231,8 @@ def _check(section, key, value):
         return (value in MATCH_MODES, f"must be one of {list(MATCH_MODES)}")
     if section == "match" and key == "heartbeat_seconds":
         return (type(value) is int and value in MATCH_HEARTBEATS, f"must be one of {list(MATCH_HEARTBEATS)}")
+    if section == "chest_estimate" and key == "percent":
+        return (type(value) is int and 1 <= value <= 100, "must be a whole number from 1 to 100")
     if key in ("monitor", "status_interval_seconds"):
         return (isinstance(value, int) and not isinstance(value, bool) and value >= 1, "must be a whole number >= 1")
     if isinstance(default, list):
