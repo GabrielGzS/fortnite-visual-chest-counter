@@ -1,0 +1,12 @@
+/* Transparent, so it sits on the stream in OBS. Override anything in OBS: Browser Source > Custom CSS. */
+html, body { margin: 0; background: transparent; }
+body { font: 700 32px/1.25 "Segoe UI", system-ui, sans-serif; color: #fff; text-shadow: 0 2px 4px rgba(0, 0, 0, .85); padding: 8px 12px; }
+body[data-align="center"] { text-align: center; }
+body[data-align="right"] { text-align: right; }
+body[data-show="approx"] .fcc-certain, body[data-show="certain"] .fcc-approx { display: none; }
+.fcc-label-line:empty { display: none; }
+.fcc-status { font-size: 16px; font-weight: 600; opacity: .85; }
+.fcc-status:empty { display: none; }
+body[data-state="offline"][data-offline="dim"] .fcc-row { opacity: .45; }
+body[data-state="offline"][data-offline="hide"] .fcc-counter { display: none; }
+body[data-offline="hide"] .fcc-status { display: none; }

@@ -1,0 +1,19 @@
+// Fortnite Visual Chest Counter - reference relay (protocol v1). Deploys into YOUR Cloudflare account, on the Workers Free plan:
+// one Worker, one SQLite-backed Durable Object class, and the overlay page as static assets (free and not counted as requests).
+{
+  "name": "fcc-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./public"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "CHANNEL", "class_name": "Channel" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Channel"] }],
+  "vars": {
+    // the most viewers one channel accepts at a time; a safety limit, not a goal (one OBS overlay is the normal case)
+    "MAX_VIEWERS": "50"
+  },
+  "observability": { "enabled": false }
+}

@@ -1,0 +1,3 @@
+# The relay's one secret. Deploy to Cloudflare asks for it; for `wrangler dev`, copy this file to .dev.vars (never committed).
+# Your setup code: the SHA-256 (64 hex characters) of your publisher key - never the key itself.
+PUBLISHER_KEY_SHA256=paste-your-setup-code-here

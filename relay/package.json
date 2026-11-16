@@ -1,0 +1,21 @@
+{
+  "name": "fcc-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reference relay for Fortnite Visual Chest Counter's Remote Sharing (protocol v1). Deploy your own copy; nothing goes through anyone else.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "PUBLISHER_KEY_SHA256": {
+        "description": "Your **setup code**: the SHA-256 of your publisher key, as your app or `tools/test_publisher.py keys` shows it (64 characters 0-9 a-f). Never paste the key itself."
+      }
+    }
+  }
+}

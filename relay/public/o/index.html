@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Chest counter</title>
+<link rel="stylesheet" href="overlay.css">
+</head>
+<body data-show="both" data-align="left" data-offline="show" data-state="connecting">
+<!-- Fortnite Visual Chest Counter remote overlay. Style it in OBS (Browser Source > Custom CSS) with the classes below. -->
+<div class="fcc-counter" aria-live="polite">
+  <div class="fcc-label-line" id="label"></div>
+  <div class="fcc-row fcc-certain"><span class="fcc-name">CERTAIN OPENED CHESTS:</span> <span class="fcc-value" id="certain">–</span></div>
+  <div class="fcc-row fcc-approx"><span class="fcc-name">APPROX. OPENED CHESTS:</span> <span class="fcc-value" id="approx">–</span></div>
+  <div class="fcc-status" id="status">Connecting…</div>
+</div>
+<script src="overlay.js"></script>
+</body>
+</html>
