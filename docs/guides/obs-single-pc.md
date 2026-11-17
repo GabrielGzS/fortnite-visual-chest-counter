@@ -47,6 +47,9 @@ Add one OBS Text source that reads `obs_output\chest_counter.txt`: [OBS overlay 
 
 ## Counting a stream or video you are watching
 
+For a Twitch stream on one PC with one monitor, OBS can load the channel in its own Browser Source and send it through
+Virtual Camera. Follow the [Twitch Browser Source guide](twitch-obs-browser.md) for the tested setup.
+
 The counter only needs the picture, so it can also count chests in someone else's livestream or a video playing in your
 browser. Easiest, without OBS: paste the stream's link ([Livestream URL](livestream-url.md)) or play it fullscreen and pick
 that [screen](screen-capture.md). Through OBS:

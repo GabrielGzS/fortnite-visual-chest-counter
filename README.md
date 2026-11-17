@@ -65,6 +65,7 @@ Pick what you want to count - most people need one of the first two, which need 
 |---|---|---|
 | A **Twitch or YouTube livestream** - paste the link | [Livestream URL](docs/guides/livestream-url.md) | **Yes** - incl. a 3-hour session (~500 chests, not checked one by one), 2026-11-08. Convenient, but it can miss chests |
 | Anything **on a screen** - a stream or video playing fullscreen, or your own game | [Screen](docs/guides/screen-capture.md) | **Yes** - 2026-11-08 |
+| A **Twitch livestream on one PC with one monitor**, through OBS's browser | [Twitch Browser Source + Virtual Camera](docs/guides/twitch-obs-browser.md) | **Capture setup verified** - 2026-11-17; detector accuracy unmeasured for this method |
 | **Your own stream**, Fortnite and OBS on one PC | [Single PC with OBS](docs/guides/obs-single-pc.md) | Yes |
 | **Gaming PC + streaming PC** on the same network, no capture card | [Dual PC over the network (SRT)](docs/guides/obs-dual-pc-srt.md) | **Yes** - 2026-11-07, v0.2.0 |
 | A **video file** | [Recorded video](docs/guides/recorded-video.md) | Yes |

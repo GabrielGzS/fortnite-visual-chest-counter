@@ -6,6 +6,9 @@ saved to `logs\diagnostics.txt`). Include it, and any `logs\crash_*.txt`, when y
 
 Setup-specific problems: [dual-PC SRT](obs-dual-pc-srt.md#troubleshooting) · [capture card](capture-card.md#if-the-picture-is-black).
 
+For Twitch inside OBS on one PC with one monitor, check the
+[Browser Source and Virtual Camera guide](twitch-obs-browser.md#troubleshooting-and-limits) for player layout and background playback.
+
 ## The counter does not get a picture
 
 | Message or symptom | Fix |
