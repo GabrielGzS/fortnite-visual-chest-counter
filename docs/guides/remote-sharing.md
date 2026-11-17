@@ -37,9 +37,10 @@ switches what your viewers see: the previous profile's overlays show "Counter of
 ## Two PCs
 
 - **The relay never moves**: it runs at your relay host, not on a PC.
-- To publish from another PC, use **Enter key...** there with the key from this PC, or **New key** (then give the relay the new
-  setup code; the old PC is refused from then on). Only one PC can publish a profile's channel at a time: a second one takes over
-  and the first stops, with a message.
+- To publish from another PC: **Create key** there and give your relay that PC's setup code (for the reference relay: replace
+  `PUBLISHER_KEY_SHA256` in its settings). From then on the relay refuses the old PC's key. The app never shows a key, so a key
+  cannot be copied between PCs; **Enter key...** is only for a key you already keep elsewhere. Only one PC can publish a profile's
+  channel at a time: a second one takes over and the first stops, with a message.
 - Profile export/import moves a profile's channel and its links' fingerprints, never a key: the links keep working, but their
   addresses cannot be shown on the new PC - make a new link there if you need to copy one.
 
@@ -47,7 +48,7 @@ switches what your viewers see: the previous profile's overlays show "Counter of
 
 | The app says | What to do |
 | --- | --- |
-| This PC has no publisher key | Create key (or Enter key from your other PC), then give the relay the setup code |
+| This PC has no publisher key | Create key, then give the relay the setup code |
 | The relay did not accept this PC's publisher key | The relay has another setup code: copy this PC's setup code to the relay again |
 | Another PC is now publishing this profile's channel | Turn sharing off and on again (and save) to take it back |
 | The relay's certificate is not trusted | The address is wrong, or the relay uses a private certificate authority (not supported) |

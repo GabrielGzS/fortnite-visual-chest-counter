@@ -2069,7 +2069,9 @@ class OverlayPage(SavedPage):
         grid.addWidget(self.rs_key_state, 1, 1)
         self.rs_key_new = button("Create key", tip="Make this PC's publisher key (kept in Windows Credential Manager)",
                                  on_click=self._rs_create_key)
-        self.rs_key_enter = button("Enter key...", tip="Use the publisher key from your other PC", on_click=self._rs_enter_key)
+        self.rs_key_enter = button("Enter key...", tip="Use a publisher key you already have (the app never shows its own key, "
+                                                       "so on a new PC use New key and give the relay its setup code)",
+                                   on_click=self._rs_enter_key)
         self.rs_key_forget = button("Forget key", "link", on_click=self._rs_forget_key)
         keys = QHBoxLayout()
         for widget in (self.rs_key_new, self.rs_key_enter, self.rs_key_forget):
@@ -2491,7 +2493,7 @@ class OverlayPage(SavedPage):
         self.rs_note.setText("New key stored. Copy the setup code to your relay; until then the relay refuses this PC.")
 
     def _rs_enter_key(self):
-        key, ok = QInputDialog.getText(self, "Enter publisher key", "The publisher key from your other PC (it is stored in Windows "
+        key, ok = QInputDialog.getText(self, "Enter publisher key", "A publisher key you already have (it is stored in Windows "
                                        "Credential Manager and never shown):", QLineEdit.Password)
         if not ok or not key.strip():
             return
@@ -2572,7 +2574,7 @@ class OverlayPage(SavedPage):
                                      f"{status['viewers']} viewer(s) connected.", theme.CERTAIN),
                        "connecting": (f"● Connecting to {status['relay']} ...", theme.INFO),
                        "retrying": (f"● Not connected: {status['detail']} Trying again.", theme.APPROX),
-                       "no_key": ("● This PC has no publisher key yet: Create key (or Enter key from your other PC).", theme.APPROX),
+                       "no_key": ("● This PC has no publisher key yet: Create key, then give your relay the setup code.", theme.APPROX),
                        "key_rejected": (f"● {status['detail']}", theme.REJECT),
                        "taken_over": (f"● {status['detail']}", theme.REJECT)}.get(
             state, (f"● Off. {status.get('detail') or ''}".strip(), theme.MUTED))
