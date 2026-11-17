@@ -24,6 +24,7 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from fortnite_chest_counter import match_estimate as E
 from fortnite_chest_counter import match_history as H
 
 COMPLETE, PARTIAL, UNCONFIRMED = "complete", "partial", "unconfirmed"
@@ -76,6 +77,9 @@ class RecentMatch:
     broken_chests: int = 0                 # of those +1s, the ones you said were broken chests
     active_seconds: object = None          # alive on the bus or the map (v0.4.0, for Personal Bests)
     estimated: int = 0                     # end-of-match estimate added for this match (match_estimate.py); approx above already includes it
+    estimate_percent: object = None        # the share it used and the detected chests it was worked out from, as recorded (None: no estimate)
+    estimate_base: object = None
+    estimate_eligible: bool = False        # a complete, English-confirmed match: the only kind an estimate is ever added to
 
 
 @dataclass
@@ -200,6 +204,7 @@ def summarize(history, recent=RECENT_MATCHES, include_manual=False):
     # An end-of-match estimate is treated like a +1: in the count shown, in the statistics only when asked.
     for_match = {key: value for key, value in H.corrections_by_match(history.chest_corrections).items() if key in credited}
     estimated = {key: value for key, value in H.estimates_by_match(history.chest_corrections).items() if key in credited}
+    estimate_info = H.estimate_details_by_match(history.chest_corrections)
     shown, stats = {}, {}
     for key, (certain, approx) in credited.items():
         added, removed, _ = for_match.get(key, (0, 0, 0))
@@ -269,7 +274,10 @@ def summarize(history, recent=RECENT_MATCHES, include_manual=False):
                                                bool(match["history_incomplete"]), match["completion"], bool(match.get("interrupted")), ending_text(match),
                                                match["run_id"], match["match_number"], bool(match["not_a_match"]),
                                                match_rate(figures[0], figures[1], match.get("active_seconds")) if fair else None, added, removed, broken,
-                                               _number(match.get("active_seconds")), estimated=estimated.get(key, 0)))
+                                               _number(match.get("active_seconds")), estimated=estimated.get(key, 0),
+                                               estimate_percent=estimate_info.get(key, {}).get("percent") if estimated.get(key) else None,
+                                               estimate_base=estimate_info.get(key, {}).get("base") if estimated.get(key) else None,
+                                               estimate_eligible=E.eligible(match)))
     summary.recent = summary.all_matches[:recent]
     return summary
 

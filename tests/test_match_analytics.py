@@ -544,7 +544,8 @@ def test_the_statistics_module_uses_no_gui_and_touches_no_totals():
             imported |= {alias.name for alias in node.names}
         elif isinstance(node, ast.ImportFrom):
             imported |= {f"{node.module}.{alias.name}" for alias in node.names}
-    assert imported == {"math", "dataclasses.dataclass", "dataclasses.field", "datetime.datetime", "datetime.timedelta", "fortnite_chest_counter.match_history"}, imported
+    assert imported == {"math", "dataclasses.dataclass", "dataclasses.field", "datetime.datetime", "datetime.timedelta", "fortnite_chest_counter.match_history",
+                        "fortnite_chest_counter.match_estimate"}, imported          # match_estimate: pure rules (which match gets an estimate)
 
 
 def test_loading_changes_no_file():

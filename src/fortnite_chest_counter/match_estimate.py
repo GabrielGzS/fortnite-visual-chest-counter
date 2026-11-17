@@ -11,8 +11,10 @@ estimate, never evidence:
     target    = base x percent / 100, rounded half up
     estimate  = target - your "Broken chest" +1s for that match, never below 0: chests you added yourself are not added twice
 
-The base never contains a correction or an earlier estimate, so nothing compounds. Only a COMPLETE match qualifies (English confirmed,
-its start and its end seen, no gap in the video): never a match cut off by Stop, a video gap or one not confirmed as a match. It is
+The base never contains a correction or an earlier estimate, so nothing compounds. A match qualifies when it is confirmed as a match
+(English) and either COMPLETE, or PARTIAL with your own ending seen on screen (Placed or Victory): the share applies to the chests that
+were detected, so a short gap in the video does not stop it (v0.6.0). Never a match cut off by Stop, lost, ended without your ending being
+seen, or not confirmed as a match. "Partial" itself does not change: only who gets an estimate. It is
 applied once its late chests are in (10 s of video after the close - the tracker's settling time -, the next match opening, or
 counting stopping), exactly once: its id is made from the run and the match number, and the counter refuses a second one from memory and from
 the history. CERTAIN never changes. The record is kept apart from your +1s (a "chest_estimate" row of the match history), so the
@@ -22,7 +24,8 @@ back like a +1. Pure functions only: the counter applies the estimate.
 
 DEFAULT_PERCENT = 20
 MIN_PERCENT, MAX_PERCENT = 1, 100
-COMPLETE = "complete"
+COMPLETE, PARTIAL = "complete", "partial"
+PLAYER_ENDINGS = ("placed", "victory")      # match_state.PLACED / VICTORY: your own ending, seen on screen
 
 
 def estimate_id(run_id, match_number):
@@ -31,8 +34,11 @@ def estimate_id(run_id, match_number):
 
 
 def eligible(match):
-    """Only a complete match: English confirmed, start and end seen, no gap. Not "partial" (cut off by Stop or a video gap)."""
-    return bool(match) and match.get("completion") == COMPLETE and match.get("english_confirmed") is True
+    """English confirmed, and complete - or partial (a gap in the video, say) with your Placed / Victory seen. Never one cut off by Stop,
+    lost, ended unseen, or unconfirmed."""
+    if not match or match.get("english_confirmed") is not True:
+        return False
+    return match.get("completion") == COMPLETE or (match.get("completion") == PARTIAL and match.get("ended_by") in PLAYER_ENDINGS)
 
 
 def valid_percent(value):

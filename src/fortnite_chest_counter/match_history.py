@@ -339,6 +339,16 @@ def estimates_by_match(corrections):
     return out
 
 
+def estimate_details_by_match(corrections):
+    """{(run_id, match_number): {"percent", "base"}} of the latest end-of-match estimate still standing - what it was worked out from, as
+    recorded (Analytics shows it; nothing is recalculated). A top-up of 0 is never recorded, so a match without one has no entry."""
+    out = {}
+    for c in corrections:
+        if c.get("estimate") and not c["undone"]:
+            out[(c.get("run_id"), c.get("match_number"))] = {"percent": c.get("percent"), "base": c.get("base")}
+    return out
+
+
 def corrections_by_match(corrections):
     """{(run_id, match_number): [added, removed, broken chests among the added]} of the corrections still standing that were made for a match.
     Your own +1s and -1s only: an end-of-match estimate is estimates_by_match()."""

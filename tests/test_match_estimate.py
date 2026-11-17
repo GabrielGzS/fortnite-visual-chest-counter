@@ -74,10 +74,14 @@ def test_your_minus_ones_are_no_chests_to_estimate_from():
     assert E.amount(3, 9, 0, 20) == (0, 0, 0)
 
 
-def test_only_a_complete_confirmed_match_qualifies():
+def test_a_confirmed_match_qualifies_when_complete_or_partial_with_your_ending_seen():
+    from fortnite_chest_counter import match_state as S
+    assert set(E.PLAYER_ENDINGS) == {S.PLACED, S.VICTORY}
     assert E.eligible(complete())
-    for match in (complete(completion="partial"), complete(completion="unconfirmed"), complete(english_confirmed=False),
-                  complete(english_confirmed=None), {}, None):
+    for ending in E.PLAYER_ENDINGS:                              # a short video gap made it partial: the detected chests still count
+        assert E.eligible(complete(completion="partial", ended_by=ending)), ending
+    for match in ([complete(completion="partial", ended_by=e) for e in (S.STOPPED, S.LOST, S.DISCONTINUITY, S.LEFT_OR_UNKNOWN, None)]
+                  + [complete(completion="unconfirmed"), complete(english_confirmed=False), complete(english_confirmed=None), {}, None]):
         assert not E.eligible(match), match
     assert E.valid_percent(20) and not E.valid_percent(0) and not E.valid_percent(101) and not E.valid_percent(True) and not E.valid_percent(20.0)
 
@@ -129,6 +133,18 @@ def test_a_new_run_never_reaches_back_to_an_earlier_runs_match():
         later.history = H.HistoryWriter(TC.history(tmp), [].append, run_id="run-2")
         assert later.apply_estimate(complete(approx=50), 20)["delta"] == 10
         assert sorted(e["run_id"] for e in estimates(tmp)) == [RUN, "run-2"] and later.state["approximate"] == 1030
+
+
+def test_a_partial_match_that_ended_with_placed_gets_its_estimate_once():
+    """A short video gap makes a match partial; with your Placed seen it still gets 20 % of what was detected - once, CERTAIN untouched."""
+    with tempfile.TemporaryDirectory() as tmp:
+        session, _ = session_with_history(tmp)
+        certain = session.state["certain"]
+        result = session.apply_estimate(complete(approx=54, completion="partial", ended_by="placed", discontinuity=True), 20)
+        assert result["status"] == "applied" and result["delta"] == 11
+        assert session.state["approximate"] == 1011 and session.state["certain"] == certain
+        assert session.apply_estimate(complete(approx=54, completion="partial", ended_by="placed"), 20)["status"] != "applied"
+        assert [e["delta"] for e in estimates(tmp)] == [11] and estimates(tmp)[0]["percent"] == 20
 
 
 def test_partial_unconfirmed_or_without_history_nothing_happens():
@@ -343,6 +359,22 @@ def test_analytics_shows_it_in_the_match_and_keeps_it_out_of_rates_unless_asked(
         assert (row.approx, row.estimated, row.manual_added, row.broken_chests) == (6, 2, 1, 1)
         assert off.estimated_chests == 2 and off.manual_added == 1, "the estimate is not one of your +1s"
         assert (off.credited_approx, on.credited_approx) == (6, 9), "rates: like a +1, only when asked"
+        assert (row.estimate_percent, row.estimate_base) == (50, 3), "the recorded share and base, never recalculated"
+
+
+def test_the_matches_table_says_what_the_estimate_added_or_why_it_added_nothing():
+    from fortnite_chest_counter.gui import app as App
+    row = A.RecentMatch(None, 600, True, 2, 54, False, "complete", False, "Placed", "run", 1, False, None, 0, 0, 0, 600,
+                        estimated=11, estimate_percent=20, estimate_base=54, estimate_eligible=True)
+    tip = App.estimate_tip(row, True)
+    assert "11 estimated broken chests: 20% of the 54 chests detected" in tip and "not detected" in tip
+    stopped = A.RecentMatch(None, 600, False, 37, 54, False, "partial", False, "Stopped", "run", 2, False, None, 0, 0, 0, 600)
+    assert "Placed or Victory" in App.estimate_tip(stopped, True) and "Stopped" in App.estimate_tip(stopped, True)
+    assert App.estimate_tip(stopped, False) == "", "nothing about an estimate that is switched off"
+    covered = A.RecentMatch(None, 600, True, 22, 41, False, "complete", False, "Placed", "run", 3, False, None, 8, 0, 8, 600,
+                            estimate_eligible=True)
+    tip = App.estimate_tip(covered, True)
+    assert "+8 manual" in tip and "8 broken" in tip and "already covered it" in tip
 
 
 # ------------------------------------------------------------------ the app

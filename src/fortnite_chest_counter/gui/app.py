@@ -1556,8 +1556,9 @@ class Dashboard(QWidget):
         game.addLayout(manual)
         estimate = QHBoxLayout()                              # the end-of-match chest estimate (match_estimate.py): saved at once, like the Dashboard's other choices
         self.estimate_on = QCheckBox("Add estimated broken chests when a match ends")
-        self.estimate_on.setToolTip("Broken chests show no pop-up, so the counter cannot see them. When a complete match ends (start and end seen), "
-                                    "this adds the chosen share of the chests detected in it to APPROX: an estimate, never CERTAIN, kept apart from "
+        self.estimate_on.setToolTip("Broken chests show no pop-up, so the counter cannot see them. When a match ends with your Placed or Victory seen "
+                                    "(a short gap in the video does not matter; Stop does), this adds the chosen share of the chests detected in it "
+                                    "to APPROX: an estimate, never CERTAIN, kept apart from "
                                     "your +1s. The Broken chest +1s you made for that match count towards it. Needs match tracking.")
         self.estimate_percent = QSpinBox()
         self.estimate_percent.setRange(1, 100)
@@ -2913,6 +2914,26 @@ def manual_text(added, removed):
     return f"{'+' if net > 0 else '−' if net < 0 else '±'}{abs(net)} manual" if added or removed else ""
 
 
+def estimate_tip(match, estimate_on):
+    """The Matches table's APPROX tooltip: your corrections, and the broken-chest estimate - what was added, from the recorded numbers,
+    or (while the estimate is on) why none was. "" when there is nothing to say."""
+    parts = []
+    if match.manual_added or match.manual_removed:
+        parts.append("Includes your corrections:" + manual_part(match.manual_added, match.manual_removed, match.broken_chests) + ".")
+    if match.estimated:
+        how = (f": {match.estimate_percent}% of the {fmt(match.estimate_base)} chests detected"
+               + (f", minus your {fmt(match.broken_chests)} broken-chest +1s" if match.broken_chests else "")
+               if match.estimate_percent and match.estimate_base is not None else "")
+        parts.append(f"Includes {fmt(match.estimated)} estimated broken chest{'' if match.estimated == 1 else 's'}{how}, added when the "
+                     "match ended (an estimate, not detected).")
+    elif estimate_on and not match.excluded:
+        parts.append("No broken-chest estimate: one is added only to matches confirmed as a match that ended with your Placed or Victory "
+                     f"seen (or complete), and this one ended: {match.ending or 'unknown'}." if not match.estimate_eligible else
+                     "No broken-chest estimate was recorded for this match: the estimate was off then, an older version gave none to partial "
+                     "matches, or your broken-chest +1s already covered it.")
+    return "\n".join(parts)
+
+
 def manual_part(added, removed, broken=0):
     return f" ({manual_text(added, removed)}" + (f", {fmt(broken)} broken" if broken else "") + ")" if added or removed else ""
 
@@ -3583,23 +3604,25 @@ class AnalyticsPage(QWidget):
             if old is not None:
                 old.hide()
         self.table.setRowCount(len(matches))
+        try:
+            estimate_on = load_cfg()[0]["chest_estimate"]["enabled"]
+        except Exception:
+            estimate_on = False
         for row, match in enumerate(matches):
             seen = minutes_text(match.duration_seconds)
             more = "+" if match.chests_may_be_missing else ""
             net = match.manual_added - match.manual_removed
             mine = f" ({'+' if net > 0 else '−' if net < 0 else '±'}{abs(net)})" if match.manual_added or match.manual_removed else ""
-            mine += f" (+{fmt(match.estimated)} est.)" if match.estimated else ""
+            if match.estimated:                                 # the recorded end-of-match estimate, with the share it used
+                mine += f" (+{fmt(match.estimated)} · {match.estimate_percent}%)" if match.estimate_percent else f" (+{fmt(match.estimated)} est.)"
             quality, color = ("Not a match", theme.DIM) if match.excluded else QUALITY_LOOK[match.quality]
             cells = (match.started_at.strftime("%b %d, %H:%M") if match.started_at else UNKNOWN_VALUE,
                      UNKNOWN_VALUE if seen is None else seen if match.duration_is_full else f"{seen} seen",
                      f"{fmt(match.certain)}{more}", f"{fmt(match.approx)}{more}{mine}", rate_cell(match), quality, match.ending)
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)
-                if column == 3 and mine:
-                    item.setToolTip(("Includes your corrections:" + manual_part(match.manual_added, match.manual_removed, match.broken_chests)
-                                     if match.manual_added or match.manual_removed else "Includes") +
-                                    (f"{' and' if match.manual_added or match.manual_removed else ''} {fmt(match.estimated)} estimated broken "
-                                     f"chest{'' if match.estimated == 1 else 's'} (end-of-match estimate, not detected)" if match.estimated else ""))
+                if column == 3:
+                    item.setToolTip(estimate_tip(match, estimate_on))
                 if column == 5:
                     item.setForeground(QColor(color))
                     if match.interrupted:
