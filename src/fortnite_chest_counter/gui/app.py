@@ -2436,11 +2436,26 @@ class OverlayPage(SavedPage):
         return load_cfg()[0]["profile"]["state_base"]
 
     def _rs_guide(self):
-        guide = paths.APP_DIR / "docs" / "guides" / "remote-sharing.md"
-        if guide.exists():
-            open_path(guide)
-        else:
-            QDesktopServices.openUrl(QUrl(REPO_URL + "/blob/main/docs/guides/remote-sharing.md"))
+        """The setup guide ships inside the program (guides/remote-sharing.md) and opens in a window of the app: no browser, no
+        Markdown viewer needed, nothing fetched (NotesView)."""
+        guide = Path(__file__).resolve().parent.parent / "guides" / "remote-sharing.md"
+        try:
+            text = guide.read_text(encoding="utf-8")
+        except OSError:
+            QDesktopServices.openUrl(QUrl(REPO_URL + "/blob/main/src/fortnite_chest_counter/guides/remote-sharing.md"))
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Remote Sharing - setup guide")
+        dialog.resize(760, 640)
+        layout = QVBoxLayout(dialog)
+        view = NotesView()
+        view.show_markdown(text)
+        layout.addWidget(view)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        self._guide_dialog = dialog                       # kept, so it is not collected while open
+        dialog.show()
 
     def _rs_fill(self):
         """The publisher key state and the profile's viewer links, as saved now (they are not page settings)."""
