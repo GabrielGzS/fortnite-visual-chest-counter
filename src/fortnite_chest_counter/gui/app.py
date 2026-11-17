@@ -28,12 +28,12 @@ from PySide6.QtCore import QByteArray, QDate, QEvent, QObject, QPoint, QRect, QS
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPalette, QPixmap, QTextDocument
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog,
                                QFrame, QGridLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QTextBrowser,
+                               QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QTextBrowser,
                                QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from fortnite_chest_counter import counter as C
 from fortnite_chest_counter.console import CHEST_LABELS
-from fortnite_chest_counter import match_analytics, match_estimate, match_history, paths, predictions, profiles, progression, records, settings, timeline
+from fortnite_chest_counter import match_analytics, match_estimate, match_history, paths, predictions, profile_transfer, profiles, progression, records, settings, timeline
 from fortnite_chest_counter.detection import chest_types
 from fortnite_chest_counter.gui import charts, release_notes, theme
 from fortnite_chest_counter.gui import update_manager as UM
@@ -1307,7 +1307,7 @@ class Dashboard(QWidget):
         prow.setSpacing(8)
         prow.addWidget(label("Profile"))
         self.profile = QComboBox()
-        self.profile.setMinimumWidth(220)
+        self.profile.setMinimumWidth(170)
         self.profile.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.profile.setToolTip("Each profile keeps its own counts and its own video source (for example one profile per "
                                 "streamer). One profile counts at a time; OBS always shows the selected profile.")
@@ -1319,7 +1319,15 @@ class Dashboard(QWidget):
                                      on_click=win.rename_profile)
         self.profile_delete = button("Delete...", tip="Remove the selected profile (its counts are kept in a backup "
                                                       "file)", on_click=win.delete_profile)
-        for widget in (self.profile_new, self.profile_rename, self.profile_delete):
+        self.profile_transfer = button("Export / Import", tip="Move a profile to another PC: export it to one file here, "
+                                                              "import that file there. Nothing else on either PC changes.")
+        self.profile_transfer_menu = QMenu(self.profile_transfer)
+        self.profile_transfer_menu.addAction("Export this profile...", win.export_profile)
+        self.profile_transfer_menu.addAction("Import a profile...", win.import_profile)
+        # opened by hand: an attached menu (setMenu) widens the button for its arrow and the row no longer fits at 920 px
+        self.profile_transfer.clicked.connect(lambda: self.profile_transfer_menu.exec(
+            self.profile_transfer.mapToGlobal(QPoint(0, self.profile_transfer.height()))))
+        for widget in (self.profile_new, self.profile_rename, self.profile_delete, self.profile_transfer):
             prow.addWidget(widget)
         overview.addLayout(prow)
 
@@ -5068,6 +5076,101 @@ class MainWindow(QMainWindow):
             return
         self.profile_changed()
 
+    # ---- profile export / import (profile_transfer.py): one profile, one file; never settings, other profiles or keys
+    def export_profile(self):
+        current = load_cfg()[0]["profile"]
+        if self._profile_busy():
+            show_error(self, "Stop counting before exporting a profile, so its counts and history belong together.")
+            return
+        safe = re.sub(r'[\\/:*?"<>|]+', "_", current["name"]).strip(" .") or "profile"
+        start = Path.home() / "Documents" / f"{safe}{profile_transfer.SUFFIX}"
+        path, _ = QFileDialog.getSaveFileName(self, "Export profile", str(start), "Chest counter profile (*.fccprofile)")
+        if not path:
+            return
+        if not path.lower().endswith(profile_transfer.SUFFIX):
+            path += profile_transfer.SUFFIX
+        try:
+            summary = profile_transfer.export_profile(current["state_base"], current["id"], path, __version__)
+        except (OSError, profile_transfer.TransferError, profiles.ProfileError) as error:
+            show_error(self, f"The profile was not exported: {error}.")
+            return
+        self.add_log({"type": "info", "text": f"Profile {current['name']} exported to {path}: CERTAIN {fmt(summary['certain'])} / "
+                                              f"APPROX {fmt(summary['approx'])}, {summary['matches']} match(es)."})
+        QMessageBox.information(self, APP_NAME, f'"{current["name"]}" was exported to\n{path}\n\nCopy this file to the other PC '
+                                                "and use Import... there. It holds this profile's counts and history"
+                                                + (" and its own wording" if summary["own_wording"] else "")
+                                                + " - never this PC's settings, other profiles, keys or viewer-link addresses.")
+
+    def import_profile(self):
+        if self._profile_busy():
+            show_error(self, "Stop counting before importing a profile.")
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Import profile", str(Path.home() / "Documents"),
+                                              "Chest counter profile (*.fccprofile);;All files (*)")
+        if not path:
+            return
+        base = load_cfg()[0]["profile"]["state_base"]
+        try:
+            package = profile_transfer.read_package(path)
+        except profile_transfer.TransferError as error:
+            show_error(self, f"This file cannot be imported: {error}. Nothing was changed.")
+            return
+        mode, name = self._ask_import(package, profile_transfer.existing(base, package), base)
+        if mode is None:
+            return
+        try:
+            entry = profile_transfer.import_profile(base, package, mode, name)
+            profiles.set_active(base, entry["id"])
+        except (profile_transfer.TransferError, profiles.ProfileError, OSError) as error:
+            show_error(self, f"The profile was not imported: {error}.")
+            return
+        self.profile_changed()
+        links = package.summary["links"]
+        self.add_log({"type": "info", "text": f"Profile {entry['name']} imported from {path}"
+                                              + (" (it replaced the profile with that name)." if mode == "replace" else ".")})
+        QMessageBox.information(self, APP_NAME, f'"{entry["name"]}" is imported and selected.'
+                                + ("\n\nRemote Sharing is off for it: turn it on in Overlay > Remote Sharing when this PC "
+                                   "should send it." if entry.get("remote") else "")
+                                + (f"\n\nIts {links} viewer link(s) keep working once it is shared, but their addresses "
+                                   "cannot be shown on this PC - make a new link if you need to copy one." if entry.get("remote") and links else ""))
+
+    def _ask_import(self, package, clash, base):
+        """The preview, and the choice: ("copy", name) / ("replace", None) / (None, None) for Cancel."""
+        s, p = package.summary, package.profile
+        when = str(package.manifest.get("exported_at") or "")[:10]
+        lines = [f'Profile "{p["name"]}"' + (f", exported {when}" if when else "") + ":",
+                 f"   CERTAIN {fmt(s['certain'])} / APPROX {fmt(s['approx'])}",
+                 f"   {s['matches']} match(es), {s['corrections']} correction(s), {s['estimates']} estimate(s) in its history"]
+        if s["own_wording"]:
+            lines.append("   its own overlay wording")
+        if p.get("remote"):
+            lines.append(f"   its Remote Sharing channel and {s['links']} viewer link(s) - sharing stays off until you turn it on")
+        lines.append("\nNothing else on this PC changes: its settings and other profiles stay as they are.")
+        box = QMessageBox(self)
+        box.setWindowTitle("Import profile")
+        box.setIcon(QMessageBox.Question)
+        if clash is None:
+            box.setText("\n".join(lines))
+            ok = box.addButton("Import", QMessageBox.AcceptRole)
+            box.addButton("Cancel", QMessageBox.RejectRole)
+            box.exec()
+            return ("copy", None) if box.clickedButton() is ok else (None, None)
+        copy_name = profile_transfer.free_name(base, p["name"])
+        lines.append(f'\nThis PC already has a profile "{clash["name"]}". Replace it (its counts and history are kept in a '
+                     f'backup in state\\profiles\\deleted and state\\history\\deleted), or import the file as a separate profile '
+                     f'"{copy_name}"?')
+        box.setText("\n".join(lines))
+        replace = box.addButton(f'Replace "{clash["name"]}"', QMessageBox.DestructiveRole)
+        copy = box.addButton("Import as a copy", QMessageBox.AcceptRole)
+        box.addButton("Cancel", QMessageBox.RejectRole)
+        box.setDefaultButton(copy)
+        box.exec()
+        if box.clickedButton() is replace:
+            return "replace", None
+        if box.clickedButton() is copy:
+            return "copy", copy_name
+        return None, None
+
     # ---- counting
     def toggle_counting(self):
         if self.worker.running():
@@ -5148,8 +5251,8 @@ class MainWindow(QMainWindow):
         restyle(d.start, "danger" if mode in ("connecting", "counting") else "primary")
         d.start.setEnabled(mode != "stopping")
         d.source.setEnabled(not running)
-        for widget in (d.profile, d.profile_new, d.profile_rename):
-            widget.setEnabled(not running)
+        for widget in (d.profile, d.profile_new, d.profile_rename, d.profile_transfer):
+            widget.setEnabled(not running)                # export/import: counts and history must not change meanwhile
         d.profile_delete.setEnabled(not running and d.profile.currentData() != profiles.DEFAULT_ID)
         d.url.setEnabled(not running)
         d.stability.setEnabled(not running)

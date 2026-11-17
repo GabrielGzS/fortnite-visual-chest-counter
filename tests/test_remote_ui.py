@@ -185,6 +185,32 @@ def test_a_profile_can_keep_its_own_wording_and_switching_profile_switches_the_o
         assert overlay_file(w) == shared_text
 
 
+def test_export_and_import_from_the_dashboard_select_the_imported_profile_and_are_blocked_while_counting():
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    with remote_page() as (w, page, creds):
+        profiles.create(base(w), "Streamer B", activate=True)
+        w.win.profile_changed()
+        target = str(w.dir / "Streamer B.fccprofile")
+        shown = []
+        with patch.object(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (target[:-len(".fccprofile")], ""))), \
+                patch.object(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (target, ""))), \
+                patch.object(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2]))):
+            w.win.export_profile()                              # the suffix is added when it is missing
+            assert Path(target).exists() and "never this PC's settings" in shown[-1]
+            asked = []
+            w.win._ask_import = lambda package, clash, b: asked.append(clash["name"] if clash else None) or ("copy", "Streamer C")
+            w.win.import_profile()
+            assert asked == ["Streamer B"]                      # the clash was offered, the copy chosen
+            reg = profiles.load(base(w))
+            assert profiles.active(reg)["name"] == "Streamer C" and w.win.dashboard.profile.currentText() == "Streamer C"
+            w.win.set_mode("counting")
+            assert not w.win.dashboard.profile_transfer.isEnabled()
+            w.win.set_mode("stopped")
+            assert w.win.dashboard.profile_transfer.isEnabled()
+            actions = [a.text() for a in w.win.dashboard.profile_transfer_menu.actions()]
+            assert actions == ["Export this profile...", "Import a profile..."]
+
+
 def test_new_setups_start_with_the_chests_opened_preset_and_existing_ones_keep_their_wording():
     from fortnite_chest_counter.gui import app as A
     saved = paths.APP_DIR
