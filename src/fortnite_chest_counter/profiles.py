@@ -9,6 +9,8 @@ diagnostic recording, OBS WebSocket - is shared. The OBS text files always show 
     state/profiles.json         {"version": 1, "active": "<id>", "profiles": [{"id", "name", "created_at", "source", "hud"?}]}
 
 A profile without "hud" uses [detector] hud of config.toml ("standard" unless changed). Versions before v0.4.1 ignore the field.
+A profile may also have its own overlay wording ("display", over config.toml [display]) and Remote Sharing data ("remote", see
+remote/sharing.py). v0.5.1 and older drop both when they save profiles.json.
     the Default profile         the [state] path of config.toml (state/chest_state.json): an update keeps its counts
     every other profile         state/profiles/<id>.json, next to the Default counter file
 
@@ -134,6 +136,9 @@ def _validate(data):
         remote = _clean_remote(p.get("remote"))
         if remote is not None:                           # a damaged one is dropped: Remote Sharing is then off for it
             entry["remote"] = remote
+        display = _clean_display(p.get("display"))
+        if display:                                      # its own overlay wording, over config.toml [display]
+            entry["display"] = display
         profiles.append(entry)
     if DEFAULT_ID not in seen:
         profiles.insert(0, _default_entry())
@@ -166,6 +171,18 @@ def _clean_remote(remote):
             clean["revoked"] = True
         links.append(clean)
     return {"enabled": remote.get("enabled") is True, "channel": remote["channel"], "links": links[-MAX_STORED_LINKS:]}
+
+
+DISPLAY_KEYS = ("show", "both_layout", "certain_text", "approx_text", "combined_status_format", "use_thousands_separator")
+
+
+def _clean_display(display):
+    """A profile's own overlay wording: any of DISPLAY_KEYS, each checked exactly like config.toml [display] (settings._check).
+    Unknown or invalid values are dropped one by one (that key then follows config.toml). -> a dict, possibly empty."""
+    from fortnite_chest_counter import settings
+    if not isinstance(display, dict):
+        return {}
+    return {key: display[key] for key in DISPLAY_KEYS if key in display and settings._check("display", key, display[key])[0]}
 
 
 def _rebuild(base_state_path):
@@ -353,6 +370,46 @@ def set_remote(base_state_path, profile_id, remote):
     save(base_state_path, reg)
 
 
+def set_display(base_state_path, profile_id, display):
+    """The profile's own overlay wording (DISPLAY_KEYS; None or {} = it follows config.toml [display] again). Writes only on a
+    change."""
+    clean = _clean_display(display or {})
+    reg = load(base_state_path)
+    entry = get(reg, profile_id)
+    if entry.get("display", {}) == clean and registry_path(base_state_path).exists():
+        return
+    if clean:
+        entry["display"] = clean
+    else:
+        entry.pop("display", None)
+    save(base_state_path, reg)
+
+
+KEEP = object()
+
+
+def update_entry(base_state_path, profile_id, display=KEEP, remote=KEEP):
+    """Change a profile's own wording and/or Remote Sharing data in ONE write of profiles.json (the Overlay page's Save):
+    display None/{} = follow config.toml again; remote None = remove. KEEP leaves a field as it is."""
+    reg = load(base_state_path)
+    entry = get(reg, profile_id)
+    if display is not KEEP:
+        clean = _clean_display(display or {})
+        if clean:
+            entry["display"] = clean
+        else:
+            entry.pop("display", None)
+    if remote is not KEEP:
+        clean = None if remote is None else _clean_remote(remote)
+        if remote is not None and clean is None:
+            raise ProfileError("unusable Remote Sharing data")
+        if clean is None:
+            entry.pop("remote", None)
+        else:
+            entry["remote"] = clean
+    save(base_state_path, reg)
+
+
 def apply(cfg, choice=None, warn=None):
     """Point cfg's counter file at the active profile (or `choice`: a name or id, for this run only). Adds
     cfg["profile"] = {"id", "name", "state_base"}. Idempotent. -> the profile entry."""
@@ -366,4 +423,6 @@ def apply(cfg, choice=None, warn=None):
     cfg["profile"] = {"id": entry["id"], "name": entry["name"], "state_base": str(base)}
     if entry.get("hud") in HUD_VALUES:                   # this person's HUD Scale, over the config default
         cfg["detector"]["hud"] = entry["hud"]
+    if entry.get("display"):                             # this profile's own overlay wording, over config.toml [display]
+        cfg["display"] = {**cfg["display"], **entry["display"]}
     return entry

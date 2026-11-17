@@ -31,6 +31,7 @@ HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 MAX_LINKS = 16                       # active viewer links per channel (the relay's limit)
 MAX_LABEL = 40
+MAX_LINES, MAX_LINE = 4, 120         # the overlay text sent along: far below the relay's 4,096-character message limit
 
 
 def relay_url_problem(url):
@@ -130,10 +131,24 @@ def read_counts(path):
     return certain, max(approx, certain), updated
 
 
-def snapshot_message(rev, certain, approx, state, at=None):
+def read_overlay_lines(path):
+    """The overlay text exactly as local OBS reads it (obs_output/chest_counter.txt), as lines - READ ONLY. None if missing."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    lines = text.splitlines()
+    return [line[:MAX_LINE] for line in lines[:MAX_LINES]] or None
+
+
+def snapshot_message(rev, certain, approx, state, at=None, lines=None):
+    """lines: the overlay text (the same wording as local OBS), in "ext" - the protocol's free field for presentation. A relay
+    stores and forwards it untouched; an overlay page that does not know it shows the plain counts instead."""
     message = {"type": "snapshot", "v": 1, "rev": rev, "certain": certain, "approx": approx, "state": state}
     if at:
         message["at"] = at
+    if lines:
+        message["ext"] = {"lines": list(lines)}
     return message
 
 

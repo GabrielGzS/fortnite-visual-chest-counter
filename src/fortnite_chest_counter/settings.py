@@ -18,6 +18,10 @@ from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
 
+# A brand-new install (no config.toml and no state/ yet) starts with this wording; existing installs keep theirs. "Original wording"
+# in the app still means DEFAULTS["display"].
+NEW_SETUP_DISPLAY = {"show": "approx", "approx_text": "CHESTS OPENED ≈ {count}"}
+
 DEFAULTS = {
     "detector": {
         "process_fps": 15,                      # detector cadence; 15 is what the detectors were developed at

@@ -41,6 +41,8 @@ from fortnite_chest_counter.gui.save_state import SaveState
 from fortnite_chest_counter.gui.worker import Worker, run_command
 from fortnite_chest_counter.obs import credentials as obs_credentials
 from fortnite_chest_counter.obs.link import TextOutputLink
+from fortnite_chest_counter.remote import protocol as remote_protocol
+from fortnite_chest_counter.remote import sharing as remote_sharing
 from fortnite_chest_counter.remote.link import RemoteLink
 from fortnite_chest_counter.preview import PreviewReader, block_name
 from fortnite_chest_counter.progress import Eta, clock_text, describe
@@ -117,6 +119,22 @@ def open_path(path):
 
 def config_file():
     return paths.APP_DIR / settings.DEFAULT_CONFIG_PATH
+
+
+def shared_display():
+    """config.toml [display] as every profile without its own wording uses it."""
+    return settings.load_config(str(config_file()) if config_file().exists() else None)[0]["display"]
+
+
+def new_setup_wording():
+    """A brand-new install (no config.toml and no state/ yet) starts with settings.NEW_SETUP_DISPLAY; an existing one - even one
+    that never saved a setting - keeps the wording it has."""
+    if config_file().exists() or (paths.APP_DIR / "state").exists():
+        return
+    try:
+        C.update_config_sections(config_file(), {"display": dict(settings.NEW_SETUP_DISPLAY)})
+    except (C.UserError, OSError):
+        pass
 
 
 def load_cfg():
@@ -1373,6 +1391,9 @@ class Dashboard(QWidget):
         self.obs_line = label("", "hint", wrap=True)          # OBS WebSocket output status (only while it is on)
         self.obs_line.hide()
         overview.addWidget(self.obs_line)
+        self.remote_line = label("", "hint", wrap=True)       # Remote Sharing status (only while it is set up)
+        self.remote_line.hide()
+        overview.addWidget(self.remote_line)
 
         # source + start
         box, box_layout = card()
@@ -1871,13 +1892,14 @@ class SavedPage(QWidget):
 
 class OverlayPage(SavedPage):
     """
-    What viewers see, in two tabs: Display (the ONE text file OBS reads, its wording) and OBS WebSocket (the same text put straight into
-    an OBS Text source). One Save for both; a saved change is used at once, also while counting - the counter re-reads the wording
-    within a second, and OBS is reconnected only when its address or password changed. Connect, Refresh, Copy path and Use direct
-    updates act at once with the SAVED settings; Forget password asks first.
+    What viewers see, in three tabs: Display (the ONE text file OBS reads, its wording - shared by every profile, or this profile's
+    own), OBS WebSocket (the same text put straight into an OBS Text source) and Remote Sharing (the same text sent to the user's own
+    relay, for an OBS Browser Source on any PC or network). One Save for all of them; a saved change is used at once, also while
+    counting - the counter re-reads the wording within a second, and OBS is reconnected only when its address or password changed.
+    Connect, Refresh, Copy path, Use direct updates, the publisher key and viewer links act at once; Forget and Revoke ask first.
     """
     page_name = "Overlay"
-    TABS = ("Display", "OBS WebSocket")
+    TABS = ("Display", "OBS WebSocket", "Remote Sharing")
 
     def __init__(self, win):
         super().__init__()
@@ -1885,9 +1907,23 @@ class OverlayPage(SavedPage):
         self._loading = False
         self.display = {}
         self._source = ("", "")                 # the OBS Text source picked on this page (name, OBS id), saved or not
-        display, obs_tab = self._build("Overlay", "What your viewers see. The counter writes ONE text file; OBS shows it with a Text "
-                                                  "source. Fonts, colours and size are set in OBS. Saved changes are used at once, "
-                                                  "also while counting.", self.TABS)
+        display, obs_tab, remote_tab = self._build("Overlay", "What your viewers see. The counter writes ONE text file; OBS shows it "
+                                                              "with a Text source. Fonts, colours and size are set in OBS. Saved "
+                                                              "changes are used at once, also while counting.", self.TABS)
+        self.profile = {"id": profiles.DEFAULT_ID, "name": profiles.DEFAULT_NAME}
+        self.shared_display = {}
+        box, box_layout = card("Profiles", "Each profile can keep its own wording - for example one per streamer. Switching the "
+                                           "profile on the Dashboard switches the wording with it.")
+        self.scope = QButtonGroup(self)
+        self.scope_shared = QRadioButton("The same wording for every profile")
+        self.scope_own = QRadioButton("Own wording for this profile only")
+        self.scope.addButton(self.scope_shared, 0)
+        self.scope.addButton(self.scope_own, 1)
+        self.scope_own.toggled.connect(self._scope_toggled)
+        box_layout.addWidget(self.scope_shared)
+        box_layout.addWidget(self.scope_own)
+        display.addWidget(box)
+
         box, box_layout = card("What OBS shows")
         self.modes = QButtonGroup(self)
         self.mode_buttons = {}
@@ -1921,6 +1957,8 @@ class OverlayPage(SavedPage):
         box_layout.addWidget(self.thousands)
         row = QHBoxLayout()
         row.addWidget(button("Original wording", "link", on_click=self._defaults))
+        row.addWidget(button("CHESTS OPENED ≈ #", "link", tip="One line: the estimated total, e.g. CHESTS OPENED ≈ 24,576",
+                             on_click=self._preset_chests))
         row.addStretch(1)
         box_layout.addLayout(row)
         display.addWidget(box)
@@ -1995,15 +2033,88 @@ class OverlayPage(SavedPage):
         box_layout.addLayout(row)
         obs_tab.addWidget(box)
         obs_tab.addStretch(1)
+        self._build_remote(remote_tab)
         self._watch_inputs()
+
+    def _build_remote(self, tab):
+        box, box_layout = card("Remote Sharing (optional)",
+                               "Send this profile's counter to a relay YOU run, so an OBS Browser Source on any PC or network "
+                               "shows the same text as the Display tab. Nothing is sent until this is set up. Your PC only "
+                               "connects out to your relay; viewers only ever connect to the relay, never to your PC.")
+        row = QHBoxLayout()
+        row.addWidget(button("Setup guide", "link", tip="What a relay is and how to run one for free", on_click=self._rs_guide))
+        row.addStretch(1)
+        box_layout.addLayout(row)
+        tab.addWidget(box)
+
+        box, box_layout = card("Your relay", "Any relay that speaks Remote Sharing protocol v1 works; you can run your own copy of "
+                                             "the reference relay for free (see the setup guide).")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        self.rs_url = QLineEdit()
+        self.rs_url.setPlaceholderText("wss://your-relay.example")
+        grid.addWidget(label("Relay address"), 0, 0)
+        grid.addWidget(self.rs_url, 0, 1, 1, 3)
+        self.rs_key_state = label("", wrap=True)
+        grid.addWidget(label("Publisher key"), 1, 0)
+        grid.addWidget(self.rs_key_state, 1, 1)
+        self.rs_key_new = button("Create key", tip="Make this PC's publisher key (kept in Windows Credential Manager)",
+                                 on_click=self._rs_create_key)
+        self.rs_key_enter = button("Enter key...", tip="Use the publisher key from your other PC", on_click=self._rs_enter_key)
+        self.rs_key_forget = button("Forget key", "link", on_click=self._rs_forget_key)
+        keys = QHBoxLayout()
+        for widget in (self.rs_key_new, self.rs_key_enter, self.rs_key_forget):
+            keys.addWidget(widget)
+        grid.addLayout(keys, 1, 2, 1, 2)
+        self.rs_setup = QLineEdit()
+        self.rs_setup.setReadOnly(True)
+        self.rs_setup_copy = button("Copy", tip="Copy the setup code", on_click=self._rs_copy_setup)
+        grid.addWidget(label("Setup code"), 2, 0)
+        grid.addWidget(self.rs_setup, 2, 1, 1, 2)
+        grid.addWidget(self.rs_setup_copy, 2, 3)
+        grid.setColumnStretch(1, 1)
+        box_layout.addLayout(grid)
+        box_layout.addWidget(label("Give the setup code to your relay (the reference relay calls it PUBLISHER_KEY_SHA256). It is "
+                                   "not the key: the key never leaves this PC and is never shown.", "hint", wrap=True))
+        tab.addWidget(box)
+
+        box, box_layout = card("This profile")
+        self.rs_enabled = QCheckBox("Share this profile's counter")
+        box_layout.addWidget(self.rs_enabled)
+        self.rs_status = label("", "hint", wrap=True)
+        box_layout.addWidget(self.rs_status)
+        tab.addWidget(box)
+
+        box, box_layout = card("Viewer links (read-only)", "A link shows this profile's counter in an OBS Browser Source "
+                                                           "(Sources > + > Browser, about 600 x 150) or any browser. Anyone with a "
+                                                           "link can watch, never change anything - keep links out of public chat. "
+                                                           "Revoke a link to stop it at once.")
+        self.rs_links = QVBoxLayout()
+        self.rs_links.setSpacing(6)
+        box_layout.addLayout(self.rs_links)
+        row = QHBoxLayout()
+        self.rs_new_label = QLineEdit()
+        self.rs_new_label.setPlaceholderText("Name, e.g. OBS on PC B")
+        self.rs_new_label.setMaxLength(remote_protocol.MAX_LABEL)
+        row.addWidget(self.rs_new_label, 1)
+        self.rs_new_link = button("New link", "primary", tip="Make a link and copy its address", on_click=self._rs_new_link)
+        row.addWidget(self.rs_new_link)
+        box_layout.addLayout(row)
+        self.rs_note = label("", "hint", wrap=True)
+        box_layout.addWidget(self.rs_note)
+        tab.addWidget(box)
+        tab.addStretch(1)
 
     # ---- the saved settings
     def _values(self):
         """Every editable setting in saved units. The wording counts as the [display] settings it would save (so a text that changes
         nothing in the file is no change); a typed password counts only as "a new password was typed", never as its text."""
         return {"display": {**self.display, **self.display_changes()}, "ws_enabled": self.ws_enabled.isChecked(),
+                "display_scope": "own" if self.scope_own.isChecked() else "shared",
                 "ws_host": self.ws_host.text().strip(), "ws_port": self.ws_port.value(), "ws_source": self._source,
-                "ws_new_password": bool(self.ws_password.text())}
+                "ws_new_password": bool(self.ws_password.text()),
+                "rs_url": self.rs_url.text().strip(), "rs_enabled": self.rs_enabled.isChecked()}
 
     def load(self):
         """The saved overlay settings into both tabs: whatever was changed and not saved is replaced. The tab on screen stays."""
@@ -2011,13 +2122,17 @@ class OverlayPage(SavedPage):
         self.save_state.loading()
         cfg, warnings = load_cfg()
         self.unreadable = self._unreadable(warnings)
-        self.display = cfg["display"]
+        self.display = cfg["display"]                          # what this profile uses: config.toml, or its own wording over it
+        self.shared_display = shared_display()
+        self.profile = profiles.get(profiles.load(cfg["profile"]["state_base"]), cfg["profile"]["id"])
+        self.scope_own.setText(f"Own wording for {self.profile['name']} only")
+        (self.scope_own if self.profile.get("display") else self.scope_shared).setChecked(True)
         self.obs_path.setText(str((paths.APP_DIR / cfg["state"]["obs_dir"] / "chest_counter.txt").resolve()))
-        self.mode_buttons[C.display_mode(self.display)].setChecked(True)
-        self.certain_text.setText(C.hash_from_text(self.display["certain_text"]))
-        self.approx_text.setText(C.hash_from_text(self.display["approx_text"]))
-        self.line_text.setText(C.markers_from_line(self.display["combined_status_format"]))
-        self.thousands.setChecked(self.display["use_thousands_separator"])
+        self._fill_display(self.display)
+        self.rs_url.setText(cfg["remote"]["url"])
+        remote = self.profile.get("remote") or {}
+        self.rs_enabled.setText(f"Share {self.profile['name']}'s counter")
+        self.rs_enabled.setChecked(bool(remote.get("enabled")))
         ws = cfg["obs_websocket"]
         self.ws_enabled.setChecked(ws["enabled"])
         self._ws_toggled(ws["enabled"])
@@ -2031,6 +2146,36 @@ class OverlayPage(SavedPage):
         self.save_state.loaded()
         self.copy_note.setText("")
         self.show_obs_status(self.win.obs_link.status()[1])
+        self.rs_note.setText("")
+        self._rs_fill()
+        self.show_remote_status(self.win.remote_link.status()[1])
+
+    def _fill_display(self, display):
+        self.mode_buttons[C.display_mode(display)].setChecked(True)
+        self.certain_text.setText(C.hash_from_text(display["certain_text"]))
+        self.approx_text.setText(C.hash_from_text(display["approx_text"]))
+        self.line_text.setText(C.markers_from_line(display["combined_status_format"]))
+        self.thousands.setChecked(display["use_thousands_separator"])
+
+    def _scope_toggled(self, own):
+        """Shared: the page shows (and Save writes) the wording every profile shares. Own: this profile's saved wording - or, the
+        first time, what is on screen, to start from."""
+        if self._loading:
+            return
+        if own and self.profile.get("display"):
+            self.display = {**self.shared_display, **self.profile["display"]}
+        elif not own:
+            self.display = dict(self.shared_display)
+        else:
+            return
+        self._loading = True
+        self._fill_display(self.display)
+        self._loading = False
+        self._changed()
+
+    def _preset_chests(self):
+        self.mode_buttons["approx"].setChecked(True)
+        self.approx_text.setText(C.hash_from_text(settings.NEW_SETUP_DISPLAY["approx_text"]))
 
     def _saved_text(self):
         return "✓ Overlay saved."
@@ -2046,8 +2191,22 @@ class OverlayPage(SavedPage):
         values, changes = self._values(), self.save_state.changes()
         self.save_button.setEnabled(False)
         sections, obs = {}, {}
-        before = self.save_state.saved_value("display") or {}
-        sections["display"] = {k: v for k, v in values["display"].items() if before.get(k) != v or ("display", k) in self.unreadable}
+        own = values["display_scope"] == "own"
+        if own:                                              # this profile's wording: config.toml [display] stays as it is
+            sections["display"] = {k: self.shared_display[k] for s, k in self.unreadable if s == "display" and k in self.shared_display}
+            profile_display = ({k: values["display"][k] for k in profiles.DISPLAY_KEYS if k in values["display"]}
+                               if "display" in changes or "display_scope" in changes else profiles.KEEP)
+        else:
+            before = self.shared_display
+            sections["display"] = {k: v for k, v in values["display"].items()
+                                   if before.get(k) != v or ("display", k) in self.unreadable}
+            profile_display = None if self.profile.get("display") else profiles.KEEP      # back to the shared wording
+        remote = profiles.KEEP
+        if "rs_enabled" in changes:
+            remote = {**(self.profile.get("remote") or {"channel": remote_protocol.new_channel_id(), "links": []}),
+                      "enabled": values["rs_enabled"]}
+        if "rs_url" in changes:
+            sections["remote"] = {"url": values["rs_url"]}
         for name, key in (("ws_enabled", "enabled"), ("ws_host", "host"), ("ws_port", "port")):
             if name in changes:
                 obs[key] = changes[name]
@@ -2065,8 +2224,19 @@ class OverlayPage(SavedPage):
                                   "192.168.1.50)")
             if len(typed) > obs_credentials.MAX_PASSWORD:
                 raise C.UserError(f"the OBS password is longer than {obs_credentials.MAX_PASSWORD} characters")
+            problem = remote_protocol.relay_url_problem(values["rs_url"]) if "rs_url" in changes else None
+            if problem:
+                raise C.UserError(f"the relay address {problem}")
+            if values["rs_enabled"] and not values["rs_url"]:
+                raise C.UserError("enter your relay's address before sharing this profile")
             if any(sections.values()):
                 original = C.update_config_sections(config_file(), {s: v for s, v in sections.items() if v})
+            if profile_display is not profiles.KEEP or remote is not profiles.KEEP:
+                try:
+                    profiles.update_entry(load_cfg()[0]["profile"]["state_base"], self.profile["id"],
+                                          display=profile_display, remote=remote)
+                except (OSError, profiles.ProfileError) as error:
+                    raise C.UserError(f"the profile's settings could not be saved ({error})") from error
             if typed:
                 old_password = obs_credentials.load_password()
                 try:
@@ -2081,10 +2251,12 @@ class OverlayPage(SavedPage):
             self.save_state.failed(str(error))
             show_error(self, f"The Overlay settings were not saved: {error}")
             return False
-        wording = "display" in changes
+        wording = "display" in changes or "display_scope" in changes
         reconnect = connect or bool(typed) or "host" in obs or "port" in obs
         self.unreadable = frozenset()                            # every default shown was written
         self.display = cfg["display"]
+        self.shared_display = shared_display()
+        self.profile = profiles.get(profiles.load(cfg["profile"]["state_base"]), cfg["profile"]["id"])
         self._loading = True
         self.ws_password.clear()                   # stored: the box goes back to "Saved - type a new one to replace it"
         self._loading = False
@@ -2099,6 +2271,7 @@ class OverlayPage(SavedPage):
             self.win.refresh_viewers()
         if obs or typed or connect:
             self.win.apply_obs_settings(reconnect=reconnect)
+        self._rs_fill()                                          # links follow the saved relay address
         self._changed()
         return True
 
@@ -2247,6 +2420,158 @@ class OverlayPage(SavedPage):
                 if s["name"] == current:
                     self.ws_source.setCurrentIndex(self.ws_source.count() - 1)
         self.ws_source.blockSignals(False)
+
+    # ---- Remote Sharing tab (the relay address and "Share" are saved with Save changes; keys and links act at once)
+    def _rs_base(self):
+        return load_cfg()[0]["profile"]["state_base"]
+
+    def _rs_guide(self):
+        guide = paths.APP_DIR / "docs" / "guides" / "remote-sharing.md"
+        if guide.exists():
+            open_path(guide)
+        else:
+            QDesktopServices.openUrl(QUrl(REPO_URL + "/blob/main/docs/guides/remote-sharing.md"))
+
+    def _rs_fill(self):
+        """The publisher key state and the profile's viewer links, as saved now (they are not page settings)."""
+        key = remote_sharing.load_publisher_key()
+        self.rs_key_state.setText("Stored on this PC (Windows Credential Manager)" if key else "None on this PC yet")
+        self.rs_setup.setText(remote_protocol.setup_code(key) if key else "")
+        self.rs_setup_copy.setEnabled(bool(key))
+        self.rs_key_forget.setVisible(bool(key))
+        self.rs_key_new.setText("New key" if key else "Create key")
+        while self.rs_links.count():
+            item = self.rs_links.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        remote = self.profile.get("remote") or {}
+        links = remote.get("links", [])
+        saved_url = self.save_state.saved_value("rs_url") if self.save_state.saved_value("rs_url") is not None else ""
+        if not links:
+            self.rs_links.addWidget(label("No viewer links yet.", "hint"))
+        for link in reversed(links):
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            revoked = bool(link.get("revoked"))
+            text = f"{link['label'] or link['id']}   ({link['id']}" + (", revoked)" if revoked else ")")
+            line.addWidget(label(text, "hint" if revoked else None), 1)
+            if not revoked:
+                token = remote_sharing.link_token(self._rs_base(), self.profile["id"], link["id"])
+                copy = button("Copy link", tip="Copy the address for an OBS Browser Source" if token else
+                              "Made on another PC: its address cannot be shown here. Make a new link instead.",
+                              on_click=lambda _=False, i=link["id"]: self._rs_copy_link(i))
+                copy.setEnabled(bool(token and saved_url))
+                line.addWidget(copy)
+                line.addWidget(button("Revoke", "link", on_click=lambda _=False, i=link["id"], n=link["label"]: self._rs_revoke(i, n)))
+            self.rs_links.addWidget(row)
+        self.rs_new_link.setEnabled(bool(saved_url))
+        self.rs_new_link.setToolTip("Make a link and copy its address" if saved_url else "Save your relay's address first")
+
+    def _rs_create_key(self):
+        if remote_sharing.load_publisher_key() and not ask(
+                self, "Make a new publisher key?", "This PC gets a new key and a new setup code. Your relay refuses this PC until "
+                "it has the new setup code (the old key stops working there). Viewer links keep working.", "Make a new key",
+                danger=True):
+            return
+        try:
+            remote_sharing.save_publisher_key(remote_protocol.new_secret())
+        except (OSError, remote_sharing.SharingError) as error:
+            show_error(self, f"The key could not be stored in Windows Credential Manager ({error}).")
+            return
+        self._rs_fill()
+        self.rs_note.setText("New key stored. Copy the setup code to your relay; until then the relay refuses this PC.")
+
+    def _rs_enter_key(self):
+        key, ok = QInputDialog.getText(self, "Enter publisher key", "The publisher key from your other PC (it is stored in Windows "
+                                       "Credential Manager and never shown):", QLineEdit.Password)
+        if not ok or not key.strip():
+            return
+        try:
+            remote_sharing.save_publisher_key(key)
+        except remote_sharing.SharingError as error:
+            show_error(self, str(error))
+            return
+        except OSError as error:
+            show_error(self, f"The key could not be stored in Windows Credential Manager ({error}).")
+            return
+        self._rs_fill()
+        self.rs_note.setText("Key stored. Check that the setup code above matches the one your relay has.")
+
+    def _rs_forget_key(self):
+        if not ask(self, "Forget the publisher key?", "This PC's publisher key is deleted from Windows Credential Manager now, "
+                                                      "so this PC can no longer send to your relay until a key is set again.",
+                   "Forget key", danger=True):
+            return
+        try:
+            remote_sharing.forget_publisher_key()
+        except OSError as error:
+            show_error(self, f"The key could not be removed ({error}).")
+            return
+        self._rs_fill()
+
+    def _rs_copy_setup(self):
+        QApplication.clipboard().setText(self.rs_setup.text())
+        self.rs_note.setText("Setup code copied - paste it into your relay's setting for it.")
+
+    def _rs_new_link(self):
+        base = self._rs_base()
+        try:
+            if remote_sharing.remote_of(base, self.profile["id"]) is None:       # the profile's channel, sharing still off
+                remote_sharing.set_enabled(base, self.profile["id"], False)
+            link_id, _ = remote_sharing.add_link(base, self.profile["id"], self.rs_new_label.text() or "OBS")
+        except remote_sharing.SharingError as error:
+            show_error(self, str(error))
+            return
+        except (OSError, profiles.ProfileError) as error:
+            show_error(self, f"The link could not be made ({error}).")
+            return
+        self.profile = profiles.get(profiles.load(base), self.profile["id"])
+        self.rs_new_label.clear()
+        self._rs_fill()
+        self._rs_copy_link(link_id)
+
+    def _rs_copy_link(self, link_id):
+        base = self._rs_base()
+        token = remote_sharing.link_token(base, self.profile["id"], link_id)
+        url = self.save_state.saved_value("rs_url") or ""
+        if not token or not url:
+            return
+        channel = self.profile["remote"]["channel"]
+        QApplication.clipboard().setText(remote_protocol.overlay_url(url, channel, link_id, token))
+        self.rs_note.setText(f"Link {link_id} copied - paste it as the URL of an OBS Browser Source. "
+                             + ("" if self.profile["remote"].get("enabled") else "It shows the counter once sharing is on and saved."))
+
+    def _rs_revoke(self, link_id, name):
+        if not ask(self, "Revoke this link?", f"\"{name or link_id}\" stops showing the counter at once, everywhere it is open, "
+                                              "and can never be used again.", "Revoke", danger=True):
+            return
+        base = self._rs_base()
+        try:
+            remote_sharing.revoke_link(base, self.profile["id"], link_id)
+        except (OSError, remote_sharing.SharingError, profiles.ProfileError) as error:
+            show_error(self, f"The link could not be revoked ({error}).")
+            return
+        self.profile = profiles.get(profiles.load(base), self.profile["id"])
+        self._rs_fill()
+        self.rs_note.setText(f"Link {link_id} revoked." + ("" if self.win.remote_link.status()[1]["state"] == "connected" else
+                                                         " Open overlays close the next time this profile is shared."))
+
+    def show_remote_status(self, status):
+        """What the Remote Sharing link reports (in the background). Never a key or a link address."""
+        state = status["state"]
+        text, color = {"connected": (f"● Live - sharing {status['profile']} with {status['relay']}, "
+                                     f"{status['viewers']} viewer(s) connected.", theme.CERTAIN),
+                       "connecting": (f"● Connecting to {status['relay']} ...", theme.INFO),
+                       "retrying": (f"● Not connected: {status['detail']} Trying again.", theme.APPROX),
+                       "no_key": ("● This PC has no publisher key yet: Create key (or Enter key from your other PC).", theme.APPROX),
+                       "key_rejected": (f"● {status['detail']}", theme.REJECT),
+                       "taken_over": (f"● {status['detail']}", theme.REJECT)}.get(
+            state, (f"● Off. {status.get('detail') or ''}".strip(), theme.MUTED))
+        if status.get("warning"):
+            text += f" {status['warning']}"
+        self.rs_status.setText(text)
+        self.rs_status.setStyleSheet(f"color: {color};")
 
 
 class SettingsPage(SavedPage):
@@ -4877,6 +5202,7 @@ class MainWindow(QMainWindow):
         if version != self._remote_version:
             self._remote_version = version
             self.remote_status_changed(status)
+            self.remote_status_shown(status)
         self._update_ticks += 1
         if self._update_ticks % 4 == 0 and self.updates.poll():
             self.update_changed()
@@ -5042,6 +5368,19 @@ class MainWindow(QMainWindow):
             text += f" {status['warning']}"
         self.add_log({"type": "warn" if state in ("key_rejected", "taken_over", "retrying") else "info",
                       "text": f"Remote Sharing: {text}"})
+
+    def remote_status_shown(self, status):
+        self.overlay.show_remote_status(status)
+        line, state = self.dashboard.remote_line, status["state"]
+        if state == "off":
+            line.hide()
+            return
+        text, color = {"connected": (f"Live, {status['viewers']} viewer(s)", theme.CERTAIN),
+                       "connecting": ("connecting ...", theme.INFO),
+                       "retrying": ("not connected - trying again", theme.APPROX)}.get(state, ("needs attention (Overlay page)", theme.REJECT))
+        line.setText(f"Remote Sharing: {text}")
+        line.setStyleSheet(f"color: {color};")
+        line.show()
 
     def obs_status_changed(self, status):
         line = self.dashboard.obs_line
@@ -5767,6 +6106,7 @@ def main(argv=None):
     if lock is None:
         QMessageBox.information(None, APP_NAME, f"{APP_NAME} is already open.\n\nLook for it in the taskbar.")
         return 0
+    new_setup_wording()
     window = MainWindow()
     set_class_icon(window)
     sys.excepthook = _crash_hook(lambda: window)

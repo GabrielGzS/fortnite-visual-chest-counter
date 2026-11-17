@@ -26,7 +26,8 @@ from fortnite_chest_counter.remote import protocol as P
 from fortnite_chest_counter.remote import sharing
 
 KEY = "k" * 43
-SRC = Path(__file__).resolve().parent.parent / "src" / "fortnite_chest_counter"
+NL = chr(10)
+SRC =Path(__file__).resolve().parent.parent / "src" / "fortnite_chest_counter"
 
 
 # ==================================================================
@@ -90,7 +91,8 @@ class FakeRelay:
                 accepted = message["rev"] > ch["rev"]
                 if accepted:
                     ch["rev"], ch["snapshot"] = message["rev"], message
-                    ch["history"].append((message["certain"], message["approx"], message["state"], message["rev"]))
+                    ch["history"].append((message["certain"], message["approx"], message["state"], message["rev"],
+                                          tuple((message.get("ext") or {}).get("lines") or ())))
                 conn.inbox.put(json.dumps({"type": "ack", "rev": ch["rev"], "accepted": accepted}))
             elif message["type"] == "links":
                 ch["links"] = {l["id"]: l["sha256"] for l in message["active"]}
@@ -273,8 +275,8 @@ def test_off_unless_relay_key_and_profile_sharing_are_all_set_and_off_opens_no_s
         s.write_config("wss://relay.invalid")                                       # a relay, but sharing is off
         time.sleep(0.4)
         assert link.status()[1]["state"] == "off" and "off for" in link.status()[1]["detail"]
+        link.stop()                                            # (this link has a key: with sharing on it WOULD connect)
         sharing.set_enabled(s.base, "default", True)
-        link.stop()
         link = L.RemoteLink(s.config, key_loader=lambda: "", poll=0.05).start()       # sharing on, but no key
         wait_until(lambda: link.status()[1]["state"] == "no_key", what="no_key")
         link.stop()
@@ -418,6 +420,48 @@ def test_viewer_links_are_kept_on_reconnect_and_unknown_ones_never_revoked():
         sharing.revoke_link(s.base, "default", link_id)                  # revoked while connected
         wait_until(lambda: relay.channel(channel)["links"] == {}, what="revoked on the relay")
         link.stop()
+    finally:
+        s.close()
+
+
+def test_the_overlay_text_travels_with_the_counts_and_a_wording_change_alone_reaches_viewers():
+    s, relay = Setup(), FakeRelay()
+    try:
+        channel = sharing.set_enabled(s.base, "default", True)["channel"]
+        overlay = s.dir / "obs_output" / "chest_counter.txt"
+        overlay.parent.mkdir(parents=True)
+        overlay.write_text("CHESTS OPENED ≈ 1,250" + NL, encoding="utf-8")
+        s.counts("default", 500, 1250)
+        link = started(s, relay)
+        wait_until(lambda: history(relay, channel) and history(relay, channel)[-1][4] == ("CHESTS OPENED ≈ 1,250",),
+                   what="lines")
+        before = len(history(relay, channel))
+        time.sleep(0.05)
+        overlay.write_text("CERTAIN: 500" + NL + "APPROX: 1,250" + NL, encoding="utf-8")    # the Overlay page saved new wording
+        wait_until(lambda: history(relay, channel)[-1][4] == ("CERTAIN: 500", "APPROX: 1,250"), what="new wording")
+        assert len(history(relay, channel)) == before + 1 and history(relay, channel)[-1][:2] == (500, 1250)
+        link.stop()
+    finally:
+        s.close()
+
+
+def test_a_running_counter_picks_up_its_profiles_own_wording():
+    from types import SimpleNamespace
+    s = Setup()
+    try:
+        profiles.create(s.base, "Streamer B", activate=True)
+        args = SimpleNamespace(config=str(s.config), profile="streamer-b")
+        cfg = counter.make_config(args)[0]
+        written = []
+        session = SimpleNamespace(display=cfg["display"], state=counter.fresh_state(), obs_dir=s.dir / "obs_output",
+                                  write_obs=lambda: written.append(dict(session.display)), announce=lambda: None)
+        watcher = counter.DisplayConfigWatcher(args)
+        time.sleep(0.05)
+        profiles.set_display(s.base, "streamer-b", {"show": "approx", "approx_text": "CHESTS OPENED ≈ {count}"})
+        assert watcher.check(session) is True and written[-1]["approx_text"] == "CHESTS OPENED ≈ {count}"
+        time.sleep(0.05)
+        sharing.set_enabled(s.base, "streamer-b", True)          # profiles.json changes, the wording does not
+        assert watcher.check(session) is False and len(written) == 1
     finally:
         s.close()
 

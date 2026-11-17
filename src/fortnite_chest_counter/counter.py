@@ -598,22 +598,38 @@ class DisplayConfigWatcher:
     restart (they are not touched here)."""
 
     def __init__(self, args):
-        self.args, self.path = args, config_path(args)
+        self.args, self.path, self.registry = args, config_path(args), None
+        if not getattr(args, "state", None):          # a profile's own wording lives in profiles.json (profiles.apply)
+            try:
+                cfg, _, _ = settings.load_config(getattr(args, "config", None), config_overrides(args))
+                self.registry = profiles.registry_path(cfg["state"]["path"])
+            except Exception:
+                pass
         self.mtime = self._mtime()
 
-    def _mtime(self):
+    @staticmethod
+    def _stamp(path):
         try:
-            return self.path.stat().st_mtime_ns
-        except OSError:
+            return path.stat().st_mtime_ns
+        except (OSError, AttributeError):
             return None
+
+    def _mtime(self):
+        return self._stamp(self.path), self._stamp(self.registry)
 
     def check(self, session):
         """-> True if the overlay settings were reloaded."""
-        mtime = self._mtime()
-        if mtime == self.mtime:
+        mtime, previous = self._mtime(), self.mtime
+        if mtime == previous:
             return False
         self.mtime = mtime
         cfg, _, warnings = settings.load_config(getattr(self.args, "config", None), config_overrides(self.args))
+        try:
+            use_profiles(cfg, self.args)              # the counted profile's own wording, if it has one
+        except UserError:
+            pass
+        if mtime[0] == previous[0] and cfg["display"] == session.display:
+            return False                              # only profiles.json changed, for another reason (a link, a source, ...)
         for w in warnings:
             CONSOLE.warn(w)
         session.display = cfg["display"]

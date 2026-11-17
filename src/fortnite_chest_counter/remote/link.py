@@ -34,7 +34,7 @@ BACKOFF_SECONDS = (1, 2, 5, 10, 20, 30)
 CONNECT_TIMEOUT = 10
 KEY_RECHECK_SECONDS = 5                 # after the relay refused the key, look for a new one this often
 
-Target = namedtuple("Target", "url profile_id profile_name channel counter_path active known")
+Target = namedtuple("Target", "url profile_id profile_name channel counter_path overlay_path active known")
 
 _tls = None
 
@@ -79,7 +79,7 @@ class RemoteLink:
         self._version = 0
         self._status = {"state": "off", "detail": "", "warning": "", "viewers": 0, "profile": "", "relay": ""}
         self._config_sig = None
-        self._url, self._base, self._resolved, self._resolved_key = "", None, (None, ""), None
+        self._url, self._base, self._overlay, self._resolved, self._resolved_key = "", None, None, (None, ""), None
         self._last_rev = 0                      # the newest rev sent on the current channel
 
     # ---- the app's side (any thread)
@@ -125,7 +125,9 @@ class RemoteLink:
             self._config_sig = sig
             try:
                 cfg, _, _ = settings.load_config(self.config_path)
-                self._url, self._base = cfg["remote"]["url"], Path(cfg["state"]["path"])
+                root = self.config_path.parent                 # relative paths are relative to the program folder
+                self._url, self._base = cfg["remote"]["url"], root / cfg["state"]["path"]
+                self._overlay = root / cfg["state"]["obs_dir"] / "chest_counter.txt"
             except Exception:                      # a broken config: the app reports it; nothing is shared meanwhile
                 self._url, self._base = "", None
         if not self._url or self._base is None:
@@ -153,7 +155,7 @@ class RemoteLink:
         links = remote["links"]
         active = tuple((l["id"], l["sha256"]) for l in links if not l.get("revoked"))[:P.MAX_LINKS]
         self._resolved = (Target(self._url, entry["id"], entry["name"], remote["channel"],
-                                 profiles.profile_state_path(self._base, entry["id"]), active,
+                                 profiles.profile_state_path(self._base, entry["id"]), self._overlay, active,
                                  frozenset(l["id"] for l in links)), "")
         return self._resolved
 
@@ -297,7 +299,7 @@ class RemoteLink:
 
     def _publish(self, ws, conn, target, force=False):
         """Send the counts if they (or counting/idle) changed since the last snapshot."""
-        sig = _signature(target.counter_path)
+        sig = (_signature(target.counter_path), _signature(target.overlay_path))
         with self._lock:
             counting = self._counting
         if not force and sig == conn["counter_sig"] and conn["sent"] is not None and conn["sent"][2] == counting:
@@ -308,11 +310,13 @@ class RemoteLink:
             self._set_status(detail="The counter file could not be read; viewers keep the last count.")
             return
         certain, approx, at = counts
-        current = (certain, approx, counting)
+        lines = P.read_overlay_lines(target.overlay_path)      # the active profile's text, as local OBS shows it
+        current = (certain, approx, counting, tuple(lines or ()))
         if not force and current == conn["sent"]:
             return
         rev = P.next_rev(self._last_rev, conn["relay_rev"], self._clock() * 1000)
-        ws.send_text(json.dumps(P.snapshot_message(rev, certain, approx, "counting" if counting else "idle", at)))
+        ws.send_text(json.dumps(P.snapshot_message(rev, certain, approx, "counting" if counting else "idle", at, lines),
+                                ensure_ascii=False))
         conn["sent"], self._last_rev = current, rev
         self._set_status(detail="")
 
