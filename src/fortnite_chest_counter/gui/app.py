@@ -1945,7 +1945,8 @@ class OverlayPage(SavedPage):
             box_layout.addWidget(radio)
         display.addWidget(box)
 
-        box, box_layout = card("Wording", "Put # where the number goes, e.g.  Chests opened: #   or   Chest Hunt: #/500")
+        box, box_layout = card("Wording", "Put # where the number goes, e.g.  Chests opened: #   or   Chest Hunt: #/500.  \\n starts a new "
+                                          "line (once per text), e.g.  CHESTS OPENED\\n≈ #")
         form = QGridLayout()
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(8)

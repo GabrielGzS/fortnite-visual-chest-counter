@@ -211,6 +211,27 @@ def test_export_and_import_from_the_dashboard_select_the_imported_profile_and_ar
             assert actions == ["Export this profile...", "Import a profile..."]
 
 
+def test_a_typed_line_break_gives_two_lines_locally_and_remotely_and_only_one_break_is_allowed():
+    with remote_page() as (w, page, creds):
+        page.mode_buttons["approx"].setChecked(True)
+        page.approx_text.setText("CHESTS OPENED\\n≈ #")              # typed: a backslash and an n
+        assert page.preview.text() == "CHESTS OPENED" + chr(10) + "≈ 0"
+        assert page.save()
+        assert settings.load_config(str(w.dir / "config.toml"))[0]["display"]["approx_text"] == "CHESTS OPENED" + chr(10) + "≈ {count}"
+        local = overlay_file(w)
+        assert local == "CHESTS OPENED" + chr(10) + "≈ 0" + chr(10)                         # the OBS text file: two lines
+        assert P.read_overlay_lines(w.dir / "obs_output" / "chest_counter.txt") == local.splitlines()   # what Remote Sharing sends
+        page.load()
+        assert page.approx_text.text() == "CHESTS OPENED\\n≈ #"      # shown as typed
+        before = config_text(w)
+        page.approx_text.setText("A\\nB\\n#")                                # a second break: refused, nothing written
+        assert page.save() is False and config_text(w) == before
+        page.approx_text.setText("CHESTS OPENED: #")                         # one-line wording still works as before
+        assert page.save() and overlay_file(w) == "CHESTS OPENED: 0" + chr(10)
+        assert w.A.C.line_from_markers("#A total\\n#C sure") == "{approx} total" + chr(10) + "{certain} sure"
+        assert w.A.C.markers_from_line("{approx} total" + chr(10) + "{certain} sure") == "#A total\\n#C sure"
+
+
 def test_new_setups_start_with_the_chests_opened_preset_and_existing_ones_keep_their_wording():
     from fortnite_chest_counter.gui import app as A
     saved = paths.APP_DIR

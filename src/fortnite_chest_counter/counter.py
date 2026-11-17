@@ -1892,17 +1892,21 @@ def _set_config_lines(lines, section, values):
             end += 1
 
 
+LINE_BREAK = "\\n"            # typed in a one-line wording box: a new line in the overlay (at most one per text, settings.MAX_BREAKS)
+
+
 def text_from_hash(text):
-    """'Chests opened: #' -> 'Chests opened: {count}'. Braces are kept literal; no # -> the number goes at the end."""
-    literal = str(text).replace("{", "{{").replace("}", "}}")
+    """'Chests opened: #' -> 'Chests opened: {count}'. Braces are kept literal; no # -> the number goes at the end; a typed \\n is a line
+    break ('CHESTS OPENED\\n≈ #' -> two lines)."""
+    literal = str(text).replace("{", "{{").replace("}", "}}").replace(LINE_BREAK, "\n")
     if "#" not in literal:
         literal = literal.rstrip() + " #"
     return literal.replace("#", "{count}")
 
 
 def hash_from_text(template):
-    """The reverse, to show a user their current text: 'Chests: {count}' -> 'Chests: #'."""
-    return str(template).replace("{count}", "#").replace("{{", "{").replace("}}", "}")
+    """The reverse, to show a user their current text: 'Chests: {count}' -> 'Chests: #' (a line break shows as \\n)."""
+    return str(template).replace("{count}", "#").replace("{{", "{").replace("}}", "}").replace("\n", LINE_BREAK)
 
 
 CONFIGURE_CHOICES = {"1": "approx", "2": "certain", "3": "inline", "4": "stacked"}
@@ -1913,7 +1917,7 @@ MODE_SETTINGS = {"approx": {"show": "approx"}, "certain": {"show": "certain"},
 def line_from_markers(text):
     """One-line wording: '#C confirmed • #A total' -> '{certain} confirmed • {approx} total' (braces kept literal)."""
     import re
-    literal = str(text).replace("{", "{{").replace("}", "}}")
+    literal = str(text).replace("{", "{{").replace("}", "}}").replace(LINE_BREAK, "\n")
     literal = re.sub("#a", "{approx}", re.sub("#c", "{certain}", literal, flags=re.I), flags=re.I)
     if "{approx}" not in literal and "{certain}" not in literal:
         literal = "{certain} / {approx} " + literal.strip()
@@ -1922,7 +1926,7 @@ def line_from_markers(text):
 
 def markers_from_line(template):
     return (str(template).replace("{certain}", "#C").replace("{approximate}", "#A").replace("{approx}", "#A")
-            .replace("{{", "{").replace("}}", "}"))
+            .replace("{{", "{").replace("}}", "}").replace("\n", LINE_BREAK))
 
 
 def _ask(question, valid=None):

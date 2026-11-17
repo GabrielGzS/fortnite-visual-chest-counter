@@ -21,6 +21,7 @@ DEFAULT_CONFIG_PATH = Path("config.toml")
 # A brand-new install (no config.toml and no state/ yet) starts with this wording; existing installs keep theirs. "Original wording"
 # in the app still means DEFAULTS["display"].
 NEW_SETUP_DISPLAY = {"show": "approx", "approx_text": "CHESTS OPENED ≈ {count}"}
+MAX_BREAKS = 1                  # line breaks per wording text (typed as \n): 2 lines each, at most 4 stacked = the remote overlay's limit
 
 DEFAULTS = {
     "detector": {
@@ -262,6 +263,8 @@ def _check(section, key, value):
         except (KeyError, IndexError, ValueError):
             return False, ("may only use the placeholders {count}, {certain} and {approx} "
                            "(write {{ and }} for a literal brace)")
+        if value.count("\n") > MAX_BREAKS:            # two lines per text: both counters stacked stay within 4 lines, local and remote alike
+            return False, "may start a new line (\\n) only once"
         return True, ""
     if isinstance(default, str):
         return (isinstance(value, str) and value.strip() != "", "must be non-empty text")
