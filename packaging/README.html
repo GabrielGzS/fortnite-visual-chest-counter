@@ -36,7 +36,7 @@
 <main>
 
 <h1>Fortnite Visual Chest Counter</h1>
-<p class="sub">Automatically count Fortnite chests from gameplay video &middot; v0.5.1 public beta &middot; Windows 10 / 11 &middot; no Python or programming needed</p>
+<p class="sub">Automatically count Fortnite chests from gameplay video &middot; v0.6.0 public beta &middot; Windows 10 / 11 &middot; no Python or programming needed</p>
 
 <h2 id="start-here" style="border-top:none;margin-top:1rem">Start here</h2>
 <ol>
@@ -273,11 +273,19 @@ this does not work while OBS is using the card. If the app says the device canno
 </ul>
 <div class="note warn"><b>Less tested:</b> this has been tested against a simulated OBS server, and not yet with OBS on a second PC.</div>
 
+<h3 id="remote">Another PC or network: Remote Sharing (preview, v0.6.0)</h3>
+<p>Show the counter in an OBS <b>Browser Source</b> anywhere, without opening your PC to the internet: the app sends the active
+profile&rsquo;s counter out to <b>a relay you run</b>, and viewers connect only to that relay. Off until you set it up; the app
+contains no relay or account of anyone else. <b>Overlay</b> &rarr; <b>Remote Sharing</b>: your relay&rsquo;s <code>wss://</code>
+address, <b>Create key</b> (kept in Windows Credential Manager; you give the relay its <i>setup code</i>), <b>Share this
+profile&rsquo;s counter</b>, then <b>New link</b> copies a read-only link. The <b>Setup guide</b> button there explains how to run
+a free relay of your own.</p>
+
 <h2 id="custom">Customize what viewers see</h2>
 <p>Open the <b>Overlay</b> page in the app, <b>Display</b> tab:</p>
 <ul>
   <li><b>What OBS shows</b>: both numbers on two lines, both on one line, only the estimated total, or only the confirmed chests. Each choice shows an example with your current numbers.</li>
-  <li><b>Wording</b>: put <code>#</code> where the number goes, e.g. <code>Chests opened: #</code> or <code>Chest Hunt: #/500</code>. For the one-line choice, <code>#C</code> is the confirmed number and <code>#A</code> the estimated total. <b>Original wording</b> brings the default text back.</li>
+  <li><b>Wording</b>: put <code>#</code> where the number goes, e.g. <code>Chests opened: #</code> or <code>Chest Hunt: #/500</code>. For the one-line choice, <code>#C</code> is the confirmed number and <code>#A</code> the estimated total. <b>Original wording</b> brings the default text back. Type <code>\n</code> for a new line, e.g. <code>CHESTS OPENED\n&asymp; #</code>. Each profile can keep its own wording.</li>
   <li><b>Preview</b> shows exactly what the text file will contain. Click <b>Save changes</b> at the top of the page: OBS updates at once, even while counting. Until then the page says <b>Unsaved changes</b>, and <b>Discard changes</b> goes back to what is saved.</li>
 </ul>
 <p>OBS always reads the same file (<code>chest_counter.txt</code>), whatever you choose, so you never change the OBS source. Any text, symbols and emoji work (emoji need an OBS font that has them).</p>
@@ -346,6 +354,10 @@ so corrections made before it can no longer be undone; they stay in the history.
 and its own video source (for example that streamer&rsquo;s Twitch link). One profile counts at a time; switch when counting
 is stopped. OBS always shows the selected profile, so the OBS text source never changes. Counts from earlier versions are
 the <b>Default</b> profile. A deleted profile&rsquo;s counts are kept as a backup in <code>state\profiles\deleted\</code>.</p>
+<p><b>Move a profile to another PC</b> (v0.6.0): <b>Export / Import</b> &rarr; <b>Export this profile&hellip;</b> saves one
+<code>.fccprofile</code> file with its counts, history and own wording. On the other PC, <b>Import a profile&hellip;</b> checks the
+file, shows what it holds and adds it (or replaces the profile of the same name, keeping a backup). Nothing else on either PC
+changes; keys and link addresses never travel, and Remote Sharing stays off for it until you turn it on there.</p>
 
 <h2 id="types">Chest types</h2>
 <p>The line under the two numbers splits the APPROX total by what the pop-up says: <b>Chest</b>, <b>Rare chest</b>,

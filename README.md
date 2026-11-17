@@ -18,7 +18,7 @@ without revealing hidden information or providing gameplay assistance. See
 
 > Independent, unofficial project: not affiliated with, endorsed by or approved by Epic Games. "Fortnite" is a trademark of
 > Epic Games, Inc.
-> Status: **v0.5.1 public beta** (desktop app). Developed and tested during Fortnite Chapter 7 Season 5 (November 2026) -
+> Status: **v0.6.0 public beta** (desktop app). Developed and tested during Fortnite Chapter 7 Season 5 (November 2026) -
 > see [Fortnite compatibility](#fortnite-compatibility). Windows 10 / 11. Nothing to install.
 
 **Contents:** [The two numbers](#the-two-numbers-read-this-first) · [Download](#download) · [Choose your setup](#choose-your-setup) ·
@@ -97,8 +97,21 @@ Every click explained: [setup guides](docs/guides/README.md).
 In the scene your viewers see: **Sources → + → Text (GDI+)** → tick **Read from file** → choose
 **`obs_output\chest_counter.txt`** (the app's **Overlay** page shows the exact path, with **Copy path**). That is the only file
 OBS ever needs. The Overlay page chooses what it says - both numbers on two lines or one line, estimated total only, or
-confirmed only - and your own wording; changes apply within a second, even while counting.
+confirmed only - and your own wording; changes apply within a second, even while counting. Type `\n` to start a new line,
+e.g. `CHESTS OPENED\n≈ #`. Each profile can keep its **own wording** (one per streamer, say): switching the profile switches it.
+New installs start with `CHESTS OPENED ≈ #`; your existing wording is kept.
 Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
+
+### Remote Sharing (preview, v0.6.0)
+
+Show the counter in OBS on **another PC or network** (a Browser Source) without opening your PC to the internet: the app sends
+the active profile's counter out to **a relay you run**, and viewers connect only to that relay. It is off until you set it up,
+and the app contains no relay or account of anyone else. Overlay → **Remote Sharing**: your relay's `wss://` address,
+**Create key** (the key stays in Windows Credential Manager; you give the relay its *setup code*), **Share this profile's
+counter**, then **New link** copies a read-only link for an OBS Browser Source. Viewers see the same wording as your Overlay page;
+Revoke stops a link at once. The **Setup guide** button explains everything. A free reference relay you can deploy into your own
+Cloudflare account (Workers Free, Deploy button, no Node.js): [relay/](https://github.com/GabrielGzS/fortnite-visual-chest-counter/tree/b0-relay/relay) -
+any server speaking its documented protocol works too.
 
 ## Using the app
 
@@ -109,10 +122,11 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
   - **Game:** this match only: its status and details beside the **Live preview**, its chests and chests per minute, and
     **Fix this match** (**−1**, **+1**, **Undo**) for a chest the counter missed, a broken chest or a wrong count.
     **Add estimated broken chests when a match ends** (off by default, 20 %): a broken chest shows no pop-up, so the counter
-    cannot see it. When this is on and a *complete* match ends (start and end seen), that share of the chests detected in
-    it is added to APPROX as *estimated* broken chests, minus the Broken chest +1s you already made for it. Never CERTAIN,
-    once per match, shown apart from your +1s (Overview line, Analytics), and **Undo** takes it back. It is an estimate:
-    single matches vary a lot. Needs match tracking.
+    cannot see it. When this is on and a match ends with your **Placed** or **Victory** seen (a *complete* match, or a
+    *partial* one whose video had a short gap - v0.6.0), that share of the chests detected in it is added to APPROX as
+    *estimated* broken chests, minus the Broken chest +1s you already made for it. Never a match cut off by Stop. Never
+    CERTAIN, once per match, shown apart from your +1s (Overview line; Analytics shows it as e.g. `54 (+11 · 20%)`), and
+    **Undo** takes it back. It is an estimate: single matches vary a lot. Needs match tracking.
   - **Console:** **Activity**, every decision as it happens - **green** = certain chest, **yellow** = counted in APPROX
     only, **red** = looked like a chest pop-up but not counted - with the reason, plus **Diagnostic recording**. The
     button shows a number when there are warnings you have not seen.
@@ -127,6 +141,10 @@ Details and the other files: [overlay guide](docs/guides/obs-overlay.md).
   own video source (such as that streamer's Twitch link). **New profile...**, **Rename...** and **Delete...** sit above the
   numbers; a deleted profile's counts are kept in `state\profiles\deleted\`. One profile counts at a time, and the OBS text
   file always shows the selected profile. Counts from earlier versions become the **Default** profile.
+  **Export / Import** (v0.6.0) moves ONE profile to another PC: Export saves its counts, whole history, corrections, estimates,
+  predictions and own wording in one `.fccprofile` file; Import on the other PC checks the file, shows what it holds and adds it
+  (or replaces that PC's profile of the same name, keeping a backup) - never touching the other PC's settings or other profiles.
+  It never contains keys or link addresses, and Remote Sharing stays off for it until you turn it on there.
 - **Chest types** (v0.2.2): the line under the numbers splits the APPROX total by the pop-up's wording - **Chest**, **Rare
   chest**, **Sprite chest**, or **Unknown type** when the line could not be read reliably (a chest is never guessed to be a
   normal one). It is a label only: CERTAIN and APPROX are counted exactly as before, and OBS still shows only the two

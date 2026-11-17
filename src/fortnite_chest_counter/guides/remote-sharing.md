@@ -14,7 +14,7 @@ forwarding is needed. The app contains no relay of its own and no account of any
 
 A relay that speaks **Remote Sharing protocol v1** (`relay/PROTOCOL.md` in the project). The project includes a reference relay
 you can run for free in your own account on Cloudflare's Workers Free plan, with a Deploy button and no Node.js on your PC: see
-`relay/README.md` on the project's GitHub page. Any other server that passes `relay/tools/conformance.py` works the same way.
+https://github.com/GabrielGzS/fortnite-visual-chest-counter/tree/b0-relay/relay (its README). Any other server that passes `relay/tools/conformance.py` works the same way.
 
 ## Set it up (Overlay > Remote Sharing)
 
