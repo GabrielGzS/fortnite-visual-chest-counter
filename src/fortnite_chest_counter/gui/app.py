@@ -127,9 +127,11 @@ def shared_display():
 
 
 def new_setup_wording():
-    """A brand-new install (no config.toml and no state/ yet) starts with settings.NEW_SETUP_DISPLAY; an existing one - even one
-    that never saved a setting - keeps the wording it has."""
-    if config_file().exists() or (paths.APP_DIR / "state").exists():
+    """A brand-new install (no config.toml and no counts yet) starts with settings.NEW_SETUP_DISPLAY; an existing one - even one
+    that never saved a setting - keeps the wording it has. A release ships state/ with only a README.txt, so "counts" means a
+    counter file, the profile list, a profile's file or a history folder - not the folder itself."""
+    state = paths.APP_DIR / "state"
+    if config_file().exists() or any((state / name).exists() for name in ("chest_state.json", "profiles.json", "profiles", "history")):
         return
     try:
         C.update_config_sections(config_file(), {"display": dict(settings.NEW_SETUP_DISPLAY)})

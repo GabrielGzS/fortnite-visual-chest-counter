@@ -217,12 +217,15 @@ def test_new_setups_start_with_the_chests_opened_preset_and_existing_ones_keep_t
     try:
         with tempfile.TemporaryDirectory() as fresh, tempfile.TemporaryDirectory() as used:
             paths.APP_DIR = Path(fresh)
+            (Path(fresh) / "state").mkdir()                     # as a release unpacks: state/ holds only a README
+            (Path(fresh) / "state" / "README.txt").write_text("Your counter lives here.", encoding="utf-8")
             A.new_setup_wording()
             text = (Path(fresh) / "config.toml").read_text(encoding="utf-8")
             assert 'show = "approx"' in text and "CHESTS OPENED ≈ {count}" in text
             assert settings.load_config(str(Path(fresh) / "config.toml"))[0]["display"]["approx_text"] == "CHESTS OPENED ≈ {count}"
             paths.APP_DIR = Path(used)
             (Path(used) / "state").mkdir()                      # counted before, never saved a setting
+            (Path(used) / "state" / "chest_state.json").write_text('{"certain": 3, "approximate": 9}', encoding="utf-8")
             A.new_setup_wording()
             assert not (Path(used) / "config.toml").exists()
     finally:
