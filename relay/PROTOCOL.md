@@ -49,6 +49,10 @@ Publisher -> relay
 
 A frame larger than 4,096 bytes closes the connection (`1009`). An unknown or malformed message gets `{"type":"error","code":…}`.
 
+`ext` is free for presentation and passed through untouched. The app uses `ext.lines`: up to 4 strings of up to 120 characters,
+the counter's text exactly as the app's local OBS file shows it (its wording, per profile). An overlay shows them as plain text
+instead of its own labels; an overlay or relay that does not know `ext` simply ignores it.
+
 Relay -> publisher
 
 | `type` | Fields | When |
@@ -76,6 +80,8 @@ Viewer -> relay: only the exact text `{"type":"ping"}`. Anything else closes the
 3. **One publisher per channel.** A new publisher connection closes the previous one with `4001`; that publisher must not reconnect by itself.
 4. **Revocation is immediate.** Removing a link from `links` closes its connected viewers (`4003`) and refuses it afterwards (`401`).
 5. **Heartbeats.** Both sides send `{"type":"ping"}` every 30 s and reconnect after 75 s of silence, with backoff 1, 2, 5, 10, 20, then 30 s, plus jitter.
+   A viewer whose attempts keep failing before a connection ever opens (a revoked link after a reload looks like that: browsers do
+   not report the `401`) may slow down further; the reference overlay goes to 1, 2, then 5 minutes.
 6. **No commands.** Nothing a relay sends can make the publisher do anything but show a status.
 
 ## Close codes

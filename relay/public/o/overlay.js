@@ -4,7 +4,10 @@
 (() => {
   "use strict";
   const PROTOCOL = "fcc.v1";
-  const DELAYS = [1, 2, 5, 10, 20, 30];
+  // Reconnect back-off. After about two minutes of attempts that never open it slows to 1, 2, then 5 minutes, so a forgotten
+  // Browser Source with a revoked link costs the relay a few hundred requests a day instead of thousands.
+  const DELAYS = [1, 2, 5, 10, 20, 30, 30, 30, 60, 120, 300];
+  const SLOW_AFTER = 8;
   const byId = (id) => document.getElementById(id);
   const [credential, ...rest] = decodeURIComponent(location.hash.slice(1)).split("&");
   const options = {};
@@ -38,6 +41,16 @@
       byId("certain").textContent = number(snapshot.certain);
       byId("approx").textContent = number(snapshot.approx);
       byId("label").textContent = showLabel && typeof snapshot.label === "string" ? snapshot.label.slice(0, 40) : "";
+      // The app's own wording (the same text as its local OBS file), when it sends it: plain text only, never markup.
+      const ext = snapshot.ext && typeof snapshot.ext === "object" ? snapshot.ext : {};
+      const lines = Array.isArray(ext.lines) ? ext.lines.filter((l) => typeof l === "string").slice(0, 4) : [];
+      byId("lines").replaceChildren(...lines.map((text) => {
+        const line = document.createElement("div");
+        line.className = "fcc-line";
+        line.textContent = text.slice(0, 120);
+        return line;
+      }));
+      document.body.dataset.lines = lines.length ? "app" : "none";
     }
     presence(message.publisher);
   }
@@ -73,7 +86,12 @@
         setStatus("revoked", "This overlay link was revoked. Ask for a new one.");
         return;
       }
-      if (document.body.dataset.state !== "offline") setStatus("reconnecting", "Reconnecting…");
+      if (attempt >= SLOW_AFTER) {
+        // Refused again and again before ever opening: a revoked link (after a reload, browsers do not say why) or a long outage.
+        setStatus("unreachable", "Cannot reach the counter. If this link was revoked, ask for a new one.");
+      } else if (document.body.dataset.state !== "offline") {
+        setStatus("reconnecting", "Reconnecting…");
+      }
       retry();
     };
     socket.onerror = () => {};
@@ -81,7 +99,7 @@
 
   function retry() {
     const base = DELAYS[Math.min(attempt, DELAYS.length - 1)];
-    attempt += 1;
+    attempt += 1;                                          // reset only when a connection opens
     setTimeout(connect, (base + Math.random() * base * 0.3) * 1000);
   }
 

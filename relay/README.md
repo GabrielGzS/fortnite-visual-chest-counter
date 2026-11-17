@@ -19,9 +19,9 @@ never shown to viewers: both sides only talk to the relay, and nothing connects 
 You need a Cloudflare account on the **Workers Free** plan (no card, no domain) and a GitHub or GitLab account for the Deploy button.
 Deploying does not need Node.js on your PC.
 
-1. **Make your keys.** Until the app has its Remote Sharing tab, the test publisher plays its part:
-   `python tools/test_publisher.py keys`. It stores the publisher key in a private file outside this folder and prints a
-   **setup code**: the key's SHA-256. The setup code goes to the relay; the key itself never leaves your PC.
+1. **Make your key.** In the app: Overlay > Remote Sharing > **Create key**, then **Copy** the **setup code** next to it (the key's
+   SHA-256). The setup code goes to the relay; the key itself stays in Windows Credential Manager and never leaves your PC.
+   (Without the app, `python tools/test_publisher.py keys` does the same for testing.)
 2. **Deploy.** [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/GabrielGzS/fortnite-visual-chest-counter/tree/b0-relay/relay)
    Cloudflare asks you to sign in, connect your GitHub/GitLab account (it creates a copy of this folder in **your** account; allow
    it only that repository), name the Worker (keep `live`: it must match `wrangler.jsonc`), and paste your setup code into
@@ -29,9 +29,10 @@ Deploying does not need Node.js on your PC.
 3. **Your relay address** is `https://live.<your-subdomain>.workers.dev`; the app and the tools use `wss://live.<your-subdomain>.workers.dev`.
    Your `workers.dev` subdomain is part of every overlay link: choose a neutral one, not your name.
 4. **Check it:** `python tools/conformance.py --relay wss://live.<your-subdomain>.workers.dev` should say `15/15 checks passed`.
-5. **A viewer link:** `python tools/test_publisher.py link --label OBS --relay wss://…` prints an overlay URL. In OBS: Sources > + >
-   Browser > paste it, size 600 x 150. Keep it out of public chat; anyone with it can watch this counter (read-only).
-6. **Publish:** `python tools/test_publisher.py run --relay wss://…` sends simulated counts until Ctrl+C. The overlay follows within a second.
+5. **Share a profile:** in the app's Remote Sharing tab, enter the relay address, tick **Share this profile's counter** and save.
+6. **A viewer link:** **New link** copies an overlay address. In OBS: Sources > + > Browser > paste it, about 600 x 150. Keep it out
+   of public chat; anyone with it can watch this counter (read-only). The overlay shows the same wording as the app's Overlay page.
+   (For testing without the app: `tools/test_publisher.py link` and `run`.)
 
 Overlay options go after the link, in the same `#…` part: `&show=both|approx|certain`, `&align=left|center|right`,
 `&offline=show|dim|hide`, `&label=1`. Fonts and colours: OBS's Custom CSS field, with the classes in `public/o/overlay.css`.
@@ -44,6 +45,13 @@ object counts 128 MB for every second it is awake, and it sleeps a few seconds a
 seconds (the test publisher sends one every 5 s) keep it awake: about 450 GB-s an hour, so a day's free allowance covers more than
 24 hours of nonstop publishing; real play, with a snapshot only when a count changes, uses less. Over a limit, Cloudflare refuses
 requests until 00:00 UTC; the Free plan does not bill. Keep the account on Workers Free and do not add a payment method for this.
+
+## Updating your relay
+
+The Deploy button made a **copy** of this folder in your GitHub/GitLab account, so later changes here do not reach your relay by
+themselves. To update it, put the changed files into your copy at the same paths (on GitHub: open the file in your repository >
+Edit, or Add file > Upload files) and commit; Cloudflare then builds and deploys it on its own. Changes to `public/o/` (the overlay
+page) need no new setup code and keep every viewer link working. Open overlays pick up the new page the next time they load.
 
 ## Without the Deploy button
 

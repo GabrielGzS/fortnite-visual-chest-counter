@@ -4,6 +4,10 @@ body { font: 700 32px/1.25 "Segoe UI", system-ui, sans-serif; color: #fff; text-
 body[data-align="center"] { text-align: center; }
 body[data-align="right"] { text-align: right; }
 body[data-show="approx"] .fcc-certain, body[data-show="certain"] .fcc-approx { display: none; }
+/* The app sends its own wording (its Overlay page): those lines replace the two labelled rows. */
+body[data-lines="app"] .fcc-row { display: none; }
+body[data-lines="none"] .fcc-lines { display: none; }
+body[data-state="revoked"] .fcc-status, body[data-state="broken"] .fcc-status, body[data-state="unreachable"] .fcc-status { color: #ff8a80; }
 .fcc-label-line:empty { display: none; }
 .fcc-status { font-size: 16px; font-weight: 600; opacity: .85; }
 .fcc-status:empty { display: none; }
